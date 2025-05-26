@@ -26,83 +26,84 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 #[derive(Debug)]
 pub struct BaseGame {
-    m_language: Language,
-    m_ghost: Arc<Mutex<Ghost>>, // Assuming Ghost is defined elsewhere
-    m_socket: TcpServer, // Assuming TcpServer is defined in socket
-    m_protocol: GameProtocol,
-    m_slots: Vec<GameSlot>,
-    m_potentials: Vec<PotentialPlayer>,
-    m_players: Vec<GamePlayer>,// Assuming CallableScoreCheck is defined
-    m_actions: VecDeque<CIncomingAction>, // Assuming IncomingAction is defined
-    m_reserved: Vec<String>,
-    m_ignored_names: HashSet<String>,
-    m_ip_black_list: HashSet<String>,
-    m_enforce_slots: Vec<GameSlot>,// Assuming PidPlayer is defined
-    m_map: Map, // Assuming Map is defined
-    m_exiting: bool,
-    m_saving: bool,
-    m_host_port: u16,
-    m_game_state: u8,
-    m_virtual_host_pid: u8,
-    m_fake_player_pid: u8,
-    m_gproxy_empty_actions: u8,
-    m_game_name: String,
-    m_last_game_name: String,
-    m_virtual_host_name: String,
-    m_owner_name: String,
-    m_creator_name: String,
-    m_creator_server: String,
-    m_announce_message: String,
-    m_stat_string: String,
-    m_kick_vote_player: String,
-    m_hcl_command_string: String,
-    m_random_seed: u32,
-    m_host_counter: u32,
-    m_entry_key: u32,
-    m_latency: u32,
-    m_sync_limit: u32,
-    m_sync_counter: u32,
-    m_game_ticks: u32,
-    m_creation_time: u32,
-    m_last_ping_time: u32,
-    m_last_refresh_time: u32,
-    m_last_download_ticks: u32,
-    m_download_counter: u32,
-    m_last_download_counter_reset_ticks: u32,
-    m_last_announce_time: u32,
-    m_announce_interval: u32,
-    m_last_auto_start_time: u32,
-    m_auto_start_players: u32,
-    m_last_count_down_ticks: u32,
-    m_count_down_counter: u32,
-    m_started_loading_ticks: u32,
-    m_start_players: u32,
-    m_last_lag_screen_reset_time: u32,
-    m_last_action_sent_ticks: u32,
-    m_last_action_late_by: u32,
-    m_started_lagging_time: u32,
-    m_last_lag_screen_time: u32,
-    m_last_reserved_seen: u32,
-    m_started_kick_vote_time: u32,
-    m_game_over_time: u32,
-    m_last_player_leave_ticks: u32,
-    m_minimum_score: f64,
-    m_maximum_score: f64,
-    m_slot_info_changed: bool,
-    m_locked: bool,
-    m_refresh_messages: bool,
-    m_refresh_error: bool,
-    m_refresh_rehosted: bool,
-    m_mute_all: bool,
-    m_mute_lobby: bool,
-    m_count_down_started: bool,
-    m_game_loading: bool,
-    m_game_loaded: bool,
-    m_load_in_game: bool,
-    m_lagging: bool,
-    m_auto_save: bool,
-    m_match_making: bool,
-    m_local_admin_messages: bool,
+   pub  m_language: Language,
+    pub m_ghost: Arc<Mutex<Ghost>>, // Assuming Ghost is defined elsewhere
+    pub m_socket: TcpServer, // Assuming TcpServer is defined in socket
+    pub m_protocol: GameProtocol,
+    pub m_slots: Vec<GameSlot>,
+    pub m_potentials: Vec<PotentialPlayer>,
+   pub  m_players: Vec<GamePlayer>,// Assuming CallableScoreCheck is defined
+   pub  m_actions: VecDeque<CIncomingAction>, // Assuming IncomingAction is defined
+    pub m_reserved: Vec<String>,
+    pub m_ignored_names: HashSet<String>,
+   pub  m_ip_black_list: HashSet<String>,
+   pub  m_enforce_slots: Vec<GameSlot>,// Assuming PidPlayer is defined
+   pub  m_map: Map, // Assuming Map is defined
+    pub m_exiting: bool,
+    pub m_saving: bool,
+    pub m_host_port: u16,
+    pub m_game_state: u8,
+    pub m_virtual_host_pid: u8,
+    pub m_fake_player_pid: u8,
+    pub m_gproxy_empty_actions: u8,
+    pub m_game_name: String,
+    pub m_last_game_name: String,
+    pub m_virtual_host_name: String,
+    pub m_owner_name: String,
+    pub m_creator_name: String,
+    pub m_creator_server: String,
+    pub m_announce_message: String,
+    pub m_stat_string: String,
+    pub m_kick_vote_player: String,
+    pub m_hcl_command_string: String,
+    pub m_random_seed: u32,
+    pub m_host_counter: u32,
+    pub m_entry_key: u32,
+    pub m_latency: u32,
+    pub m_sync_limit: u32,
+    pub m_sync_counter: u32,
+    pub m_game_ticks: u32,
+    pub m_creation_time: u32,
+    pub m_last_ping_time: u32,
+    pub m_last_refresh_time: u32,
+    pub m_last_download_ticks: u32,
+    pub m_download_counter: u32,
+    pub m_last_download_counter_reset_ticks: u32,
+    pub m_last_announce_time: u32,
+    pub m_announce_interval: u32,
+    pub m_last_auto_start_time: u32,
+    pub m_auto_start_players: u32,
+    pub m_last_count_down_ticks: u32,
+    pub m_count_down_counter: u32,
+    pub m_started_loading_ticks: u32,
+    pub m_start_players: u32,
+    pub m_last_lag_screen_reset_time: u32,
+    pub m_last_action_sent_ticks: u32,
+    pub m_last_action_late_by: u32,
+    pub m_started_lagging_time: u32,
+    pub m_last_lag_screen_time: u32,
+    pub m_last_reserved_seen: u32,
+    pub m_started_kick_vote_time: u32,
+    pub m_game_over_time: u32,
+    pub m_last_player_leave_ticks: u32,
+    pub m_minimum_score: f64,
+    pub m_maximum_score: f64,
+    pub m_slot_info_changed: bool,
+    pub m_locked: bool,
+    pub m_refresh_messages: bool,
+    pub m_refresh_error: bool,
+    pub m_refresh_rehosted: bool,
+    pub m_mute_all: bool,
+    pub m_mute_lobby: bool,
+    pub m_count_down_started: bool,
+    pub m_game_loading: bool,
+    pub m_game_loaded: bool,
+    pub m_load_in_game: bool,
+    pub m_lagging: bool,
+    pub m_auto_save: bool,
+    pub m_match_making: bool,
+    pub m_local_admin_messages: bool,
+    pub m_inited: bool
 }
 
 impl BaseGame {
@@ -195,6 +196,7 @@ impl BaseGame {
             m_auto_save: false,
             m_match_making: false,
             m_local_admin_messages: false,
+            m_inited: false
         }
     }
 
@@ -218,12 +220,13 @@ impl BaseGame {
 
         self.m_socket.bind(&ghost.m_BindAddress, self.m_host_port).await;
 
-        if self.m_socket.has_error() {
+        if !self.m_socket.has_error() {
             log_info(&format!("[GAME: {}] binding to address [{}]", self.m_game_name, self.m_host_port));
         } else {
             log_info(&format!("[GAME: {}] error binding to address [{}]", self.m_game_name, self.m_host_port));
             self.m_exiting = true;
         }
+        self.m_inited = true;
     }
 
     pub fn get_enforce_slots(&self) -> Vec<GameSlot> { self.m_enforce_slots.clone() }
@@ -339,10 +342,12 @@ impl BaseGame {
     }
 
     pub async fn update(&mut self) -> bool {
+        println!("PIDORASY");
         let mut indices_to_remove = Vec::new();
-        
-        for (index, player) in self.m_players.iter().enumerate() {
+        let mut players = self.m_players.clone();
+        for (index, player) in players.iter_mut().enumerate() {
             if player.update().await {
+                self.event_player_deleted(player).await;
                 indices_to_remove.push(index);
             }
         }
@@ -367,7 +372,295 @@ impl BaseGame {
         if !self.m_game_loading && !self.m_game_loaded && self.get_num_players() < 12 {
             self.create_virtual_host().await;
         }
+
+        if self.m_locked && self.get_player_from_name(self.m_owner_name.clone(), false).is_some() {
+            self.send_all_chat(self.m_language.game_unlocked()).await;
+            self.m_locked = false;
+        }
+
+        if get_time() as u32 - self.m_last_ping_time >= 5 {
+            self.send_all(self.m_protocol.SEND_W3GS_PING_FROM_HOST()).await;
+
+            if !self.m_count_down_started {
+                let fixed_host_counter = self.m_host_counter & 0x0FFFFFFF;
+
+                // TODO: broadcast to LAN .....
+
+            }
+            self.m_last_ping_time = get_time() as u32;
+        }
         
+        if !self.m_refresh_error && !self.m_count_down_started && self.m_game_state == GAME_PUBLIC && self.get_slots_open() > 0 && get_time() - self.m_last_refresh_time >= 3 {
+            let mut refreshed = false;
+
+            for bnet in self.m_ghost.lock().unwrap().m_BNETs.clone().iter_mut() {
+                if bnet.get_out_packets_queued() <= 1 {
+                    bnet.queue_game_refresh(self.m_game_state, self.m_game_name.clone(), String::new(), &mut self.m_map, get_time() as u32 - self.m_creation_time, self.m_host_counter).await;
+                    refreshed = true;
+                }
+            }
+
+            if self.m_refresh_messages && refreshed {
+                self.send_all_chat(self.m_language.game_refreshed()).await;
+            }
+        }
+
+
+        if !self.m_game_loading && !self.m_game_loaded && get_ticks() as u32 - self.m_last_download_counter_reset_ticks >= 1000 {
+            if self.m_slot_info_changed {
+                self.send_all_slot_info().await;
+            }
+            self.m_download_counter = 0;
+            self.m_last_download_counter_reset_ticks = get_ticks() as u32;
+        }
+
+        if !self.m_game_loading && !self.m_game_loaded && get_ticks() as u32 - self.m_last_download_ticks >= 100 {
+            let mut downloaders: u32 = 0;
+            players = self.m_players.clone();
+            for i in players.iter_mut() {
+                if i.get_download_started() && !i.get_download_finished() {
+                    downloaders += 1;
+                    
+                    let mut map_size : u32 = byte_array_to_uint32(&self.m_map.get_map_size(), false, 0);
+                    while i.get_last_map_part_sent() < i.get_last_map_part_acked() + 1442 * 100 && i.get_last_map_part_sent() < map_size {
+                        if i.get_last_map_part_sent() == 0 {
+                            i.set_started_downloading_ticks(get_ticks() as u32);
+                        }
+
+                        self.send(i, self.m_protocol.SEND_W3GS_MAPPART( self.get_host_pid(), i.get_pid(), i.get_last_map_part_sent(), &self.m_map.get_map_data())).await;
+                        i.set_last_map_part_sent(i.get_last_map_part_sent() + 1442);
+                        self.m_download_counter += 1442;
+                    } 
+                }
+            }
+            self.m_last_download_ticks = get_ticks() as u32;
+        }
+
+        if !self.m_announce_message.is_empty() && !self.m_count_down_started && get_time() as u32 - self.m_last_announce_time >= self.m_announce_interval {
+            self.send_all_chat(self.m_announce_message.clone()).await;
+            self.m_last_announce_time = get_time() as u32;
+        }
+
+        if self.m_count_down_started && get_ticks() as u32 - self.m_last_count_down_ticks >= 500 {
+            if self.m_count_down_counter > 0 {
+                self.send_all_chat(format!("{}. . .", self.m_count_down_counter)).await;
+                self.m_count_down_counter -= 1;
+            } else if !self.m_game_loading && !self.m_game_loaded {
+                self.event_game_started().await;
+            }
+        }
+
+        if self.m_game_loading {
+            let mut finished_loading: bool = true;
+            players = self.m_players.clone();
+
+            for i in players.iter_mut() {
+                finished_loading = i.get_finished_loading();
+
+                if !finished_loading {
+                    break;
+                }
+            }
+
+            if finished_loading {
+                self.m_last_action_sent_ticks = get_ticks() as u32;
+                self.m_game_loading = false;
+                self.m_game_loaded = true;
+                self.event_game_loaded().await;
+            } else {
+                if self.m_load_in_game && get_time() as u32 - self.m_last_lag_screen_reset_time >= 30 {
+                    let mut using_gproxy = false;
+                    players = self.m_players.clone();
+                    for i in players.iter_mut() {
+                        if i.get_gproxy() {
+                            using_gproxy = true;
+                        }
+                    }
+
+                    for i in players.clone().iter_mut() {
+                        if i.get_finished_loading() {
+                            for j in players.iter_mut() {
+                                if !j.get_finished_loading() {
+                                    self.send(i, self.m_protocol.SEND_W3GS_STOP_LAG(i, true)).await;
+                                }
+
+                                if using_gproxy && !i.get_gproxy() {
+                                    for _ in 0..self.m_gproxy_empty_actions {
+                                        self.send(i, self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0)).await;
+                                    }
+                                }
+                            }
+                            self.send(i, self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0)).await;
+                            self.send(i, self.m_protocol.SEND_W3GS_START_LAG(players.clone(), true)).await;
+                        } else {
+                            if using_gproxy && !i.get_gproxy() {
+                                for _ in 0..self.m_gproxy_empty_actions {
+                                    i.add_load_in_game_data(self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0));
+                                }
+                            }
+                            i.add_load_in_game_data(self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0));
+                        }
+                    }
+                    self.m_last_lag_screen_reset_time = get_time();
+                }
+            }
+        }
+
+        if self.m_game_loaded {
+            if !self.m_lagging {
+                let mut lagging_string:String = String::new();
+                players = self.m_players.clone();
+
+                for i in players.iter_mut() {
+                    if self.m_sync_counter - i.get_sync_counter() > self.m_sync_limit {
+                        i.set_lagging(true);
+                        i.set_started_lagging_ticks( get_ticks() as u32);
+                        self.m_lagging = true;
+                        self.m_started_lagging_time = get_time();
+
+                        if lagging_string.is_empty() {
+                            lagging_string = i.get_name();
+                        } else {
+                            lagging_string.push_str(&format!(", {}", i.get_name()));
+                        }
+                    }
+                }
+
+                if self.m_lagging {
+                    log_info(&format!("[GAME: {}] started lagging on [{}]", self.m_game_name, lagging_string));
+                    
+                    self.send_all(self.m_protocol.SEND_W3GS_START_LAG(players.clone(), false)).await;
+                    players = self.m_players.clone();
+
+                    for i in players.iter_mut() {
+                        i.set_drop_vote(false);
+                    }
+                    self.m_last_lag_screen_reset_time = get_time();
+                    
+                }
+            }
+
+            if self.m_lagging {
+                let mut using_gproxy = false;
+                players = self.m_players.clone();
+                for i in players.iter_mut() {
+                    if i.get_gproxy() {
+                        using_gproxy = true;
+                    }
+                }
+
+                let mut wait_time: u32 = 60;
+
+                if using_gproxy {
+                    wait_time = (self.m_gproxy_empty_actions as u32 + 1) * 60;
+                }
+
+                if get_time() - self.m_started_lagging_time >= wait_time {
+                    self.stop_laggers(self.m_language.auto_kicked_after_seconds(&wait_time.to_string()));
+                }
+
+                if get_time() - self.m_last_lag_screen_reset_time >= 60 {
+                    players = self.m_players.clone();
+                    for i in players.clone().iter_mut() {
+                        for j in players.iter_mut() {
+                            if j.get_lagging() {
+                                self.send(i, self.m_protocol.SEND_W3GS_STOP_LAG(j, false)).await;
+                            }
+                        }
+
+                        if using_gproxy && !i.get_gproxy() {
+                            for _ in 0..self.m_gproxy_empty_actions {
+                                self.send(i, self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0)).await;
+                            }
+                        }
+                        self.send(i, self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0)).await;
+                        self.send(i, self.m_protocol.SEND_W3GS_START_LAG(self.m_players.clone(), false)).await;
+                    }
+
+                    self.m_last_lag_screen_reset_time = get_time();
+                }
+
+                for i in players.iter_mut() {
+                    if i.get_lagging() && self.m_sync_counter - i.get_sync_counter() < self.m_sync_limit / 2 {
+                        log_info(&format!("[GAME: {}] stopped lagging on [{}]", self.m_game_name, i.get_name()));
+                        self.send_all(self.m_protocol.SEND_W3GS_STOP_LAG(i, false)).await;
+                        i.set_lagging(false);
+                        i.set_started_lagging_ticks(0);
+                    }
+                }
+
+                let mut lagging = false;
+                for i in players.iter_mut() {
+                    if i.get_lagging() {
+                        lagging = true;
+                    }
+                }
+                self.m_lagging = lagging;
+
+                self.m_last_action_sent_ticks = get_ticks() as u32;
+                self.m_last_lag_screen_time = get_time();
+            }
+        }
+
+        if self.m_game_loaded && !self.m_lagging && get_ticks() as u32 - self.m_last_action_sent_ticks >= self.m_latency - self.m_last_action_late_by {
+            self.send_all_actions().await;
+        }
+
+        if !self.m_kick_vote_player.is_empty() && get_time() - self.m_started_kick_vote_time >= 60 {
+            log_info(&format!("[GAME: {}] votekick against player [{}] expired", self.m_game_name, self.m_kick_vote_player));
+            self.send_all_chat(self.m_language.vote_kick_expired(&self.m_kick_vote_player)).await;
+            self.m_kick_vote_player.clear();
+            self.m_started_kick_vote_time = 0;
+        }
+
+        if self.m_players.len() == 1 && self.m_fake_player_pid == 255 && self.m_game_over_time == 0 && (self.m_game_loading || self.m_game_loaded) {
+            log_info(&format!("[GAME: {}] gameover timer started (one player left)", self.m_game_name));
+            self.m_game_over_time = get_time();
+        }
+
+        if self.m_game_over_time != 0 && get_time() - self.m_game_over_time >= 60 {
+            let mut already_stopped = true;
+
+            for i in players.iter_mut() {
+                if i.get_delete_me() {
+                    already_stopped = false;
+                    break;
+                }
+            }
+            if !already_stopped {
+                log_info(&format!("[GAME: {}] is over (gameover timer finished)", self.m_game_name));
+                self.stop_players("was disconnected (gameover timer finished".to_owned());
+            }
+        }
+
+        if self.m_players.is_empty() && (self.m_game_loaded || self.m_game_loading) {
+            if !self.m_saving {
+                log_info(&format!("[GAME: {}] is over (no player left)", self.m_game_name));
+                self.save_game_data();
+                self.m_saving = true;
+            }
+            else if self.is_game_data_saved() {
+                return true;
+            }
+        }
+
+        if !self.m_socket.has_error() || self.m_socket.connected() {
+            let mut new_socket = self.m_socket.accept().await.unwrap();
+            if new_socket.connected() {
+                new_socket.set_tcp_nodelay(true);
+
+                self.m_potentials.push(
+                    PotentialPlayer::new(
+                        self.m_protocol.clone(),
+                        self.clone(),
+                        new_socket
+                    )
+                 );
+            } if self.m_socket.has_error() {
+                return true;
+            }
+        }
+
         return self.m_exiting;
         
     }
@@ -1050,7 +1343,7 @@ impl BaseGame {
             }
 
             if !finished_loading {
-                self.send(player, self.m_protocol.SEND_W3GS_START_LAG(players.iter().collect::<Vec<_>>(), true)).await;
+                self.send(player, self.m_protocol.SEND_W3GS_START_LAG(players.clone(), true)).await;
             }
 
             for p in players.iter_mut() {

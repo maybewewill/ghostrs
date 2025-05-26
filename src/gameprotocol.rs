@@ -367,7 +367,7 @@ impl GameProtocol {
         packet
     }
 
-    pub fn SEND_W3GS_START_LAG(&self, players: Vec<&GamePlayer>, load_in_game: bool) -> ByteArray {
+    pub fn SEND_W3GS_START_LAG(&self, players: Vec<GamePlayer>, load_in_game: bool) -> ByteArray {
         let mut packet = ByteArray::new();
         let mut num_laggers = 0;
         for player in &players {

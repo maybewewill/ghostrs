@@ -161,6 +161,12 @@ impl TcpClient {
         self.connected = false;
         self.remote_addr = None;
     }
+    pub fn set_tcp_nodelay(&mut self, enabled: bool) -> io::Result<()> {
+        if let Some(stream) = &self.stream {
+            stream.set_nodelay(enabled)?;
+        }
+        Ok(())
+    }
     
 }
 

@@ -26,7 +26,7 @@ pub struct PotentialPlayer {
 }
 
 impl PotentialPlayer {
-    pub fn new(&self, protocol: GameProtocol, game: BaseGame, socket: TcpClient) -> Self {
+    pub fn new(protocol: GameProtocol, game: BaseGame, socket: TcpClient) -> Self {
         Self {
             m_Protocol: protocol,
             m_ErrorString: String::new(),
@@ -35,7 +35,7 @@ impl PotentialPlayer {
             m_Socket: socket,
             m_DeleteMe: false,
             m_Error: false,
-            m_IncomingJoinPlayer: todo!(),
+            m_IncomingJoinPlayer: IncomingJoinPlayer::new(0, 0, String::new(), ByteArray::new()),
             m_IncomingBuffer: Vec::new()
         }
     }

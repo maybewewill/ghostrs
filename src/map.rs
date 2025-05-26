@@ -146,9 +146,9 @@ pub struct Map {
 
 impl Map {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(_ghost: Ghost, map_path: String) -> Self {
+    pub fn new(_ghost: Arc<Mutex<Ghost>>, map_path: String) -> Self {
         Map {
-            ghost: Arc::new(Mutex::new(_ghost)),
+            ghost: _ghost,
             valid: false,
             cfg_file: String::new(),
             map_path: String::new(),
@@ -837,8 +837,9 @@ impl Map {
     pub fn get_map_observers(&self) -> u8 {
         self.map_observers
     }
-    pub fn get_map_data(&self) -> Vec<u8> {
-        self.map_data.clone()
+    pub fn get_map_data(&self) -> String {
+        String::from_utf8(self.map_data.clone()).expect("Map data is not valid UTF-8")
     }
+    
     
 }

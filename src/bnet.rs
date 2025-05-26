@@ -1,7 +1,9 @@
 
 use libc::wait;
+use tokio::time::timeout;
 
 use crate::config;
+use crate::game::Game;
 use crate::gameprotocol::GAME_PRIVATE;
 use crate::gameprotocol::GAME_PUBLIC;
 use crate::ghost;
@@ -18,6 +20,7 @@ use crate::commandpacket::*;
 use crate::bncsutilinterface::*;
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct BNET {
@@ -103,6 +106,8 @@ impl BNET {
         nMaxMessageLength: u32,
         nHostCounterID: u32,
     ) -> Self {
+        let ghost_ptr = Arc::as_ptr(&ghost) as usize;
+        log_info(&format!("[BNET: {}] Ghost instance ptr: {:#x}", nServerAlias, ghost_ptr));
         let mut lower_server = nServer.clone();
         lower_server.make_ascii_lowercase();
 
@@ -493,100 +498,131 @@ pub async fn update(&mut self) -> bool {
     }
 
     pub async fn process_chat_event(&mut self, chat_event: &IncomingChatEvent) {
-        
-        // Process chat event
         let event: IncomingChatEventEnum = chat_event.GetChatEvent();
-        let whisper: bool;
-        if event == IncomingChatEventEnum::EID_WHISPER {
-            whisper = true;
-        } else {
-            whisper = false;
-        }
-
+        let whisper: bool = event == IncomingChatEventEnum::EID_WHISPER;
         let user: String = chat_event.GetUser().to_string();
         let message: String = chat_event.GetMessage().to_string();
 
         if event == IncomingChatEventEnum::EID_WHISPER || event == IncomingChatEventEnum::EID_TALK {
             if event == IncomingChatEventEnum::EID_WHISPER {
-                    log_info(&format!("[WHISPER: {}] [{}] {}", self.m_ServerAlias, user, message));
-                    if message == "host" {
-                        log_info("[GHOST] trying to host game...");
-                        let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
-                    // Lock Ghost to get host_counter and create a new Ghost without BNETs
-                        let (host_counter, gps_protocol, crc, sha, tft, exiting, exiting_nicely, enabled, version, max_games) = {
-                            let ghost = self.m_Ghost.lock().unwrap();
-                            (
-                                ghost.m_HostCounter,
-                                ghost.m_GPSProtocol.clone(),
-                                ghost.m_CRC.clone(),
-                                ghost.m_SHA.clone(),
-                                ghost.m_TFT,
-                                ghost.m_Exiting,
-                                ghost.m_ExitingNicely,
-                                ghost.m_Enabled,
-                                ghost.m_Version.clone(),
-                                ghost.m_MaxGames,
-                            )
-                        }; // MutexGuard is dropped here
-                    
-                        // Create ghost_clone without locking again
-                        let mut ghost_clone = Ghost {
-                            m_UDPSocket: None,
-                            m_ReconnectSocket: TcpClient::new(),
-                            m_ReconnectSockets: Vec::new(),
-                            m_GPSProtocol: gps_protocol,
-                            m_CRC: crc,
-                            m_SHA: sha,
-                            m_BNETs: self.m_Ghost.lock().unwrap().m_BNETs.clone(),
-                            m_TFT: tft,
-                            m_Exiting: exiting,
-                            m_ExitingNicely: exiting_nicely,
-                            m_Enabled: enabled,
-                            m_Version: version,
-                            m_HostCounter: host_counter,
-                            m_MaxGames: max_games,
-                            m_CurrentGame: self.m_Ghost.lock().unwrap().m_CurrentGame.clone(),
-                            m_ReconnectWaitTime:  self.m_Ghost.lock().unwrap().m_ReconnectWaitTime,
-                            m_BindAddress:  self.m_Ghost.lock().unwrap().m_BindAddress.clone(),
-                            m_Games: self.m_Ghost.lock().unwrap().m_Games.clone()
-                        };
-                        let mut map = Map::new(ghost_clone, map_path.clone());
-                        map.load(map_path).await;
-                        
-                        if map.get_valid() {
-                            let game_name = format!("Game_{}", get_time());
-                            let host_name = user.clone();
-                            let game_state = GAME_PUBLIC;
-                        
-                            if game_state == GAME_PRIVATE { self.queue_chat_command(format!("Creating private game [{}] by user [{}]", game_name.clone(), "slash")).await; }
-                             else if game_state == GAME_PUBLIC { self.queue_chat_command(format!("Creating public game [{}] by user [{}]", game_name.clone(), "slash")).await; }
-                            self.queue_game_create(game_state, game_name.clone(), host_name, &mut map, host_counter).await;
-                            log_info(&format!("[BNET: {}] Queued game creation for [{}]", self.m_ServerAlias, game_name));
-                        } else {
-                            log_warning(&format!("[BNET: {}] Failed to create game: Invalid map", self.m_ServerAlias));
-                            self.queue_chat_command(format!("/w {} Invalid map configuration", user)).await;
+                log_info(&format!("[WHISPER: {}] [{}] {}", self.m_ServerAlias, user, message));
+                if message == "host" {
+                   // log_info(&format!("[BNET: {}] Received host command", self.m_ServerAlias));
+                    //log_info("[GHOST] trying to host game...");
+                    let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
+                    //log_info(&format!("[BNET: {}] Map path: {}", self.m_ServerAlias, map_path));
+
+                    // Try to lock Ghost for host_counter with timeout
+                   // log_info(&format!("[BNET: {}] Attempting to lock Ghost for host_counter", self.m_ServerAlias));
+                    let host_counter = match timeout(Duration::from_millis(100), async {
+                        self.m_Ghost.try_lock()
+                    }).await {
+                        Ok(Ok(mut ghost)) => {
+                            let counter = ghost.m_HostCounter;
+                            //log_info(&format!("[BNET: {}] Got host_counter: {}", self.m_ServerAlias, counter));
+                            counter
                         }
-                
+                        Ok(Err(_)) => {
+                           // log_error(&format!("[BNET: {}] Failed to lock Ghost mutex: busy", self.m_ServerAlias));
+                            return;
+                        }
+                        Err(_) => {
+                            //log_error(&format!("[BNET: {}] Failed to lock Ghost mutex: timed out", self.m_ServerAlias));
+                            return;
+                        }
+                    };
+                    //log_info(&format!("[BNET: {}] Released Ghost mutex, proceeding to map load", self.m_ServerAlias));
+
+                    let mut map = Map::new(Arc::clone(&self.m_Ghost), map_path.clone());
+                    //log_info(&format!("[BNET: {}] Loading map: {}", self.m_ServerAlias, map_path));
+                    map.load(map_path).await;
+                    //log_info(&format!("[BNET: {}] Map loaded, valid: {}", self.m_ServerAlias, map.get_valid()));
+
+                    if map.get_valid() {
+                        let game_name = format!("Game_{}", get_time());
+                        let host_name = user.clone();
+                        let game_state = GAME_PUBLIC;
+
+                        log_info(&format!("[BNET: {}] Creating game: {}", self.m_ServerAlias, game_name));
+                        if game_state == GAME_PRIVATE {
+                            self.queue_chat_command(format!(
+                                "Creating private game [{}] by user [{}]",
+                                game_name, "slash"
+                            ))
+                            .await;
+                        } else {
+                            self.queue_chat_command(format!(
+                                "Creating public game [{}] by user [{}]",
+                                game_name, "slash"
+                            ))
+                            .await;
+                        }
+
+                        let mut game = Game::new(
+                            Arc::clone(&self.m_Ghost),
+                            map.clone(),
+                            6115,
+                            game_state,
+                            game_name.clone(),
+                            host_name.clone(),
+                            host_name.clone(),
+                            self.m_Server.clone(),
+                        );
+
+                      //  log_info(&format!("[BNET: {}] Initializing game [{}]", self.m_ServerAlias, game_name));
+                        game.base.init().await;
+                      //  log_info(&format!(
+                      //      "[BNET: {}] Game [{}] initialized, inited: {}",
+                      //     self.m_ServerAlias, game_name, game.base.m_inited
+                      //
+
+                        // Try to lock Ghost for set_current_game
+                       // log_info(&format!("[BNET: {}] Attempting to lock Ghost to set current game [{}]", self.m_ServerAlias, game_name));
+                        match timeout(Duration::from_millis(100), async {
+                            self.m_Ghost.try_lock()
+                        }).await {
+                            Ok(Ok(mut ghost)) => {
+                                ghost.set_current_game(Some(game.base));
+                        //        log_info(&format!("[BNET: {}] Set current game: {}", self.m_ServerAlias, game_name));
+                            }
+                            Ok(Err(_)) => {
+                        //        log_error(&format!("[BNET: {}] Failed to lock Ghost mutex for set_current_game: busy", self.m_ServerAlias));
+                                return;
+                            }
+                            Err(_) => {
+                          //      log_error(&format!("[BNET: {}] Failed to lock Ghost mutex for set_current_game: timed out", self.m_ServerAlias));
+                                return;
+                            }
+                        }
+
+                        self.queue_game_create(game_state, game_name.clone(), host_name, &mut map, host_counter)
+                            .await;
+                        // log_info(&format!(
+                        //     "[BNET: {}] Queued game creation for [{}]",
+                        //     self.m_ServerAlias, game_name
+                        // ));
+                    } else {
+                        // log_warning(&format!(
+                        //     "[BNET: {}] Failed to create game: Invalid map",
+                        //     self.m_ServerAlias
+                        // ));
+                        self.queue_chat_command(format!("/w {} Invalid map configuration", user))
+                            .await;
+                    }
                 }
             } else {
                 log_info(&format!("[LOCAL: {}] [{}] {}", self.m_ServerAlias, user, message));
-            
             }
-        }
-        else if event == IncomingChatEventEnum::EID_CHANNEL  {
-            log_info(&format!("[BNET: {}] joined channel [{}]", self.m_ServerAlias,  message));
+        } else if event == IncomingChatEventEnum::EID_CHANNEL {
+            log_info(&format!("[BNET: {}] joined channel [{}]", self.m_ServerAlias, message));
             self.m_CurrentChannel = message;
+        } else if event == IncomingChatEventEnum::EID_INFO {
+            log_info(&format!("[INFO: {}] {}", self.m_ServerAlias, message));
+        } else if event == IncomingChatEventEnum::EID_ERROR {
+            log_error(&format!("[ERROR: {}] {}", self.m_ServerAlias, message));
+        } else if event == IncomingChatEventEnum::EID_EMOTE {
+            log_info(&format!("[EMOTE: {}] [{}] {}", self.m_ServerAlias, user, message));
         }
-        else if event == IncomingChatEventEnum::EID_INFO {
-            log_info(&format!("[INFO: {}] {}", self.m_ServerAlias,  message));   
-        }
-        else if event == IncomingChatEventEnum::EID_ERROR {
-            log_error(&format!("[ERROR: {}] {}", self.m_ServerAlias,  message));
-        }
-        else if event == IncomingChatEventEnum::EID_EMOTE {
-            log_info(&format!("[EMOTE: {}] [{}] {}", self.m_ServerAlias, user,  message));
-        }
-
     }
 
     pub async fn send_join_channel(&mut self, channel: String) {
@@ -797,6 +833,10 @@ pub async fn update(&mut self) -> bool {
 
     pub fn get_host_counter_id(&mut self) -> u32 {
         self.m_HostCounterID
+    }
+
+    pub fn get_out_packets_queued(&mut self) -> usize  {
+        self.m_OutPackets.len()
     }
     
 }

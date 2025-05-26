@@ -1,3 +1,4 @@
+use crate::game;
 use crate::logger::log_info;
 use crate::logger::log_warning;
 use crate::socket::*;
@@ -149,8 +150,7 @@ impl Ghost {
         let userpassword = config::get_string("bnet_password", "");
         let firstchannel = config::get_string("bnet_firstchannel", "The Void");
         
-        let ghost_clone = (*self).clone(); // Dereference self to call clone on Ghost
-        let ghost_arc = Arc::new(Mutex::new(ghost_clone));
+        let ghost_arc = Arc::new(Mutex::new(self.clone()));
         let bnet = BNET::new(
             ghost_arc,
             server.to_owned(),
@@ -198,9 +198,24 @@ impl Ghost {
             updated_bnets.push(bnet);
         }
         
-        for mut game in &self.m_Games {
+        let games: Vec<_> = self.m_Games.drain(..).collect();
+
+        let mut updated_games = Vec::new();
+        for mut game in games {
             if game.update().await {
+                log_info(&format!("[GHOST] deleting game [{}]", game.get_game_name()));
                 
+            }
+            updated_games.push(game);
+        }
+
+        if self.m_CurrentGame.is_some() {
+            let mut game = self.m_CurrentGame.clone().unwrap();
+            if game.update().await {
+                log_info(&format!("[GHOST] deleting current game [{}]", game.get_game_name()));
+            }
+            else {
+                game.update_post().await
             }
         }
         
@@ -314,7 +329,11 @@ impl Ghost {
         }
 
         log_info(&format!("[GHOST] creating game [{}]", game_name));
+
+
+
         println!("{:?}", self.m_BNETs);
+        
         let host_counter = self.m_HostCounter;
         for i in &mut self.m_BNETs {
             let game_name = game_name.clone();
@@ -326,7 +345,7 @@ impl Ghost {
                 else if game_state == GAME_PUBLIC { i.queue_chat_command(format!("Creating public game [{}] by user [{}]", game_name.clone(), owner_name)).await; }
             }
 
-            i.queue_game_create(game_state, game_name, "".to_owned(), map, host_counter).await;
+            i.queue_game_create(game_state, game_name, owner_name.clone(), map, host_counter).await;
         }
     }
 }
