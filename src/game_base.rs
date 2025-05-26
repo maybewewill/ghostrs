@@ -21,10 +21,11 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-
+use std::rc::Rc;
 
 #[derive(Clone)]
 #[derive(Debug)]
+#[derive(Default)]
 pub struct BaseGame {
    pub  m_language: Language,
     pub m_ghost: Arc<Mutex<Ghost>>, // Assuming Ghost is defined elsewhere
@@ -218,14 +219,19 @@ impl BaseGame {
             log_info(&format!("[GAME: {}] attempting to bind to address [{}]", self.m_game_name, ghost.m_BindAddress));
         }
 
-        self.m_socket.bind(&ghost.m_BindAddress, self.m_host_port).await;
-
-        if !self.m_socket.has_error() {
-            log_info(&format!("[GAME: {}] binding to address [{}]", self.m_game_name, self.m_host_port));
-        } else {
-            log_info(&format!("[GAME: {}] error binding to address [{}]", self.m_game_name, self.m_host_port));
-            self.m_exiting = true;
+        match self.m_socket.bind(&ghost.m_BindAddress, self.m_host_port).await {
+            Ok(_) => {
+                
+                log_info(&format!("[GAME: {}] binding to address [{}]", self.m_game_name, self.m_host_port));
+            }
+            Err(e) => {
+                log_error(&format!("[GAME: {}] error binding to address [{}]: {}", self.m_game_name, self.m_host_port, e));
+                self.m_exiting = true;
+                return;
+            }
         }
+        //println!("{:?}", self.m_socket);
+        
         self.m_inited = true;
     }
 
@@ -342,7 +348,7 @@ impl BaseGame {
     }
 
     pub async fn update(&mut self) -> bool {
-        println!("PIDORASY");
+       // println!("{:?}", self.m_socket);
         let mut indices_to_remove = Vec::new();
         let mut players = self.m_players.clone();
         for (index, player) in players.iter_mut().enumerate() {
@@ -359,8 +365,8 @@ impl BaseGame {
 
         for (index, player) in self.m_potentials.iter_mut().enumerate() {
             if player.update().await {
-                if player.get_socket().connected() {
-                    player.get_socket().do_send_buff().await;
+                if player.m_Socket.connected() {
+                    player.m_Socket.do_send_buff().await;
                 }
             }
         }
@@ -643,23 +649,27 @@ impl BaseGame {
                 return true;
             }
         }
-
-        if !self.m_socket.has_error() || self.m_socket.connected() {
-            let mut new_socket = self.m_socket.accept().await.unwrap();
-            if new_socket.connected() {
-                new_socket.set_tcp_nodelay(true);
-
-                self.m_potentials.push(
-                    PotentialPlayer::new(
-                        self.m_protocol.clone(),
-                        self.clone(),
-                        new_socket
-                    )
-                 );
-            } if self.m_socket.has_error() {
-                return true;
+        if !self.m_socket.has_error() && self.m_socket.is_connected() {
+           // println!("Trying accept... [{:?}]", self.m_socket);
+            match self.m_socket.accept().await {
+                Ok(Some(mut new_socket)) => {            
+                    if new_socket.connected() {
+                        let _ = new_socket.set_tcp_nodelay(true);
+                        self.m_potentials.push(PotentialPlayer::new(
+                            self.m_protocol.clone(),
+                            self.clone(),
+                            new_socket,
+                        ));
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log_warning(&format!("Accept failed: {}", e));
+                    return true;
+                }
             }
         }
+        
 
         return self.m_exiting;
         
@@ -676,8 +686,8 @@ impl BaseGame {
 
         for (index, player) in self.m_potentials.iter_mut().enumerate() {
             if player.update().await {
-                if player.get_socket().connected() {
-                    player.get_socket().do_send_buff().await;
+                if player.m_Socket.connected() {
+                    player.m_Socket.do_send_buff().await;
                 }
             }
         }
@@ -1086,7 +1096,7 @@ impl BaseGame {
         }
     }
 
-    async fn event_player_joined(&mut self, potential: &mut PotentialPlayer, join_player: &IncomingJoinPlayer) {
+    pub async fn event_player_joined(&mut self, mut potential: PotentialPlayer, join_player: &IncomingJoinPlayer) {
         if join_player.get_name().is_empty() || join_player.get_name().len() > 15 {
             log_info(&format!("[GAME: {}] player [{}|{}] is trying to join the game with an invalid name of length {}", self.m_game_name, join_player.get_name(), potential.get_external_ip_string(), join_player.get_name().len()));
             potential.send(self.m_protocol.SEND_W3GS_REJECTJOIN(REJECTJOIN_FULL.into())).await;
@@ -1185,7 +1195,7 @@ impl BaseGame {
         if self.get_num_players() >= 11 || enforce_pid == self.m_virtual_host_pid {
             self.delete_virtual_host().await;
         }
-
+        println!("{:?}", potential.m_Socket);
         log_info(&format!("[GAME: {}] player [{}|{}] joined the game", self.m_game_name, join_player.get_name(), potential.get_external_ip_string()));
     let mut new_player = GamePlayer::new_from_potential(
         potential.clone(),

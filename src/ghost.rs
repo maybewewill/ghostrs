@@ -10,18 +10,28 @@ use crate::crc32::*;
 use crate::game::*;
 use crate::game_base::*;
 use mpq::{Archive, File};
+use tokio::time::timeout;
 use crate::map::*;
 use crate::sha1::*;
 use crate::gameprotocol::*;
 use crate::bnet::*;
 use tokio::net::UdpSocket;
 use std::sync::{Arc, Mutex};
+use tokio::sync::RwLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 
+use std::time::Duration;
 use std::time::{Instant};
 use once_cell::sync::Lazy;
 
 static START: Lazy<Instant> = Lazy::new(Instant::now);
+
+pub static CURRENT_GAME: Lazy<RwLock<Option<BaseGame>>> =
+    Lazy::new(|| RwLock::new(None));
+
+// Статический счётчик для m_HostCounter
+pub static HOST_COUNTER: AtomicU32 = AtomicU32::new(1);
 
 pub fn get_ticks() -> u128 {
     START.elapsed().as_millis()
@@ -44,6 +54,7 @@ struct GProxyReconnector {
 #[allow(dead_code)]
 #[allow(non_snake_case)]
 #[derive(Debug)]
+#[derive(Default)]
 pub struct Ghost {
     pub m_UDPSocket: Option<UdpSocket>,
     pub m_ReconnectSocket: TcpClient,
@@ -119,40 +130,44 @@ impl Ghost {
     }
 
     pub fn set_current_game(&mut self, _game: Option<BaseGame>) {
+        let self_ptr = self as *mut Ghost; // Сырой указатель на self
+    log_info(&format!(
+        "[GHOST] Setting current game: {:?}, self ptr: {:p}",
+        _game.as_ref().map(|g| g.get_game_name()),
+            self_ptr
+        ));
         self.m_CurrentGame = _game;
     }
 
     pub async fn init(&mut self) {
-        log_info("[GHOSTRS] Initializing GHOSTRS...");
+        log_info("[GHOST] Starting initialization");
         self.m_GPSProtocol = CGPSProtocol::new();
         self.m_CRC = CRC32::new();
         self.m_CRC.initialize();
         self.m_SHA = SHA1::new();
-
+    
         self.m_Exiting = false;
         self.m_ExitingNicely = false;
         self.m_Enabled = true;
         self.m_TFT = config::get_bool("bot_tft", true);
         self.m_Version = String::from("GhostRS v1.0");
         self.m_MaxGames = config::get_int("bot_maxgames", 10) as u32;
-
-        let server = config::get_string("bnet_server", "");
-        let server_alias = config::get_string("bnet_serveralias", "");
+        self.m_HostCounter = 1;
+    
+        log_info("[GHOST] Loading configuration");
+        let server = config::get_string("bnet_server", "wc3.theabyss.ru");
+        let server_alias = config::get_string("bnet_serveralias", "The Abyss");
         let cdkeyroc = config::get_string("bnet_cdkeyroc", "");
         let cdkeytft = config::get_string("bnet_cdkeytft", "");
-        let countryabbrev = "USA";
-        let country = "United States";
-       // let locale = "system";
-
-        let locale_id = 1033;
-
-        let username = config::get_string("bnet_username", "");
+        let username = config::get_string("bnet_username", "BOT");
         let userpassword = config::get_string("bnet_password", "");
-        let firstchannel = config::get_string("bnet_firstchannel", "The Void");
-        
-        let ghost_arc = Arc::new(Mutex::new(self.clone()));
+        let firstchannel = config::get_string("bnet_firstchannel", "iccup.pro");
+    
+        log_info("[GHOST] Creating BNET instance");
+        let ghost_clone = (*self).clone(); // Dereference self to call clone on Ghost
+        let ghost_arc = Arc::new(Mutex::new(ghost_clone));
         let bnet = BNET::new(
-            ghost_arc,
+            Arc::clone(&ghost_arc),
             server.to_owned(),
             server_alias.to_owned(),
             "localhost".to_owned(),
@@ -160,9 +175,9 @@ impl Ghost {
             1,
             cdkeyroc.to_owned(),
             cdkeytft.to_owned(),
-            countryabbrev.to_owned(),
-            country.to_owned(),
-            locale_id,
+            "USA".to_owned(),
+            "United States".to_owned(),
+            1033,
             username.to_owned(),
             userpassword.to_owned(),
             firstchannel.to_owned(),
@@ -177,14 +192,14 @@ impl Ghost {
             "pvpgn".to_owned(),
             "PvPGN Realm".to_owned(),
             500,
-            1
+            1,
         );
         self.m_BNETs.push(bnet);
-
+        log_info("[GHOST] BNET instance added");
+    
+        log_info("[GHOST] Extracting scripts");
         self.extract_scripts().await;
-
-
-        
+        log_info("[GHOST] Initialization completed");
     }
 
     pub async fn update(&mut self) -> bool {
@@ -197,7 +212,7 @@ impl Ghost {
             bnet.update().await;
             updated_bnets.push(bnet);
         }
-        
+        self.m_BNETs.extend(updated_bnets);
         let games: Vec<_> = self.m_Games.drain(..).collect();
 
         let mut updated_games = Vec::new();
@@ -208,19 +223,49 @@ impl Ghost {
             }
             updated_games.push(game);
         }
-
-        if self.m_CurrentGame.is_some() {
-            let mut game = self.m_CurrentGame.clone().unwrap();
-            if game.update().await {
-                log_info(&format!("[GHOST] deleting current game [{}]", game.get_game_name()));
-            }
-            else {
-                game.update_post().await
+        
+        
+        let need_init = {
+            let current_game = CURRENT_GAME.read().await;
+            current_game.as_ref().map_or(false, |game| {
+                // log_info(&format!(
+                //     "[GHOST] Processing current game [{}], inited: {}, server: {:?}",
+                //     game.get_game_name(),
+                //     game.m_inited,
+                //     game.m_creator_server
+                // ));
+                !game.m_inited
+            })
+        };
+        
+        if need_init {
+            {
+                let mut current_game = CURRENT_GAME.write().await;
+                if let Some(game) = current_game.as_mut() {
+                    log_info(&format!("[GHOST] Initializing game [{}]", game.get_game_name()));
+                    game.init().await;
+                    log_info(&format!("[GHOST] Game [{}] initialized", game.get_game_name()));
+                }
             }
         }
         
-
-        self.m_BNETs.extend(updated_bnets);
+        let should_delete = {
+            let mut current_game = CURRENT_GAME.write().await;
+            if let Some(game) = current_game.as_mut() {
+                if !game.m_inited {
+                    log_info(&format!("[GHOST] Initializing game [{}]", game.get_game_name()));
+                    game.init().await;
+                    log_info(&format!("[GHOST] Game [{}] initialized", game.get_game_name()));
+                }
+        
+                timeout(Duration::from_millis(150), game.update())
+                    .await
+                    .unwrap_or(true)
+            } else {
+                false
+            }
+        };
+        
         
         self.m_Exiting
     }

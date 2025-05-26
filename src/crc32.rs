@@ -5,6 +5,14 @@ pub struct CRC32 {
     table: [u32; 256],
 }
 
+impl Default for CRC32 {
+    fn default() -> Self {
+        CRC32 {
+            table: [0u32; 256],  // Or proper initialized table
+        }
+    }
+}
+
 impl CRC32 {
     pub fn new() -> Self {
         CRC32 {

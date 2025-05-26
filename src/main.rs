@@ -1,6 +1,5 @@
+use tokio::time::{timeout, Duration};
 use util::file_read_full_bytes;
-
-
 
 mod ghost;
 mod gpsprotocol;
@@ -29,17 +28,20 @@ async fn main() {
     config::init("default.cfg");
 
     logger::log_info("[GHOSTRS] loaded config default.cfg...");
-   
 
+    logger::log_info("[GHOSTRS] Creating Ghost instance...");
     let mut ghost = ghost::Ghost::new().await;
-    ghost.init().await;
+    logger::log_info("[GHOSTRS] Ghost instance created");
 
-   // println!("{:?}", file_read_full_bytes("maps/iCCup DotA 454.w3x").unwrap().len());
-    loop {
-        if ghost.update().await {
-            logger::log_info("[GHOSTRS] Exiting GHOSTRS...");
-            break;
+    logger::log_info("[GHOSTRS] Initializing Ghost...");
+    match timeout(Duration::from_secs(10), ghost.init()).await {
+        Ok(()) => logger::log_info("[GHOSTRS] Ghost initialized"),
+        Err(_) => {
+            logger::log_error("[GHOSTRS] Ghost initialization timed out");
+            return;
         }
     }
-    
+    loop {
+        if ghost.update().await{}
+    }
 }

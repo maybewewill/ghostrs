@@ -14,15 +14,15 @@ use std::collections::VecDeque;
 #[derive(Clone)]
 #[derive(Debug)]
 pub struct PotentialPlayer {
-    m_Game: BaseGame,
-    m_Protocol: GameProtocol,
-    m_Socket: TcpClient,
-    m_Packets: VecDeque<CommandPacket>,
-    m_DeleteMe: bool,
-    m_Error: bool,
-    m_ErrorString: String,
-    m_IncomingJoinPlayer: IncomingJoinPlayer,
-    m_IncomingBuffer: Vec<u8>,
+    pub m_Game: BaseGame,
+    pub m_Protocol: GameProtocol,
+    pub m_Socket: TcpClient,
+    pub m_Packets: VecDeque<CommandPacket>,
+    pub m_DeleteMe: bool,
+    pub m_Error: bool,
+    pub m_ErrorString: String,
+    pub m_IncomingJoinPlayer: IncomingJoinPlayer,
+    pub m_IncomingBuffer: Vec<u8>,
 }
 
 impl PotentialPlayer {
@@ -40,9 +40,6 @@ impl PotentialPlayer {
         }
     }
 
-    pub fn get_socket(&self) -> TcpClient {
-        self.m_Socket.clone()
-    }
 
     pub fn get_external_ip(&self) -> Vec<u8> {
         let mut zeros: [u8; 4] = [0, 0, 0, 0];
@@ -79,6 +76,7 @@ impl PotentialPlayer {
         if !self.m_Socket.connected() { return false; }
 
         let mut buf = [0u8; 4096];
+
         match self.m_Socket.do_recv(&mut buf).await {
             Ok(bytes_received) if bytes_received > 0 => {
                 self.m_IncomingBuffer.extend(&buf[..bytes_received]);
@@ -88,7 +86,6 @@ impl PotentialPlayer {
             }
             Ok(_) => { }
             Err(e) => {
-                self.m_Socket.disconnect();
             }
         }
         return self.m_DeleteMe || self.m_Error || self.m_Socket.has_error() || self.m_Socket.get_connected();
@@ -103,7 +100,7 @@ impl PotentialPlayer {
                     if bytes.len() >= length as usize {
                         let packet_data = self.m_IncomingBuffer[..length as usize].to_vec();
                         self.m_Packets.push_back(CommandPacket::new(
-                            255,
+                            bytes[0],
                             bytes[1] as i32,
                             packet_data,
                         ));
@@ -125,24 +122,30 @@ impl PotentialPlayer {
         }
     }
     pub async fn process_packets(&mut self) {
-
-        while let Some(packet) = self.m_Packets.pop_front() { 
+        while let Some(packet) = self.m_Packets.pop_front() {
             if packet.get_packet_type() == W3GS_HEADER_CONSTANT {
                 let packet_type: i32 = packet.get_id();
-                
+    
                 match packet_type {
                     x if x == ProtocolG::W3GS_REQJOIN as i32 => {
                         if let Some(join_player) = self.m_Protocol.RECEIVE_W3GS_REQJOIN(packet.get_data().clone()) {
-                            self.m_IncomingJoinPlayer = join_player;
-                            
+                            self.m_IncomingJoinPlayer = join_player.clone();
+                            let join_player = &self.m_IncomingJoinPlayer;
+                            let potential = self.clone();
+                            let game = &mut self.m_Game;
+                            game.event_player_joined(potential, join_player).await;
+                            return;
                         }
-                        return ;
-                    },
-                    _ => { }
+                        
+                        
+                    }
+                    _ => {}
                 }
             }
         }
     }
+    
+    
 
     pub async fn send(&mut self, data: ByteArray) {
         if self.m_Socket.connected() {

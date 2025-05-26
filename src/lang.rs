@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 #[derive(Clone)]
 #[derive(Debug)]
+#[derive(Default)]
 pub struct Language {
     cfg: HashMap<String, String>,
 }

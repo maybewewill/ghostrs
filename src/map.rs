@@ -111,6 +111,7 @@ fn read_null_terminated_string(cursor: &mut Cursor<&Vec<u8>>) -> std::io::Result
 
 #[derive(Debug)]
 #[derive(Clone)]
+#[derive(Default)]
 pub struct Map {
     pub ghost: Arc<Mutex<Ghost>>,
     pub valid: bool,

@@ -77,6 +77,7 @@ pub enum ProtocolG {
 }
 #[derive(Clone)]
 #[derive(Debug)]
+#[derive(Default)]
 pub struct GameProtocol {
     ghost: Arc<Mutex<Ghost>>
 }
@@ -641,6 +642,7 @@ impl GameProtocol {
 }
 
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct IncomingJoinPlayer {
     m_host_counter: u32,
     m_entry_key: u32,

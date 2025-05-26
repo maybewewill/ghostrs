@@ -18,6 +18,8 @@ use crate::util::{ByteArray};
 use crate::ghost::*;
 use crate::commandpacket::*;
 use crate::bncsutilinterface::*;
+use std::io::Read;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -222,48 +224,53 @@ pub async fn update(&mut self) -> bool {
     if self.m_Socket.connected() {
         let mut buf = [0u8; 4096];
 
-        match self.m_Socket.do_recv(&mut buf).await {
-            Ok(bytes_received) if bytes_received > 0 => {
+        match timeout(Duration::from_millis(150), self.m_Socket.do_recv(&mut buf)).await {
+            Ok(Ok(bytes_received)) if bytes_received > 0 => {
                 self.m_IncomingBuffer.extend(&buf[..bytes_received]);
                 
                 self.extract_packets().await;
                 self.process_packets().await;
-
+        
                 let mut wait_ticks = 0;
-
+        
                 wait_ticks += self.m_FrequencyDelayTimes * 60;
-
+        
                 if !self.m_OutPackets.is_empty() && get_ticks() - self.m_LastOutPacketTicks as u128 >= wait_ticks.into() {
                     if self.m_OutPackets.len() > 7 {
                         log_warning(&format!("[BNET: {}] packet queue warning - there are {} packets waiting to be sent", self.m_ServerAlias, self.m_OutPackets.len()));
                     }
-
+        
                     let mut last = self.m_OutPackets.pop_front().unwrap();
-                    let _ = self.m_Socket.do_send( &last ).await;
-
+                    let _ = self.m_Socket.do_send(&last).await;
+        
                     if self.m_FrequencyDelayTimes >= 100 || get_ticks() > (self.m_LastOutPacketTicks + wait_ticks + 400).into() {
                         self.m_FrequencyDelayTimes = 0;
                     } else {
                         self.m_FrequencyDelayTimes += 1;
                     }
-
+        
                     self.m_LastOutPacketTicks = get_ticks() as u32;
-                } 
-
+                }
+        
                 if get_time() - self.m_LastNullTime >= 60 && get_ticks() - self.m_LastOutPacketTicks as u128 >= 60000 {
                     let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_NULL()).await;
                 }
+        
                 return self.m_Exiting;
             }
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 log_info(&format!(
                     "[BNET: {}] recv returned nothing or error",
                     self.m_ServerAlias
                 ));
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 log_warning(&format!("[BNET: {}] recv error: {}", self.m_ServerAlias, e));
                 self.m_Socket.disconnect();
+            }
+            Err(_) => {
+                // Таймаут - recv не вернул данные за 10ms
+                // Можно просто продолжить или сделать логику "ничего не пришло"
             }
         }
     }
@@ -507,37 +514,11 @@ pub async fn update(&mut self) -> bool {
             if event == IncomingChatEventEnum::EID_WHISPER {
                 log_info(&format!("[WHISPER: {}] [{}] {}", self.m_ServerAlias, user, message));
                 if message == "host" {
-                   // log_info(&format!("[BNET: {}] Received host command", self.m_ServerAlias));
-                    //log_info("[GHOST] trying to host game...");
+                    log_info("[GHOST] trying to host game...");
                     let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
-                    //log_info(&format!("[BNET: {}] Map path: {}", self.m_ServerAlias, map_path));
-
-                    // Try to lock Ghost for host_counter with timeout
-                   // log_info(&format!("[BNET: {}] Attempting to lock Ghost for host_counter", self.m_ServerAlias));
-                    let host_counter = match timeout(Duration::from_millis(100), async {
-                        self.m_Ghost.try_lock()
-                    }).await {
-                        Ok(Ok(mut ghost)) => {
-                            let counter = ghost.m_HostCounter;
-                            //log_info(&format!("[BNET: {}] Got host_counter: {}", self.m_ServerAlias, counter));
-                            counter
-                        }
-                        Ok(Err(_)) => {
-                           // log_error(&format!("[BNET: {}] Failed to lock Ghost mutex: busy", self.m_ServerAlias));
-                            return;
-                        }
-                        Err(_) => {
-                            //log_error(&format!("[BNET: {}] Failed to lock Ghost mutex: timed out", self.m_ServerAlias));
-                            return;
-                        }
-                    };
-                    //log_info(&format!("[BNET: {}] Released Ghost mutex, proceeding to map load", self.m_ServerAlias));
-
-                    let mut map = Map::new(Arc::clone(&self.m_Ghost), map_path.clone());
-                    //log_info(&format!("[BNET: {}] Loading map: {}", self.m_ServerAlias, map_path));
+                    let mut map = Map::new(self.m_Ghost.clone(), map_path.clone());
                     map.load(map_path).await;
-                    //log_info(&format!("[BNET: {}] Map loaded, valid: {}", self.m_ServerAlias, map.get_valid()));
-
+                    let host_counter = HOST_COUNTER.fetch_add(1, Ordering::SeqCst);
                     if map.get_valid() {
                         let game_name = format!("Game_{}", get_time());
                         let host_name = user.clone();
@@ -561,7 +542,7 @@ pub async fn update(&mut self) -> bool {
                         let mut game = Game::new(
                             Arc::clone(&self.m_Ghost),
                             map.clone(),
-                            6115,
+                            6112,
                             game_state,
                             game_name.clone(),
                             host_name.clone(),
@@ -569,43 +550,14 @@ pub async fn update(&mut self) -> bool {
                             self.m_Server.clone(),
                         );
 
-                      //  log_info(&format!("[BNET: {}] Initializing game [{}]", self.m_ServerAlias, game_name));
+                        log_info(&format!("[BNET: {}] Initializing game [{}]", self.m_ServerAlias, game_name));
                         game.base.init().await;
-                      //  log_info(&format!(
-                      //      "[BNET: {}] Game [{}] initialized, inited: {}",
-                      //     self.m_ServerAlias, game_name, game.base.m_inited
-                      //
 
-                        // Try to lock Ghost for set_current_game
-                       // log_info(&format!("[BNET: {}] Attempting to lock Ghost to set current game [{}]", self.m_ServerAlias, game_name));
-                        match timeout(Duration::from_millis(100), async {
-                            self.m_Ghost.try_lock()
-                        }).await {
-                            Ok(Ok(mut ghost)) => {
-                                ghost.set_current_game(Some(game.base));
-                        //        log_info(&format!("[BNET: {}] Set current game: {}", self.m_ServerAlias, game_name));
-                            }
-                            Ok(Err(_)) => {
-                        //        log_error(&format!("[BNET: {}] Failed to lock Ghost mutex for set_current_game: busy", self.m_ServerAlias));
-                                return;
-                            }
-                            Err(_) => {
-                          //      log_error(&format!("[BNET: {}] Failed to lock Ghost mutex for set_current_game: timed out", self.m_ServerAlias));
-                                return;
-                            }
-                        }
+                        *CURRENT_GAME.write().await = Some(game.base);
 
                         self.queue_game_create(game_state, game_name.clone(), host_name, &mut map, host_counter)
                             .await;
-                        // log_info(&format!(
-                        //     "[BNET: {}] Queued game creation for [{}]",
-                        //     self.m_ServerAlias, game_name
-                        // ));
                     } else {
-                        // log_warning(&format!(
-                        //     "[BNET: {}] Failed to create game: Invalid map",
-                        //     self.m_ServerAlias
-                        // ));
                         self.queue_chat_command(format!("/w {} Invalid map configuration", user))
                             .await;
                     }

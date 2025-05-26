@@ -1,14 +1,21 @@
-use tokio::net::{TcpStream, TcpSocket, TcpListener};
+use tokio::net::{lookup_host, TcpListener, TcpSocket, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::net::{SocketAddr, IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::io;
 #[derive(Debug)]
+#[derive(Default)]
 pub struct TcpClient {
     stream: Option<TcpStream>,
     send_buffer: Vec<u8>,
     remote_addr: Option<SocketAddr>,
     connected: bool,
     error: Option<io::Error>,
+}
+
+pub fn split_socket_addr(addr: SocketAddr) -> (String, u16) {
+    let ip = addr.ip().to_string();
+    let port = addr.port();
+    (ip, port)
 }
 
 impl Clone for TcpClient {
@@ -72,6 +79,9 @@ impl TcpClient {
             self.error = Some(io::Error::new(io::ErrorKind::InvalidInput, "Invalid host"));
             self.connected = false;
         }
+    }
+    pub fn get_remote_addr(&self) -> Option<SocketAddr> {
+        self.remote_addr
     }
     
     pub async fn put_bytes(&mut self, data: &[u8]) {
@@ -171,6 +181,7 @@ impl TcpClient {
 }
 
 #[derive(Debug)]
+#[derive(Default)]
 pub struct TcpServer {
     listener: Option<TcpListener>,
     local_addr: Option<SocketAddr>,
@@ -199,52 +210,61 @@ impl TcpServer {
         }
     }
 
-    pub async fn bind(&mut self, host: &str, port: u16) {
-        let addr = format!("{}:{}", host, port)
-            .to_socket_addrs()
-            .ok()
-            .and_then(|mut iter| iter.next());
-
-        if let Some(server_addr) = addr {
-            match TcpListener::bind(server_addr).await {
-                Ok(listener) => {
-                    self.listener = Some(listener);
-                    self.local_addr = Some(server_addr);
-                    self.connected = true;
-                    self.error = None;
-                }
-                Err(e) => {
-                    self.error = Some(e);
-                    self.connected = false;
-                }
+    /// Пытается привязать сервер к указанному хосту и порту.
+    ///
+    /// В случае ошибки возвращает конкретную `std::io::Error` и обновляет
+    /// внутреннее состояние ошибки сервера.
+    pub async fn bind(&mut self, host: &str, port: u16) -> io::Result<()> {
+        // Parse host as an IP address to avoid DNS lookups
+        let ip_addr = match host.parse::<IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Invalid IP address: {}", host),
+                ));
             }
-        } else {
-            self.error = Some(io::Error::new(io::ErrorKind::InvalidInput, "Invalid host"));
-            self.connected = false;
+        };
+    
+        // Create a SocketAddr from the IP and port
+        let addr = SocketAddr::new(ip_addr, port);
+    
+        // Attempt to bind the TCP listener
+        match TcpListener::bind(&addr).await {
+            Ok(listener) => {
+                self.listener = Some(listener);
+                self.local_addr = Some(addr);
+                self.connected = true;
+                self.error = None;
+                Ok(())
+            }
+            Err(e) => {
+                // Create the error to return
+                let error_message = format!("Failed to bind to {}:{} - {}", host, port, e);
+                let bind_error = io::Error::new(e.kind(), error_message);
+                self.error = Some(io::Error::new(e.kind(), bind_error.to_string())); // Store a new error
+                self.connected = false;
+                Err(bind_error) // Return the original error
+            }
         }
     }
 
-    pub async fn accept(&mut self) -> io::Result<TcpClient> {
-        if let Some(listener) = &mut self.listener {
-            match listener.accept().await {
-                Ok((stream, addr)) => {
-                    let mut client = TcpClient::new();
-                    client.stream = Some(stream);
-                    client.remote_addr = Some(addr);
-                    client.connected = true;
-                    client.error = None;
-                    Ok(client)
-                }
-                Err(e) => {
-                    let error = io::Error::new(e.kind(), e.to_string());
-                    self.error = Some(error);
-                    Err(e)
-                }
-            }
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "Server not bound"))
-        }
+    pub async fn accept(&mut self) -> io::Result<Option<TcpClient>> {
+        let listener = self.listener.as_mut().ok_or_else(|| 
+            io::Error::new(io::ErrorKind::NotConnected, "Call bind() first")
+        )?;
+    
+        let (stream, addr) = listener.accept().await?;
+        Ok(Some(TcpClient {
+            stream: Some(stream),
+            send_buffer: Vec::new(),
+            remote_addr: Some(addr),
+            connected: true,
+            error: None,
+        }))
     }
+    
+
 
     pub fn get_local_addr(&self) -> Option<SocketAddr> {
         self.local_addr
@@ -256,8 +276,6 @@ impl TcpServer {
             IpAddr::V6(ipv6) => ipv6.octets().to_vec(),
         })
     }
-
-    
 
     pub fn get_ip_string(&self) -> String {
         self.local_addr
@@ -276,24 +294,21 @@ impl TcpServer {
             .unwrap_or_else(|| "No error".into())
     }
 
-    pub fn connected(&self) -> bool {
-        self.connected
+    /// Проверяет, привязан ли сервер и готов ли принимать соединения.
+    pub fn is_connected(&self) -> bool {
+        self.connected && self.listener.is_some()
     }
 
-    pub fn get_connected(&self) -> bool {
-        self.connected()
-    }
-
+    /// Завершает работу сервера, закрывая слушающий сокет.
     pub fn shutdown(&mut self) {
-        self.listener = None;
+        self.listener = None; // TcpListener будет закрыт при Drop
         self.connected = false;
         self.local_addr = None;
+        self.error = None; // Очищаем ошибки при выключении
     }
 
-    // Placeholder methods for game server context
+    // Методы-заглушки из вашего кода
     pub async fn update(&mut self) {}
-
     pub async fn send_to_all(&mut self, _data: &[u8]) {}
-
     pub async fn send_to_client(&mut self, _client: &TcpClient, _data: &[u8]) {}
 }
