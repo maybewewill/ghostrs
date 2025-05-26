@@ -1,6 +1,10 @@
+use libc::name_t;
 use serde::de;
 
+use crate::game;
 use crate::gameprotocol::*;
+use crate::ghost::get_ticks;
+use crate::ghost::get_time;
 use crate::socket::*;
 use crate::logger::*;
 use crate::commandpacket::*;
@@ -9,6 +13,7 @@ use crate::gpsprotocol::*;
 use crate::game_base::*;
 use crate::util::byte_array_to_uint16;
 use crate::util::create_byte_array_size;
+use crate::lang::Language;
 use std::collections::VecDeque;
 use std::sync::{Arc};
 use tokio::sync::Mutex;
@@ -165,7 +170,7 @@ impl PotentialPlayer {
 #[derive(Clone, Debug)]
 pub struct GamePlayer {
     m_protocol: GameProtocol,
-    m_game: Option<Game>, // Assuming Game is defined in gameprotocol or elsewhere
+    m_game: Arc<Mutex<BaseGame>>, // Assuming Game is defined in gameprotocol or elsewhere
    pub m_socket: TcpClient,
     m_packets: VecDeque<CommandPacket>,
     m_delete_me: bool,
@@ -218,12 +223,13 @@ pub struct GamePlayer {
     m_gproxy_reconnect_key: u32,
     m_last_gproxy_ack_time: u32,
     m_exiting: bool,
+    m_incoming_buffer: Vec<u8>,
 }
 
 impl GamePlayer {
     pub fn new(
         protocol: GameProtocol,
-        game: Option<Game>,
+        game: Arc<Mutex<BaseGame>>,
         socket: TcpClient,
         pid: u8,
         joined_realm: String,
@@ -232,8 +238,10 @@ impl GamePlayer {
         reserved: bool,
     ) -> Self {
         GamePlayer {
+            
+            m_incoming_buffer: Vec::new(),
             m_protocol: protocol,
-            m_game: game,
+            m_game: Arc::clone(&game),
             m_socket: socket,
             m_packets: VecDeque::new(),
             m_delete_me: false,
@@ -288,7 +296,7 @@ impl GamePlayer {
         }
     }
 
-    pub fn new_from_potential(
+    pub async fn new_from_potential(
         potential: PotentialPlayer,
         pid: u8,
         joined_realm: String,
@@ -298,10 +306,11 @@ impl GamePlayer {
     ) -> Self {
         GamePlayer {
             m_protocol: potential.m_Protocol,
-            m_game: None, // Assuming no game reference in PotentialPlayer; adjust if needed
+            m_incoming_buffer: potential.m_IncomingBuffer,
+            m_game: potential.m_Game, // Set to None or pass as an argument if available
             m_socket: potential.m_Socket,
             m_packets: potential.m_Packets,
-            m_delete_me: potential.m_DeleteMe,
+            m_delete_me: false,
             m_error: potential.m_Error,
             m_error_string: potential.m_ErrorString,
             m_incoming_join_player: potential.m_IncomingJoinPlayer,
@@ -476,21 +485,220 @@ impl GamePlayer {
     pub fn add_load_in_game_data(&mut self, load_in_game_data: ByteArray) {
     }
 
-    pub async fn update(&self) -> bool {
-        
+    pub async fn update(&mut self) -> bool {
 
-        return self.m_exiting;
+        let mut buf = [0u8; 4096];
+
+        match self.m_socket.do_recv(&mut buf).await {
+            Ok(bytes_received) if bytes_received > 0 => {
+                self.m_incoming_buffer.extend(&buf[..bytes_received]);
+                self.extract_packets().await;
+                self.process_packets().await;
+            }
+            Ok(_) => { 
+                // No data received, do nothing
+                log_info(&format!("No data received from player {}", self.m_name));
+            }
+            Err(e) => {
+            }
+        }
+        return self.m_delete_me || self.m_socket.has_error() || !self.m_socket.get_connected();
     }
-
+    
     pub async fn extract_packets(&mut self) {
+        while self.m_incoming_buffer.len() >= 4 {
+            let bytes = &self.m_incoming_buffer;
+            if bytes[0] == W3GS_HEADER_CONSTANT || bytes[0] == GPS_HEADER_CONSTANT {
+                let mut length: u16 = byte_array_to_uint16(&bytes, false, 2);
+
+                if length >= 4 {
+                    if bytes.len() >= length as usize {
+                        let packet_data = self.m_incoming_buffer[..length as usize].to_vec();
+                        self.m_packets.push_back(CommandPacket::new(
+                            bytes[0],
+                            bytes[1] as i32,
+                            packet_data,
+                        ));
+
+                        self.m_incoming_buffer.drain(..length as usize);
+                    } else {
+                        return;
+                    }
+                } else {
+                    self.m_error = true;
+                    self.m_error_string = "received invalid packet from player (bad length)".to_owned();
+                    return ;
+                }
+            } else {
+                self.m_error = true;
+                self.m_error_string = "received invalid packet from player (bad header constant)".to_owned();
+                return ;
+            }
+        }
     }
 
     pub async fn process_packets(&mut self) {
+        let mut action: CIncomingAction;
+        let mut chat_player: CIncomingChatPlayer;
+        let mut map_size: CIncomingMapSize;
+        let mut has_map: bool = false;
+        let mut check_num: u32 = 0;
+        let mut pong: u32 = 0;
+
+        while let Some(packet) = self.m_packets.pop_front() {
+            if packet.get_packet_type() == W3GS_HEADER_CONSTANT {
+                let packet_type: i32 = packet.get_id();
+                match packet_type {
+                    x if x == ProtocolG::W3GS_LEAVEGAME as i32 => {
+                        
+                        if let reason = self.m_protocol.RECEIVE_W3GS_LEAVEGAME(packet.get_data().clone()) {
+                            self.set_delete_me(true);
+                            if reason == PLAYERLEAVE_GPROXY as u32 {
+                                self.set_left_reason(Language::new().permanently_kicked_gproxy());
+                            } else {
+                                self.set_left_reason(Language::new().has_left_voluntarily());
+                            }
+                            let pid = self.get_pid();
+                            let game_arc = Arc::clone(&self.m_game);
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_left(pid).await;
+                                
+                            });
+                            self.set_left_code(PLAYERLEAVE_LOST as u32);
+                            return;
+                        }
+                    }
+                    x if x == ProtocolG::W3GS_GAMELOADED_SELF as i32 => {
+                        if let _test = self.m_protocol.RECEIVE_W3GS_GAMELOADED_SELF(packet.get_data().clone()) {
+                            if !self.m_finished_loading {
+                                self.m_finished_loading = true;
+                                self.m_finished_loading_ticks = get_ticks() as u32;
+                                let game_arc = Arc::clone(&self.m_game);
+                                let pid = self.m_pid;
+                                    let name = self.m_name.clone();
+                                    let finished_loading_ticks = self.m_finished_loading_ticks;
+                                tokio::spawn(async move {
+                                    let mut game = game_arc.lock().await;
+                                    
+                                    game.event_player_loaded(pid, name, finished_loading_ticks).await;
+                                });
+                                
+                            }
+                        }
+                    }
+                    x if x == ProtocolG::W3GS_OUTGOING_ACTION as i32 => {
+                        if let Some(_action) = self.m_protocol.RECEIVE_W3GS_OUTGOING_ACTION(packet.get_data().clone(), self.m_pid) {    
+                            let game_arc = Arc::clone(&self.m_game);
+                            let name = self.m_name.clone();
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_action(name, &_action).await;
+                            });
+                        } else {
+                            log_info(&format!("Received invalid action packet from player {}", self.m_name));
+                        }
+                    }
+                    x if x == ProtocolG::W3GS_OUTGOING_KEEPALIVE as i32 => {
+                        if let keep_alive  = self.m_protocol.RECEIVE_W3GS_OUTGOING_KEEPALIVE(packet.get_data().clone()) {
+                            check_num = self.m_protocol.RECEIVE_W3GS_OUTGOING_KEEPALIVE(packet.get_data().clone());
+                            self.m_check_sums.push_back(check_num);
+                            self.m_sync_counter += 1;
+                            let game_arc = Arc::clone(&self.m_game);
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_keep_alive(check_num).await;
+                            });
+                        }
+                    }
+                    x if x == ProtocolG::W3GS_CHAT_TO_HOST as i32 => {
+                        if let Some(_chat_player) = self.m_protocol.RECEIVE_W3GS_CHAT_TO_HOST(packet.get_data().clone()) {
+                            let game_arc = Arc::clone(&self.m_game);
+                            let pid = self.m_pid;
+                            let muted = self.m_muted;
+                            let name = self.get_name();
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_chat_to_host(&_chat_player, pid, muted, name).await;
+                            });
+                        }
+                    }
+                    x if x == ProtocolG::W3GS_DROPREQ as i32 => {
+                        if !self.m_drop_vote {
+                            self.m_drop_vote = true;
+                            let name = self.get_name();
+                            let game_arc = Arc::clone(&self.m_game);
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_drop_request(name).await;
+                            });
+                        }
+                    }
+                    x if x == ProtocolG::W3GS_MAPSIZE as i32 => {
+                        let protocol = self.m_protocol.clone();
+                        let game_arc = Arc::clone(&self.m_game);
+                        let pid = self.m_pid;
+                        let name = self.m_name.clone();
+                        let download_started = self.m_download_started;
+                        let started_downloading_ticks = self.m_started_downloading_ticks;
+                        tokio::spawn(async move {
+                            let mut game = game_arc.lock().await;
+                            let mapsize = protocol.RECEIVE_W3GS_MAPSIZE(packet.get_data().clone(), game.m_map.get_map_size()).unwrap();
+                            game.event_player_map_size(
+                                &mapsize,
+                                pid,
+                                name,
+                                download_started,
+                                started_downloading_ticks,
+                            ).await;
+                        });
+                        
+                    }
+                    x if x == ProtocolG::W3GS_PONG_TO_HOST as i32 => {
+                        let game_arc = Arc::clone(&self.m_game);
+                        if let _pong = self.m_protocol.RECEIVE_W3GS_PONG_TO_HOST(packet.get_data().clone()) {
+                            if _pong != 1 {
+                                if !self.m_download_started || (self.m_download_finished && get_time() - self.m_finished_downloading_time >= 5) {
+                                    let ping_value = get_ticks() as u32 - _pong;
+                                    self.m_pings.push(ping_value);
+                                }
+                            }
+                            let reserved = self.m_reserved;
+                            let pid = self.m_pid;
+                            let ping = self.get_ping(true);
+                            let delete_me = self.m_delete_me;
+                            let num_pings = self.m_pings.len();
+                            let name = self.m_name.clone();
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_pong_to_host(
+                                    _pong,
+                                    reserved,
+                                    pid,
+                                    ping,
+                                    delete_me,
+                                    num_pings as u8,
+                                    name
+                                ).await;
+                            });
+                        }
+                        
+                    }
+                    
+                    
+                    _ => {
+                        log_info(&format!("Received unknown packet type {} from player {}", packet_type, self.m_name.clone()));
+
+                    }   
+            }
+        }
     }
+}
+
+
 
     pub async fn send(&mut self, data: ByteArray) {
         if self.m_socket.connected() {
-            println!("Sending data to player {}: {:?}", self.m_name, data);
             let _ = self.m_socket.do_send(&data).await;
         }
     }

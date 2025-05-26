@@ -468,7 +468,7 @@ pub async fn update(&mut self) -> bool {
                         if self.m_Protocol.RECEIVE_SID_AUTH_ACCOUNTLOGONPROOF( packet.get_data().to_vec() ) {
                             log_info(&format!("[BNET: {}] logon successful", self.m_ServerAlias));
                             self.m_LoggedIn = true;
-                            let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_NETGAMEPORT(6114)).await;
+                            let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_NETGAMEPORT(6112)).await;
                             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_ENTERCHAT()).await;
                             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_FRIENDSLIST()).await;
                             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_CLANMEMBERLIST()).await;
@@ -550,7 +550,7 @@ pub async fn update(&mut self) -> bool {
                     let mut game = Game::new(
                         Arc::clone(&self.m_Ghost),
                         map.clone(),
-                        6114,
+                        6112,
                         game_state,
                         game_name.clone(),
                         host_name.clone(),

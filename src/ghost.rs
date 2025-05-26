@@ -271,7 +271,7 @@ impl Ghost {
             // Вызываем update без удержания лока на CURRENT_GAME
             if let Some(game_arc) = game_option {
                 let mut game = game_arc.lock().await;
-                timeout(Duration::from_millis(150), game.update())
+                timeout(Duration::from_millis(0), game.update())
                     .await
                     .unwrap_or(true)
             } else {
