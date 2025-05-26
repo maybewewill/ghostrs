@@ -27,12 +27,12 @@ impl Game {
     ) -> Self {
         Game {
             base: BaseGame {
+                m_potentials: Vec::new(),
                 m_language: Language::new(),
                 m_ghost: ghost.clone(),
                 m_socket: TcpServer::new(), // Assuming TcpServer has a new() method
                 m_protocol: GameProtocol::new(ghost), // Assuming GameProtocol has a new() method
                 m_slots: Vec::new(),
-                m_potentials: Vec::new(),
                 m_players: Vec::new(),
                 m_actions: VecDeque::new(),
                 m_reserved: Vec::new(),

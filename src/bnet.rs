@@ -23,6 +23,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use std::time::Duration;
+use tokio::sync::Mutex as AsyncMutex;
+
 
 #[derive(Debug, Clone)]
 pub struct BNET {
@@ -466,7 +468,7 @@ pub async fn update(&mut self) -> bool {
                         if self.m_Protocol.RECEIVE_SID_AUTH_ACCOUNTLOGONPROOF( packet.get_data().to_vec() ) {
                             log_info(&format!("[BNET: {}] logon successful", self.m_ServerAlias));
                             self.m_LoggedIn = true;
-                            let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_NETGAMEPORT(6112)).await;
+                            let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_NETGAMEPORT(6114)).await;
                             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_ENTERCHAT()).await;
                             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_FRIENDSLIST()).await;
                             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_CLANMEMBERLIST()).await;
@@ -513,57 +515,62 @@ pub async fn update(&mut self) -> bool {
         if event == IncomingChatEventEnum::EID_WHISPER || event == IncomingChatEventEnum::EID_TALK {
             if event == IncomingChatEventEnum::EID_WHISPER {
                 log_info(&format!("[WHISPER: {}] [{}] {}", self.m_ServerAlias, user, message));
-                if message == "host" {
-                    log_info("[GHOST] trying to host game...");
-                    let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
-                    let mut map = Map::new(self.m_Ghost.clone(), map_path.clone());
-                    map.load(map_path).await;
-                    let host_counter = HOST_COUNTER.fetch_add(1, Ordering::SeqCst);
-                    if map.get_valid() {
-                        let game_name = format!("Game_{}", get_time());
-                        let host_name = user.clone();
-                        let game_state = GAME_PUBLIC;
-
-                        log_info(&format!("[BNET: {}] Creating game: {}", self.m_ServerAlias, game_name));
-                        if game_state == GAME_PRIVATE {
-                            self.queue_chat_command(format!(
-                                "Creating private game [{}] by user [{}]",
-                                game_name, "slash"
-                            ))
-                            .await;
-                        } else {
-                            self.queue_chat_command(format!(
-                                "Creating public game [{}] by user [{}]",
-                                game_name, "slash"
-                            ))
-                            .await;
-                        }
-
-                        let mut game = Game::new(
-                            Arc::clone(&self.m_Ghost),
-                            map.clone(),
-                            6112,
-                            game_state,
-                            game_name.clone(),
-                            host_name.clone(),
-                            host_name.clone(),
-                            self.m_Server.clone(),
-                        );
-
-                        log_info(&format!("[BNET: {}] Initializing game [{}]", self.m_ServerAlias, game_name));
-                        game.base.init().await;
-
-                        *CURRENT_GAME.write().await = Some(game.base);
-
-                        self.queue_game_create(game_state, game_name.clone(), host_name, &mut map, host_counter)
-                            .await;
-                    } else {
-                        self.queue_chat_command(format!("/w {} Invalid map configuration", user))
-                            .await;
-                    }
-                }
+                
             } else {
+                
                 log_info(&format!("[LOCAL: {}] [{}] {}", self.m_ServerAlias, user, message));
+            }
+
+            if message == "host" {
+                log_info("[GHOST] trying to host game...");
+                let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
+                let mut map = Map::new(self.m_Ghost.clone(), map_path.clone());
+                map.load(map_path).await;
+                let host_counter = HOST_COUNTER.fetch_add(1, Ordering::SeqCst);
+                if map.get_valid() {
+                    let game_name = format!("Game_{}", get_time());
+                    let host_name = user.clone();
+                    let game_state = GAME_PUBLIC;
+
+                    log_info(&format!("[BNET: {}] Creating game: {}", self.m_ServerAlias, game_name));
+                    if game_state == GAME_PRIVATE {
+                        self.queue_chat_command(format!(
+                            "Creating private game [{}] by user [{}]",
+                            game_name, "slash"
+                        ))
+                        .await;
+                    } else {
+                        self.queue_chat_command(format!(
+                            "Creating public game [{}] by user [{}]",
+                            game_name, "slash"
+                        ))
+                        .await;
+                    }
+
+                    let mut game = Game::new(
+                        Arc::clone(&self.m_Ghost),
+                        map.clone(),
+                        6114,
+                        game_state,
+                        game_name.clone(),
+                        host_name.clone(),
+                        host_name.clone(),
+                        self.m_Server.clone(),
+                    );
+                    
+                    // Create Arc<Mutex<BaseGame>> here
+                    let base_game_arc = Arc::new(AsyncMutex::new(game.base));
+                    
+                    // Store the Arc in CURRENT_GAME
+                    *CURRENT_GAME.write().await = Some(Arc::clone(&base_game_arc));
+                    
+
+                    self.queue_game_create(game_state, game_name.clone(), host_name, &mut map, host_counter)
+                        .await;
+                } else {
+                    self.queue_chat_command(format!("/w {} Invalid map configuration", user))
+                        .await;
+                }
             }
         } else if event == IncomingChatEventEnum::EID_CHANNEL {
             log_info(&format!("[BNET: {}] joined channel [{}]", self.m_ServerAlias, message));

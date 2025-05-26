@@ -10,11 +10,14 @@ use crate::game_base::*;
 use crate::util::byte_array_to_uint16;
 use crate::util::create_byte_array_size;
 use std::collections::VecDeque;
+use std::sync::{Arc};
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 #[derive(Debug)]
+#[derive(Default)]
 pub struct PotentialPlayer {
-    pub m_Game: BaseGame,
+    pub m_Game: Arc<Mutex<BaseGame>>,
     pub m_Protocol: GameProtocol,
     pub m_Socket: TcpClient,
     pub m_Packets: VecDeque<CommandPacket>,
@@ -24,9 +27,11 @@ pub struct PotentialPlayer {
     pub m_IncomingJoinPlayer: IncomingJoinPlayer,
     pub m_IncomingBuffer: Vec<u8>,
 }
-
+#[clippy::warn(lint::await_holding_lock)]
+#[allow(clippy::await_holding_lock)]
 impl PotentialPlayer {
-    pub fn new(protocol: GameProtocol, game: BaseGame, socket: TcpClient) -> Self {
+    pub fn new(protocol: GameProtocol, game: Arc<Mutex<BaseGame>>, socket: TcpClient) -> Self {
+
         Self {
             m_Protocol: protocol,
             m_ErrorString: String::new(),
@@ -80,7 +85,6 @@ impl PotentialPlayer {
         match self.m_Socket.do_recv(&mut buf).await {
             Ok(bytes_received) if bytes_received > 0 => {
                 self.m_IncomingBuffer.extend(&buf[..bytes_received]);
-                
                 self.extract_packets().await;
                 self.process_packets().await;
             }
@@ -129,15 +133,19 @@ impl PotentialPlayer {
                 match packet_type {
                     x if x == ProtocolG::W3GS_REQJOIN as i32 => {
                         if let Some(join_player) = self.m_Protocol.RECEIVE_W3GS_REQJOIN(packet.get_data().clone()) {
+                            let mut pot   = std::mem::take(self);
                             self.m_IncomingJoinPlayer = join_player.clone();
-                            let join_player = &self.m_IncomingJoinPlayer;
-                            let potential = self.clone();
-                            let game = &mut self.m_Game;
-                            game.event_player_joined(potential, join_player).await;
+                            let join_player_data = self.m_IncomingJoinPlayer.clone();
+                            let game_arc = Arc::clone(&pot.m_Game);
+                            // Instead of passing `self`, pass only the data needed (e.g., join_player_data)
+                            tokio::spawn(async move {
+                                let mut game = game_arc.lock().await;
+                                game.event_player_joined(&mut pot, &join_player_data).await;
+                            });
+                            
+
                             return;
                         }
-                        
-                        
                     }
                     _ => {}
                 }
@@ -158,7 +166,7 @@ impl PotentialPlayer {
 pub struct GamePlayer {
     m_protocol: GameProtocol,
     m_game: Option<Game>, // Assuming Game is defined in gameprotocol or elsewhere
-    m_socket: TcpClient,
+   pub m_socket: TcpClient,
     m_packets: VecDeque<CommandPacket>,
     m_delete_me: bool,
     m_error: bool,
@@ -209,6 +217,7 @@ pub struct GamePlayer {
     m_gproxy_buffer: VecDeque<ByteArray>,
     m_gproxy_reconnect_key: u32,
     m_last_gproxy_ack_time: u32,
+    m_exiting: bool,
 }
 
 impl GamePlayer {
@@ -251,6 +260,7 @@ impl GamePlayer {
             m_finished_downloading_time: 0,
             m_finished_loading_ticks: 0,
             m_started_lagging_ticks: 0,
+            m_exiting: false,
             m_stats_sent_time: 0,
             m_stats_dota_sent_time: 0,
             m_last_gproxy_wait_notice_sent_time: 0,
@@ -297,6 +307,7 @@ impl GamePlayer {
             m_incoming_join_player: potential.m_IncomingJoinPlayer,
             m_pid: pid,
             m_name: name,
+            m_exiting: false,
             m_internal_ip: internal_ip,
             m_pings: Vec::new(),
             m_check_sums: VecDeque::new(),
@@ -466,7 +477,9 @@ impl GamePlayer {
     }
 
     pub async fn update(&self) -> bool {
-        true
+        
+
+        return self.m_exiting;
     }
 
     pub async fn extract_packets(&mut self) {
@@ -476,6 +489,10 @@ impl GamePlayer {
     }
 
     pub async fn send(&mut self, data: ByteArray) {
+        if self.m_socket.connected() {
+            println!("Sending data to player {}: {:?}", self.m_name, data);
+            let _ = self.m_socket.do_send(&data).await;
+        }
     }
 
     pub fn event_gproxy_reconnect(&mut self, _new_socket: TcpClient, _last_packet: u32) {

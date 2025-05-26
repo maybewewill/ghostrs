@@ -21,7 +21,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::rc::Rc;
+use once_cell::sync::Lazy;
+use std::ptr;
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::RwLock;
+
+pub static POTENTIALS: Lazy<RwLock<Vec<PotentialPlayer>>> = Lazy::new(|| RwLock::new(Vec::new()));
 
 #[derive(Clone)]
 #[derive(Debug)]
@@ -32,13 +37,13 @@ pub struct BaseGame {
     pub m_socket: TcpServer, // Assuming TcpServer is defined in socket
     pub m_protocol: GameProtocol,
     pub m_slots: Vec<GameSlot>,
-    pub m_potentials: Vec<PotentialPlayer>,
    pub  m_players: Vec<GamePlayer>,// Assuming CallableScoreCheck is defined
    pub  m_actions: VecDeque<CIncomingAction>, // Assuming IncomingAction is defined
     pub m_reserved: Vec<String>,
     pub m_ignored_names: HashSet<String>,
    pub  m_ip_black_list: HashSet<String>,
-   pub  m_enforce_slots: Vec<GameSlot>,// Assuming PidPlayer is defined
+   pub  m_enforce_slots: Vec<GameSlot>,
+   pub m_potentials: Vec<PotentialPlayer>,// Assuming PidPlayer is defined
    pub  m_map: Map, // Assuming Map is defined
     pub m_exiting: bool,
     pub m_saving: bool,
@@ -124,9 +129,9 @@ impl BaseGame {
             m_socket: TcpServer::new(), // Assuming TcpServer has a new() method
             m_protocol: GameProtocol::new(ghost), // Assuming GameProtocol has a new() method
             m_slots: Vec::new(),
-            m_potentials: Vec::new(),
             m_players: Vec::new(),
             m_actions: VecDeque::new(),
+            m_potentials: Vec::new(),
             m_reserved: Vec::new(),
             m_ignored_names: HashSet::new(),
             m_ip_black_list: HashSet::new(),
@@ -350,12 +355,22 @@ impl BaseGame {
     pub async fn update(&mut self) -> bool {
        // println!("{:?}", self.m_socket);
         let mut indices_to_remove = Vec::new();
-        let mut players = self.m_players.clone();
-        for (index, player) in players.iter_mut().enumerate() {
+        let mut players_to_delete = Vec::new();
+
+        for (index, player) in self.m_players.iter_mut().enumerate() {
             if player.update().await {
-                self.event_player_deleted(player).await;
                 indices_to_remove.push(index);
             }
+        }
+
+        // Collect players to delete after the loop to avoid double mutable borrow
+        for &index in &indices_to_remove {
+            if let Some(player) = self.m_players.get_mut(index) {
+                players_to_delete.push(player.clone());
+            }
+        }
+        for mut player in players_to_delete {
+            self.event_player_deleted(&mut player).await;
         }
 
         for index in indices_to_remove.iter().rev() {
@@ -363,7 +378,9 @@ impl BaseGame {
         }
         indices_to_remove.clear();
 
-        for (index, player) in self.m_potentials.iter_mut().enumerate() {
+        // Clone the potentials to avoid holding the lock during await
+
+        for player in self.m_potentials.iter_mut() {
             if player.update().await {
                 if player.m_Socket.connected() {
                     player.m_Socket.do_send_buff().await;
@@ -422,7 +439,7 @@ impl BaseGame {
 
         if !self.m_game_loading && !self.m_game_loaded && get_ticks() as u32 - self.m_last_download_ticks >= 100 {
             let mut downloaders: u32 = 0;
-            players = self.m_players.clone();
+            let mut players = self.m_players.clone();
             for i in players.iter_mut() {
                 if i.get_download_started() && !i.get_download_finished() {
                     downloaders += 1;
@@ -458,7 +475,7 @@ impl BaseGame {
 
         if self.m_game_loading {
             let mut finished_loading: bool = true;
-            players = self.m_players.clone();
+            let mut players = self.m_players.clone();
 
             for i in players.iter_mut() {
                 finished_loading = i.get_finished_loading();
@@ -476,7 +493,7 @@ impl BaseGame {
             } else {
                 if self.m_load_in_game && get_time() as u32 - self.m_last_lag_screen_reset_time >= 30 {
                     let mut using_gproxy = false;
-                    players = self.m_players.clone();
+                    let mut players = self.m_players.clone();
                     for i in players.iter_mut() {
                         if i.get_gproxy() {
                             using_gproxy = true;
@@ -515,7 +532,7 @@ impl BaseGame {
         if self.m_game_loaded {
             if !self.m_lagging {
                 let mut lagging_string:String = String::new();
-                players = self.m_players.clone();
+                let mut players = self.m_players.clone();
 
                 for i in players.iter_mut() {
                     if self.m_sync_counter - i.get_sync_counter() > self.m_sync_limit {
@@ -548,7 +565,7 @@ impl BaseGame {
 
             if self.m_lagging {
                 let mut using_gproxy = false;
-                players = self.m_players.clone();
+                let mut players = self.m_players.clone();
                 for i in players.iter_mut() {
                     if i.get_gproxy() {
                         using_gproxy = true;
@@ -627,7 +644,7 @@ impl BaseGame {
         if self.m_game_over_time != 0 && get_time() - self.m_game_over_time >= 60 {
             let mut already_stopped = true;
 
-            for i in players.iter_mut() {
+            for i in self.m_players.iter_mut() {
                 if i.get_delete_me() {
                     already_stopped = false;
                     break;
@@ -649,17 +666,23 @@ impl BaseGame {
                 return true;
             }
         }
+        // In game_base.rs (update method)
         if !self.m_socket.has_error() && self.m_socket.is_connected() {
-           // println!("Trying accept... [{:?}]", self.m_socket);
             match self.m_socket.accept().await {
                 Ok(Some(mut new_socket)) => {            
                     if new_socket.connected() {
                         let _ = new_socket.set_tcp_nodelay(true);
-                        self.m_potentials.push(PotentialPlayer::new(
-                            self.m_protocol.clone(),
-                            self.clone(),
-                            new_socket,
-                        ));
+                        let game_arc = {
+                            let current_game = CURRENT_GAME.read().await;
+                            current_game.as_ref().map(Arc::clone)
+                        };
+                        if let Some(game_arc) = game_arc {
+                            self.m_potentials.push(PotentialPlayer::new(
+                                self.m_protocol.clone(),
+                                game_arc,
+                                new_socket,
+                            ));
+                        }
                     }
                 }
                 Ok(None) => {}
@@ -669,6 +692,7 @@ impl BaseGame {
                 }
             }
         }
+
         
 
         return self.m_exiting;
@@ -684,7 +708,7 @@ impl BaseGame {
         }
 
 
-        for (index, player) in self.m_potentials.iter_mut().enumerate() {
+        for player in self.m_potentials.iter_mut() {
             if player.update().await {
                 if player.m_Socket.connected() {
                     player.m_Socket.do_send_buff().await;
@@ -1096,7 +1120,8 @@ impl BaseGame {
         }
     }
 
-    pub async fn event_player_joined(&mut self, mut potential: PotentialPlayer, join_player: &IncomingJoinPlayer) {
+    pub async fn event_player_joined(&mut self,  potential:&mut PotentialPlayer, join_player: &IncomingJoinPlayer) {
+        println!("event_player_joined: {:?}", potential.m_Socket);
         if join_player.get_name().is_empty() || join_player.get_name().len() > 15 {
             log_info(&format!("[GAME: {}] player [{}|{}] is trying to join the game with an invalid name of length {}", self.m_game_name, join_player.get_name(), potential.get_external_ip_string(), join_player.get_name().len()));
             potential.send(self.m_protocol.SEND_W3GS_REJECTJOIN(REJECTJOIN_FULL.into())).await;
@@ -1159,10 +1184,8 @@ impl BaseGame {
                 if let Some(kicked_player) = self.get_player_from_sid(sid) {
                     let data = protocol.SEND_W3GS_PLAYERLEAVE_OTHERS(kicked_player.get_pid(), kicked_player.get_left_code().into());
                     self.send_all(data).await;
+                }
             }
-
-        }
-        
         }
 
         if sid == 255 && self.is_owner(join_player.get_name().clone()) {
@@ -1195,10 +1218,9 @@ impl BaseGame {
         if self.get_num_players() >= 11 || enforce_pid == self.m_virtual_host_pid {
             self.delete_virtual_host().await;
         }
-        println!("{:?}", potential.m_Socket);
         log_info(&format!("[GAME: {}] player [{}|{}] joined the game", self.m_game_name, join_player.get_name(), potential.get_external_ip_string()));
     let mut new_player = GamePlayer::new_from_potential(
-        potential.clone(),
+        std::mem::take(potential),
         self.get_new_pid(),
         joined_realm.clone(),
         join_player.get_name().clone(),
@@ -1246,7 +1268,7 @@ impl BaseGame {
     // First prepare all the data we need
     let new_player = &mut self.m_players[new_player_index];
     let player_pid = new_player.get_pid();
-    let player_port = new_player.get_socket().get_port().unwrap_or(0);
+    let player_port = new_player.m_socket.get_port().unwrap_or(0);
     let player_external_ip = new_player.get_external_ip();
     
     // Send the slot info join

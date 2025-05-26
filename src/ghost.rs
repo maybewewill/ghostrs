@@ -10,6 +10,7 @@ use crate::crc32::*;
 use crate::game::*;
 use crate::game_base::*;
 use mpq::{Archive, File};
+use tokio::sync::futures;
 use tokio::time::timeout;
 use crate::map::*;
 use crate::sha1::*;
@@ -19,6 +20,7 @@ use tokio::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::sync::Mutex as AsyncMutex;
 
 
 use std::time::Duration;
@@ -27,8 +29,10 @@ use once_cell::sync::Lazy;
 
 static START: Lazy<Instant> = Lazy::new(Instant::now);
 
-pub static CURRENT_GAME: Lazy<RwLock<Option<BaseGame>>> =
+// In ghost.rs
+pub static CURRENT_GAME: Lazy<RwLock<Option<Arc<AsyncMutex<BaseGame>>>>> = 
     Lazy::new(|| RwLock::new(None));
+
 
 // Статический счётчик для m_HostCounter
 pub static HOST_COUNTER: AtomicU32 = AtomicU32::new(1);
@@ -225,39 +229,48 @@ impl Ghost {
         }
         
         
+        // 1. надо ли инициализировать текущую игру?  (только read-лок)
         let need_init = {
-            let current_game = CURRENT_GAME.read().await;
-            current_game.as_ref().map_or(false, |game| {
-                // log_info(&format!(
-                //     "[GHOST] Processing current game [{}], inited: {}, server: {:?}",
-                //     game.get_game_name(),
-                //     game.m_inited,
-                //     game.m_creator_server
-                // ));
-                !game.m_inited
+            let current = CURRENT_GAME.read().await;
+            current.as_ref().map_or(false, |g| {
+                // здесь нельзя await, но можно посмотреть поле
+                !tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let game = g.lock().await;
+                        game.m_inited
+                    })
+                })
             })
         };
-        
+
         if need_init {
-            {
-                let mut current_game = CURRENT_GAME.write().await;
-                if let Some(game) = current_game.as_mut() {
+            // 2. берём Arc без write-лока
+            let game_arc = {
+                let cur = CURRENT_GAME.read().await;      // read-лок, быстро
+                cur.clone()                               // Option<Arc<…>>
+            };
+
+            if let Some(game_arc) = game_arc {
+                // 3. теперь спокойно инициализируем
+                {
+                    let mut game = game_arc.lock().await;
                     log_info(&format!("[GHOST] Initializing game [{}]", game.get_game_name()));
-                    game.init().await;
+                    game.init().await;                            // <-- await уже без write-лока
                     log_info(&format!("[GHOST] Game [{}] initialized", game.get_game_name()));
                 }
             }
         }
-        
+
         let should_delete = {
-            let mut current_game = CURRENT_GAME.write().await;
-            if let Some(game) = current_game.as_mut() {
-                if !game.m_inited {
-                    log_info(&format!("[GHOST] Initializing game [{}]", game.get_game_name()));
-                    game.init().await;
-                    log_info(&format!("[GHOST] Game [{}] initialized", game.get_game_name()));
-                }
+            // Получаем Arc без удержания лока на CURRENT_GAME
+            let game_option = {
+                let mut current_game = CURRENT_GAME.write().await;
+                current_game.as_ref().map(|game| Arc::clone(game))
+            }; // Лок отпускается здесь
         
+            // Вызываем update без удержания лока на CURRENT_GAME
+            if let Some(game_arc) = game_option {
+                let mut game = game_arc.lock().await;
                 timeout(Duration::from_millis(150), game.update())
                     .await
                     .unwrap_or(true)
@@ -265,6 +278,7 @@ impl Ghost {
                 false
             }
         };
+        
         
         
         self.m_Exiting
