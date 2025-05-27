@@ -2,6 +2,7 @@ use std::io::Cursor;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::sync::{Arc, Mutex};
+use crate::game;
 use crate::ghost::*;
 use crate::util::*;
 use crate::logger::*;
@@ -183,6 +184,7 @@ impl Map {
     }
 
     pub fn get_map_game_flags(&self) -> Vec<u8> {
+
         let mut game_flags: u32 = 0;
 
         if self.map_speed == MAPSPEED_SLOW { game_flags = 0x00000000; }
@@ -209,10 +211,9 @@ impl Map {
             game_flags |= 0x01000000;
         } if (self.map_flags & MAPFLAG_RANDOMHERO) != 0 {
             game_flags |= 0x02000000;
-        } if (self.map_flags & MAPFLAG_TEAMSTOGETHER) != 0 {
+        } if (self.map_flags & MAPFLAG_RANDOMRACES) != 0 {
             game_flags |= 0x04000000;
         }
-
         return create_byte_array_from_u32(game_flags, false);
     }
 
@@ -318,7 +319,6 @@ impl Map {
                 } else {
                     log_warning("[MAP] Failed to lock ghost for m_SHA reset");
                 }
-                
                 map_size = create_byte_array_from_u32(self.map_data.len() as u32, false);
                 log_info(&format!("[MAP] calculated map_size = {}", byte_array_to_dec_string(&map_size)));
 
@@ -596,7 +596,8 @@ impl Map {
                                     slot.set_race(slot.race() | SLOTRACE_SELECTABLE);
                                 }
                             }
-                            self.slots = slots;
+                            self.slots = slots; 
+                            
                         } else {
                             log_info("[MAP] invalid war3map.w3i format");
                         }
@@ -622,15 +623,15 @@ impl Map {
 
         self.map_sha1 = map_sha1;
 
-        self.map_speed = config::get_int("map_speed", i32::from(MAPSPEED_FAST)) as u8;
-        self.map_visibility = config::get_int("map_visibility", i32::from(MAPVIS_DEFAULT)) as u8;
-        self.map_observers = config::get_int("map_observers", i32::from(MAPOBS_NONE)) as u8;
-        self.map_flags = config::get_int("map_flags", i32::from(MAPFLAG_TEAMSTOGETHER | MAPFLAG_FIXEDTEAMS)) as u8;
-        self.map_filter_maker = config::get_int("map_filter_maker", i32::from(MAPFILTER_MAKER_USER)) as u8;
-        self.map_filter_type = map_filter_type;
+        self.map_speed = MAPSPEED_FAST;
+        self.map_visibility = MAPVIS_DEFAULT;
+        self.map_observers = MAPOBS_NONE;
+        self.map_flags = MAPFLAG_TEAMSTOGETHER | MAPFLAG_FIXEDTEAMS;
+        self.map_filter_maker = MAPFILTER_MAKER_USER;
+        self.map_filter_type = 0;
 
-        self.map_filter_size = config::get_int("map_filter_size", i32::from(MAPFILTER_SIZE_LARGE)) as u8;
-        self.map_filter_obs = config::get_int("map_filter_obs", i32::from(MAPFILTER_OBS_NONE)) as u8;
+        self.map_filter_size = MAPFILTER_SIZE_LARGE;
+        self.map_filter_obs = MAPFILTER_OBS_NONE;
 
         self.map_options = map_options;
 
@@ -649,19 +650,7 @@ impl Map {
 
         self.map_num_teams = map_num_teams;
         if slots.is_empty() {
-            for slot in 1..=24 {
-                let slot_key = format!("map_slot{}", slot);
-                let slot_string = config::get_string(&slot_key, "");
-                if slot_string.is_empty() {
-                    break;
-                }
-                let slot_data = extract_numbers(&slot_string, 9);
-                slots.push(GameSlot::new_from_byte_array(&slot_data));
-            }
-        } else if !config::get_string("map_slot1", "").is_empty() {
-            log_info(&format!("[MAP] overriding slots"));
-            slots.clear();
-            for slot in 1..=24 {
+            for slot in 1..=12 {
                 let slot_key = format!("map_slot{}", slot);
                 let slot_string = config::get_string(&slot_key, "");
                 if slot_string.is_empty() {
@@ -671,6 +660,7 @@ impl Map {
                 slots.push(GameSlot::new_from_byte_array(&slot_data));
             }
         }
+        
 
         if self.map_flags & MAPFLAG_RANDOMRACES != 0 {
             log_info("[MAP] forcing races to random");
@@ -678,12 +668,13 @@ impl Map {
                 slot.set_race(SLOTRACE_RANDOM);
             }
         }
+        
 
         if self.map_observers == MAPOBS_ALLOWED || self.map_observers == MAPOBS_REFEREES {
             let default_max_slots = if editor_version < 6060 { 12 } else { 12 }; // Adjust if MAX_SLOTS differs
             let max_slots = config::get_int("map_maxslots", default_max_slots) as u32;
             log_info(&format!("[MAP] adding {} observer slots", max_slots - self.slots.len() as u32));
-            while self.slots.len() < max_slots as usize {
+            while self.slots.len() < 12 as usize {
                 self.slots.push(GameSlot::new(
                     0,
                     255,
@@ -774,6 +765,7 @@ impl Map {
             self.valid = false;
             log_warning("[MAP] invalid map_num_teams detected");
         }
+
         if self.slots.is_empty() || self.slots.len() > 24 {
             self.valid = false;
             log_warning("[MAP] invalid map_slot<x> detected");

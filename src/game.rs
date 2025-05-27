@@ -24,6 +24,7 @@ impl Game {
         owner_name: String,
         creator_name: String,
         creator_server: String,
+        host_counter: u32
     ) -> Self {
         Game {
             base: BaseGame {
@@ -58,8 +59,8 @@ impl Game {
                 m_stat_string: String::new(),
                 m_kick_vote_player: String::new(),
                 m_hcl_command_string: String::new(),
-                m_random_seed: 0,
-                m_host_counter: 0,
+                m_random_seed: get_ticks() as u32,
+                m_host_counter: host_counter,
                 m_entry_key: 0,
                 m_latency: 0,
                 m_sync_limit: 0,

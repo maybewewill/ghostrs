@@ -222,6 +222,9 @@ impl GameProtocol {
             packet.extend_from_slice(&zeros);
             self.AssignLength(&mut packet);
         }
+        for byte in &packet {
+            print!("{:02x} ", byte);
+        }
         packet
     }
 

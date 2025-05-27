@@ -21,6 +21,8 @@ mod gameplayer;
 mod game_base;
 mod game;
 mod lang;
+mod packed;
+mod savegame;
 
 #[tokio::main]
 async fn main() {

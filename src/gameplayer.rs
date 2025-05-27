@@ -491,17 +491,17 @@ impl GamePlayer {
 
         match self.m_socket.do_recv(&mut buf).await {
             Ok(bytes_received) if bytes_received > 0 => {
+                println!("{:?}", bytes_received);
                 self.m_incoming_buffer.extend(&buf[..bytes_received]);
                 self.extract_packets().await;
                 self.process_packets().await;
             }
             Ok(_) => { 
-                // No data received, do nothing
-                log_info(&format!("No data received from player {}", self.m_name));
             }
             Err(e) => {
             }
         }
+        println!("has_error = {}, m_delete_me = {}, get_connected = {}", self.m_delete_me, self.m_socket.has_error(), self.m_socket.get_connected());
         return self.m_delete_me || self.m_socket.has_error() || !self.m_socket.get_connected();
     }
     
@@ -519,6 +519,10 @@ impl GamePlayer {
                             bytes[1] as i32,
                             packet_data,
                         ));
+
+                        if bytes[0] == GPS_HEADER_CONSTANT {
+                            self.m_total_packets_received += 1
+                        }
 
                         self.m_incoming_buffer.drain(..length as usize);
                     } else {
@@ -546,6 +550,8 @@ impl GamePlayer {
         let mut pong: u32 = 0;
 
         while let Some(packet) = self.m_packets.pop_front() {
+            log_info(&format!("Packet type: {}    Packet id: {}", packet.get_packet_type(), packet.get_id()));
+
             if packet.get_packet_type() == W3GS_HEADER_CONSTANT {
                 let packet_type: i32 = packet.get_id();
                 match packet_type {
@@ -700,6 +706,18 @@ impl GamePlayer {
     pub async fn send(&mut self, data: ByteArray) {
         if self.m_socket.connected() {
             let _ = self.m_socket.do_send(&data).await;
+        }
+    }
+
+    pub async fn put_bytes(&mut self, data: ByteArray) {
+        if self.m_socket.connected() {
+            self.m_socket.put_bytes(&data).await;
+        }
+    }
+
+    pub async fn send_buff(&mut self) {
+        if self.m_socket.connected() {
+            self.m_socket.do_send_buff().await;
         }
     }
 

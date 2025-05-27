@@ -300,6 +300,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "config",
+ "flate2",
  "libc",
  "libloading",
  "log",

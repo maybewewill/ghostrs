@@ -413,15 +413,34 @@ impl BaseGame {
             self.m_last_ping_time = get_time() as u32;
         }
         
+        // println!("| m_RefreshError = {} |---| m_CountDownstarted = {} |---| m_GameState = {} |---| slots_open: {} |---| get_time - m_last_refresh = {}",
+        //     self.m_refresh_error,
+        //     self.m_count_down_started,
+        //     self.m_game_state,
+        //     self.get_slots_open(),
+        //     get_time() - self.m_last_refresh_time
+        // );
         if !self.m_refresh_error && !self.m_count_down_started && self.m_game_state == GAME_PUBLIC && self.get_slots_open() > 0 && get_time() - self.m_last_refresh_time >= 3 {
             let mut refreshed = false;
+            let bnets = m_BNETs.read().await;
 
-            for bnet in self.m_ghost.lock().unwrap().m_BNETs.clone().iter_mut() {
+            for bnet_arc in bnets.iter() {
+                let mut bnet = bnet_arc.lock().await;
+
                 if bnet.get_out_packets_queued() <= 1 {
-                    bnet.queue_game_refresh(self.m_game_state, self.m_game_name.clone(), String::new(), &mut self.m_map, get_time() as u32 - self.m_creation_time, self.m_host_counter).await;
+                    bnet.queue_game_refresh(
+                        self.m_game_state,
+                        self.m_game_name.clone(),
+                        "BOT".to_owned(),
+                        &mut self.m_map,
+                        get_time() as u32 - self.m_creation_time,
+                        self.m_host_counter,
+                    ).await;
+
                     refreshed = true;
                 }
             }
+
 
             if self.m_refresh_messages && refreshed {
                 self.send_all_chat(self.m_language.game_refreshed()).await;
@@ -663,6 +682,7 @@ impl BaseGame {
                 self.m_saving = true;
             }
             else if self.is_game_data_saved() {
+                println!("HERE DROPPED");
                 return true;
             }
         }
@@ -837,12 +857,14 @@ impl BaseGame {
         if !self.m_game_loading && !self.m_game_loaded {
             let map_layout_style = self.m_map.get_map_layout_style();
             let map_num_players = self.m_map.get_map_num_players();
-            self.send_all(self.m_protocol.SEND_W3GS_SLOTINFO(
-                self.m_slots.clone(), 
-                self.m_random_seed, 
-                map_layout_style, 
-                map_num_players)
-            ).await;
+            for i in self.m_players.iter_mut() {
+                i.put_bytes(self.m_protocol.SEND_W3GS_SLOTINFO(
+                    self.m_slots.clone(), 
+                    self.m_random_seed, 
+                    map_layout_style, 
+                    map_num_players)
+                ).await;
+            }   
             self.m_slot_info_changed = false;
         }
     }
@@ -1197,12 +1219,17 @@ impl BaseGame {
                 return;
             }
         } else {
-            for bnet in self.m_ghost.clone().lock().unwrap().m_BNETs.iter_mut() {
+            let bnets = m_BNETs.read().await;
+            for bnet_arc in bnets.iter() {
+                let bnet = bnet_arc.lock().await;
+
                 if bnet.get_host_counter_id() == host_counter_id {
-                    joined_realm = bnet.get_server();
+                    joined_realm = bnet.get_server(); // здесь get_server должен вернуть clone()
                     break;
                 }
             }
+
+
         }
 
         let any_admin_check = true;
@@ -1218,6 +1245,7 @@ impl BaseGame {
             if sid != 255 {
                 let reason = self.m_language.was_kicked_for_reserved_player(&join_player.get_name());
                 if let Some(kicked_player) = self.get_player_from_sid_mut(sid) {
+                    println!("1");
                     kicked_player.set_delete_me(true);
                     kicked_player.set_left_reason(reason);
                     kicked_player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -1241,6 +1269,7 @@ impl BaseGame {
             }
             let reason = self.m_language.was_kicked_for_owner_player(&join_player.get_name());
             if let Some(kicked_player) = self.get_player_from_sid_mut(sid) {
+                println!("11");
                 kicked_player.set_delete_me(true);
                 kicked_player.set_left_reason(reason);
                 kicked_player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -1254,6 +1283,7 @@ impl BaseGame {
 
         if sid >= self.m_slots.len() as u8 {
             potential.send(self.m_protocol.SEND_W3GS_REJECTJOIN(REJECTJOIN_FULL as u32)).await;
+            println!("111");
             potential.set_delete_me(true);
             return;
         }
@@ -1325,7 +1355,7 @@ impl BaseGame {
             self.m_map.get_map_layout_style(),
             self.m_map.get_map_num_players()
         );
-        new_player.send(data).await;
+        new_player.put_bytes(data).await;
     }
 
     // Send virtual host and fake player info
@@ -1336,15 +1366,15 @@ impl BaseGame {
             vec![0, 0, 0, 0],
             vec![0, 0, 0, 0]
         );
-        new_player.send(vh_data).await;
+        new_player.put_bytes(vh_data).await;
 
         let fp_data = self.m_protocol.SEND_W3GS_PLAYERINFO(
-            self.m_virtual_host_pid,
+            self.m_fake_player_pid,
             "FakePlayer".to_string(),
             vec![0, 0, 0, 0],
             vec![0, 0, 0, 0]
         );
-        new_player.send(fp_data).await;
+        new_player.put_bytes(fp_data).await;
     }
 
     let blank_ip = vec![0, 0, 0, 0];
@@ -1358,20 +1388,38 @@ impl BaseGame {
     for (pid, name, external_ip, internal_ip) in &player_infos {
         for p in self.m_players.iter_mut() {
             if !p.get_left_message_sent() && p.get_pid() != new_player_pid && p.get_socket().connected() {
-                p.send(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), blank_ip.clone(), blank_ip.clone())).await;
+                p.put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), p.get_external_ip(), p.get_internal_ip())).await;
             }
         }
+        let player_index = new_player_index;
+        let player_ptr = self.m_players.get_mut(player_index).unwrap();
+
+        player_ptr.put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), player_ptr.get_external_ip(), player_ptr.get_internal_ip())).await;
         
-        // Send to new player
-        self.m_players[new_player_index].send(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), blank_ip.clone(), blank_ip.clone())).await;
+        //self.m_players[new_player_index].put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), blank_ip.clone(), blank_ip.clone())).await;
     }
-    // Clone the player first to avoid borrow conflicts
-    let player_clone = self.m_players[new_player_index].clone();
+
     
     // Now use the mutable reference to send the map check
-    self.m_players.get_mut(new_player_index).unwrap().send(self.m_protocol.SEND_W3GS_MAPCHECK(self.m_map.get_map_path(), self.m_map.get_map_size(), self.m_map.get_map_info(), self.m_map.get_map_crc(), self.m_map.get_map_sha1())).await;
+    self.m_players.get_mut(new_player_index).unwrap().put_bytes(self.m_protocol.SEND_W3GS_MAPCHECK(format!("Maps\\Download\\{}", self.m_map.get_map_path()), self.m_map.get_map_size(), self.m_map.get_map_info(), self.m_map.get_map_crc(), self.m_map.get_map_sha1())).await;
+    
     self.send_all_slot_info().await;
-    self.send_welcome_message(player_clone).await;
+    for p in self.m_players.iter_mut() {
+        p.send_buff().await;
+    }
+
+    let player_index = new_player_index;
+    let message = "GHostRS by ***** https://discord.gg/iccup".to_owned();
+
+    let player_ptr = self.m_players.get_mut(player_index).unwrap() as *mut _; // raw pointer чтобы избежать borrow check
+
+    // вызвать функцию без `&mut self`, если возможно
+    unsafe {
+        let player = &mut *player_ptr;
+        self.send_chat_player(player, message).await;
+    }
+
+
 
 
         if self.m_count_down_started && !self.m_game_loading && !self.m_game_loaded {
@@ -1447,7 +1495,7 @@ impl BaseGame {
     }
 
     pub async fn event_player_keep_alive(&mut self, checksum: u32) {
-        // Проверяем, есть ли игроки с пустыми checksums
+        print!("event_player_keep_alive");
         for p in self.m_players.iter() {
             if !p.get_delete_me() && p.get_check_sums().is_empty() {
                 return;
@@ -1794,7 +1842,7 @@ impl BaseGame {
         if self.m_game_loading || self.m_game_loaded {
             return;
         }
-
+        println!("event_player_map_size");
         let map_size_value = byte_array_to_uint32(&self.m_map.get_map_size(), false, 0);
         if map_size.get_size_flag() != 1 || map_size.get_map_size() != map_size_value {
             if true {
@@ -1918,10 +1966,13 @@ impl BaseGame {
         self.m_ghost.clone().lock().unwrap().set_current_game(None);
         self.m_ghost.clone().lock().unwrap().add_game(self.clone());
 
-        for bnet in self.m_ghost.clone().lock().unwrap().m_BNETs.iter_mut() {
+        let bnets = m_BNETs.read().await;
+        for bnet_arc in bnets.iter() {
+            let mut bnet = bnet_arc.lock().await;
             bnet.queue_game_uncreate();
             bnet.queue_enter_chat().await;
         }
+
     }
 
     async fn event_game_loaded(&mut self) {
@@ -2539,6 +2590,7 @@ impl BaseGame {
     pub fn stop_laggers(&mut self, reason: String) {
         for player in self.m_players.iter_mut() {
             if player.get_lagging() {
+                println!("stop_laggers");
                 player.set_delete_me(true);
                 player.set_left_reason(reason.clone());
                 player.set_left_code(PLAYERLEAVE_DISCONNECT as u32);

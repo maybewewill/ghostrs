@@ -90,7 +90,8 @@ impl TcpClient {
 
     pub async fn do_send_buff(&mut self) {
         let buffer_copy = self.send_buffer.clone();
-        self.do_send(&buffer_copy).await;
+        let _ = self.do_send(&buffer_copy).await;
+        self.send_buffer.clear();
     }
 
     pub async fn do_send(&mut self, data: &[u8]) -> io::Result<u8> {

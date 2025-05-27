@@ -118,11 +118,12 @@ pub fn append_byte_array_from_string(b: &mut ByteArray, append: &str, terminator
 }
 
 pub fn append_byte_array_fast_from_string(b: &mut ByteArray, append: &str, terminator: bool) {
-    b.extend(append.as_bytes());
+    b.extend_from_slice(append.as_bytes());
     if terminator {
         b.push(0);
     }
 }
+
 
 pub fn append_byte_array_from_u16(b: &mut ByteArray, i: u16, reverse: bool) {
     b.extend(create_byte_array_from_u16(i, reverse));
@@ -283,20 +284,27 @@ pub fn add_path_separator(path: &str) -> String {
 pub fn encode_stat_string(data: &ByteArray) -> ByteArray {
     let mut result = Vec::new();
     let mut mask = 1u8;
-    for (i, &byte) in data.iter().enumerate() {
+
+    for i in 0..data.len() {
+        let byte = data[i];
         if byte % 2 == 0 {
             result.push(byte + 1);
         } else {
             result.push(byte);
             mask |= 1 << ((i % 7) + 1);
         }
+
         if i % 7 == 6 || i == data.len() - 1 {
-            result.insert(result.len() - 1 - (i % 7), mask);
+            // аналог insert(end() - 1 - (i % 7), mask)
+            let insert_pos = result.len() - 1 - (i % 7);
+            result.insert(insert_pos, mask);
             mask = 1;
         }
     }
+
     result
 }
+
 
 pub fn decode_stat_string(data: &ByteArray) -> ByteArray {
     let mut result = Vec::new();

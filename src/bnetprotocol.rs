@@ -482,7 +482,42 @@ impl BnetProtocol {
         stat_string.push(0);
         stat_string.extend_from_slice(&map_sha1);
         let stat_string = encode_stat_string(&stat_string);
+        // println!("--- SEND_SID_STARTADVEX3 CHECK ---");
+        // println!("map_game_type = {:?}, len = {}", map_game_type, map_game_type.len());
+        // println!("  → expected: len == 4");
+
+        // println!("map_flags = {:?}, len = {}", map_flags, map_flags.len());
+        // println!("  → expected: len == 4");
+
+        // println!("map_width = {:?}, len = {}", map_width, map_width.len());
+        // println!("  → expected: len == 2");
+
+        // println!("map_height = {:?}, len = {}", map_height, map_height.len());
+        // println!("  → expected: len == 2");
+
+        // println!("game_name = \"{}\", is_empty = {}", game_name, game_name.is_empty());
+        // println!("  → expected: is_empty == false");
+
+        // println!("host_name = \"{}\", is_empty = {}", host_name, host_name.is_empty());
+        // println!("  → expected: is_empty == false");
+
+        // println!("map_path = \"{}\", is_empty = {}", map_path, map_path.is_empty());
+        // println!("  → expected: is_empty == false");
+
+        // println!("map_crc = {:?}, len = {}", map_crc, map_crc.len());
+        // println!("  → expected: len == 4");
+
+        // println!("map_sha1 = {:?}, len = {}", map_sha1, map_sha1.len());
+        // println!("  → expected: len == 20");
+
+        // println!("stat_string = {:?}, len = {}", stat_string, stat_string.len());
+        // println!("  → expected: len < 128");
+
+        // println!("host_counter_string = \"{}\", len = {}", host_counter_string, host_counter_string.len());
+        // println!("  → expected: len == 8");
+
         if map_game_type.len() == 4 && map_flags.len() == 4 && map_width.len() == 2 && map_height.len() == 2 && !game_name.is_empty() && !host_name.is_empty() && !map_path.is_empty() && map_crc.len() == 4 && map_sha1.len() == 20 && stat_string.len() < 128 && host_counter_string.len() == 8 {
+            //println!("Called SEND_SID_STARTADVEX3");
             packet.push(BNET_HEADER_CONSTANT);
             packet.push(Protocol::SID_STARTADVEX3 as u8);
             packet.push(0);
@@ -497,12 +532,19 @@ impl BnetProtocol {
             append_byte_array(&mut packet, custom_game.to_vec());
             append_byte_array_fast_from_string(&mut packet, &game_name, true);
             packet.push(0);
-            packet.push(110);
+            packet.push(98);
             append_byte_array_fast_from_string(&mut packet, &host_counter_string, false);
             append_byte_array(&mut packet,stat_string);
-            packet.push(0);
+            packet.push(0);  
             self.AssignLength(&mut packet);
+            // for byte in &packet {
+            //     print!("{:02x} ", byte);
+            // }
         }
+        //println!("End SEND_SID_STARTADVEX3");
+        // for byte in &packet {
+        //     print!("{:02x} ", byte);
+        // }
         packet
     }
 

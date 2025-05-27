@@ -226,7 +226,7 @@ pub async fn update(&mut self) -> bool {
     if self.m_Socket.connected() {
         let mut buf = [0u8; 4096];
 
-        match timeout(Duration::from_millis(150), self.m_Socket.do_recv(&mut buf)).await {
+        match timeout(Duration::from_millis(1), self.m_Socket.do_recv(&mut buf)).await {
             Ok(Ok(bytes_received)) if bytes_received > 0 => {
                 self.m_IncomingBuffer.extend(&buf[..bytes_received]);
                 
@@ -521,14 +521,18 @@ pub async fn update(&mut self) -> bool {
                 log_info(&format!("[LOCAL: {}] [{}] {}", self.m_ServerAlias, user, message));
             }
 
+            if message == "unhost" {
+                self.queue_game_uncreate().await;
+                self.queue_enter_chat().await;
+            }
             if message == "host" {
                 log_info("[GHOST] trying to host game...");
                 let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
-                let mut map = Map::new(self.m_Ghost.clone(), map_path.clone());
+                let mut map = Map::new(Arc::clone(&self.m_Ghost), map_path.clone());
                 map.load(map_path).await;
                 let host_counter = HOST_COUNTER.fetch_add(1, Ordering::SeqCst);
                 if map.get_valid() {
-                    let game_name = format!("Game_{}", get_time());
+                    let game_name = "TEST2";
                     let host_name = user.clone();
                     let game_state = GAME_PUBLIC;
 
@@ -536,13 +540,13 @@ pub async fn update(&mut self) -> bool {
                     if game_state == GAME_PRIVATE {
                         self.queue_chat_command(format!(
                             "Creating private game [{}] by user [{}]",
-                            game_name, "slash"
+                            game_name, "BOT"
                         ))
                         .await;
                     } else {
                         self.queue_chat_command(format!(
                             "Creating public game [{}] by user [{}]",
-                            game_name, "slash"
+                            game_name, "BOT"
                         ))
                         .await;
                     }
@@ -552,10 +556,11 @@ pub async fn update(&mut self) -> bool {
                         map.clone(),
                         6112,
                         game_state,
-                        game_name.clone(),
+                        game_name.to_owned(),
                         host_name.clone(),
                         host_name.clone(),
                         self.m_Server.clone(),
+                        host_counter
                     );
                     
                     // Create Arc<Mutex<BaseGame>> here
@@ -564,8 +569,8 @@ pub async fn update(&mut self) -> bool {
                     // Store the Arc in CURRENT_GAME
                     *CURRENT_GAME.write().await = Some(Arc::clone(&base_game_arc));
                     
-
-                    self.queue_game_create(game_state, game_name.clone(), host_name, &mut map, host_counter)
+                    let m = CURRENT_GAME.read().await.clone().unwrap();
+                    self.queue_game_create(game_state, game_name.clone().to_owned(), "BOT".to_owned(), &mut map, host_counter)
                         .await;
                 } else {
                     self.queue_chat_command(format!("/w {} Invalid map configuration", user))
@@ -702,7 +707,7 @@ pub async fn update(&mut self) -> bool {
 
         if self.m_LoggedIn && map.get_valid() {
             let fixed_host_counter = ( host_counter & 0x0FFFFFFF ) | (self.m_HostCounterID << 28);
-            
+
             let mut map_game_type = map.get_map_game_type();
             map_game_type |= MAPGAMETYPE_UNKNOWN0;
 
@@ -717,6 +722,33 @@ pub async fn update(&mut self) -> bool {
             map_height.push( 192 );
             map_height.push( 7 );
 
+            // println!("STATE: {}", state);
+            // print!("MAP GAME TYPE: ");
+            // for byte in create_byte_array_from_u32(map_game_type, false) {
+            //     print!("{:02x} ", byte);
+            // }
+            // println!();
+            // print!("MAP_GAME_FLAGS: ");
+            // for byte in map.get_map_game_flags() {
+            //     print!("{:02x} ", byte);
+            // }
+            // println!();
+            // println!("MAP WIDTH: {:x?}", map.get_map_width());
+            // println!("MAP HEIGHT: {:x?}", map.get_map_height());
+            // println!("GAME NAME: {}", game_name);
+            // println!("HOST NAME: {}", hostname);
+            // println!("UP TIME: {}", up_time);
+            // println!("MAP PATH: {}", map.get_map_path());
+            // for byte in map.get_map_crc() {
+            //     print!("{:02x} ", byte);
+            // }
+            // for byte in map.get_map_sha1() {
+            //     print!("{:02x} ", byte);
+            // }
+            // println!();
+            // println!("FIXED HOST COUNTER: {}", fixed_host_counter);
+
+            
             let _ = self.m_Socket.do_send(&self.m_Protocol.SEND_SID_STARTADVEX3(
                 state,
                 create_byte_array_from_u32(map_game_type, false),
@@ -726,7 +758,7 @@ pub async fn update(&mut self) -> bool {
                 game_name,
                 host_name,
                 up_time,
-                map.get_map_path(),
+                format!("Maps\\Download\\{}", map.get_map_path()),
                 map.get_map_crc(),
                 map.get_map_sha1(),
                 fixed_host_counter,
@@ -735,9 +767,11 @@ pub async fn update(&mut self) -> bool {
                     }
     }
 
-    pub fn queue_game_uncreate( &mut self ) {
+    pub async fn queue_game_uncreate( &mut self ) {
         if self.m_LoggedIn {
-            self.m_OutPackets.push_back( self.m_Protocol.SEND_SID_STOPADV() );    
+            log_info("[BNET: iCCup] unhosted game");
+            let _ = self.m_Socket.do_send( &self.m_Protocol.SEND_SID_STOPADV() ).await;
+            CURRENT_GAME.read().await.as_ref().unwrap().lock().await.set_exiting(true);
         }
     }
 
@@ -786,11 +820,11 @@ pub async fn update(&mut self) -> bool {
         self.unqueue_packets(Protocol::SID_STARTADVEX3 as u8);
     }
 
-    pub fn get_server(&mut self) -> String {
+    pub fn get_server(&self) -> String {
         return self.m_Server.clone();
     }
 
-    pub fn get_host_counter_id(&mut self) -> u32 {
+    pub fn get_host_counter_id(&self) -> u32 {
         self.m_HostCounterID
     }
 
