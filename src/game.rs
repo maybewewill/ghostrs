@@ -7,6 +7,9 @@ use crate::gameprotocol::*;
 use std::collections::HashMap;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
+use rand::Rng;
+
+
 
 #[derive(Debug, Clone)]
 
@@ -26,6 +29,8 @@ impl Game {
         creator_server: String,
         host_counter: u32
     ) -> Self {
+        let mut rng = rand::rng();
+        let entry_key: u32 = rng.random();
         Game {
             base: BaseGame {
                 m_potentials: Vec::new(),
@@ -46,12 +51,12 @@ impl Game {
                 m_saving: false,
                 m_host_port: host_port,
                 m_game_state: game_state,
-                m_virtual_host_pid: 0,
-                m_fake_player_pid: 0,
+                m_virtual_host_pid: 255,
+                m_fake_player_pid: 255,
                 m_gproxy_empty_actions: 0,
                 m_game_name: game_name,
                 m_last_game_name: String::new(),
-                m_virtual_host_name: String::new(),
+                m_virtual_host_name: "iCCup".to_owned(),
                 m_owner_name: owner_name,
                 m_creator_name: creator_name,
                 m_creator_server: creator_server,
@@ -61,15 +66,15 @@ impl Game {
                 m_hcl_command_string: String::new(),
                 m_random_seed: get_ticks() as u32,
                 m_host_counter: host_counter,
-                m_entry_key: 0,
-                m_latency: 0,
-                m_sync_limit: 0,
+                m_entry_key: entry_key,
+                m_latency: 15,
+                m_sync_limit: 100,
                 m_sync_counter: 0,
                 m_game_ticks: 0,
-                m_creation_time: 0,
-                m_last_ping_time: 0,
-                m_last_refresh_time: 0,
-                m_last_download_ticks: 0,
+                m_creation_time: get_time(),
+                m_last_ping_time: get_time(),
+                m_last_refresh_time: get_time(),
+                m_last_download_ticks: get_time(),
                 m_download_counter: 0,
                 m_last_download_counter_reset_ticks: 0,
                 m_last_announce_time: 0,
@@ -85,7 +90,7 @@ impl Game {
                 m_last_action_late_by: 0,
                 m_started_lagging_time: 0,
                 m_last_lag_screen_time: 0,
-                m_last_reserved_seen: 0,
+                m_last_reserved_seen: get_time(),
                 m_started_kick_vote_time: 0,
                 m_game_over_time: 0,
                 m_last_player_leave_ticks: 0,

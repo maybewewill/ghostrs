@@ -1,5 +1,6 @@
 use libc::name_t;
 use serde::de;
+use tokio::time::timeout;
 
 use crate::game;
 use crate::gameprotocol::*;
@@ -16,6 +17,7 @@ use crate::util::create_byte_array_size;
 use crate::lang::Language;
 use std::collections::VecDeque;
 use std::sync::{Arc};
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -488,11 +490,11 @@ impl GamePlayer {
     pub async fn update(&mut self) -> bool {
 
         let mut buf = [0u8; 4096];
-
-        match self.m_socket.do_recv(&mut buf).await {
-            Ok(bytes_received) if bytes_received > 0 => {
-                println!("{:?}", bytes_received);
+        
+        match timeout(Duration::from_millis(1), self.m_socket.do_recv(&mut buf)).await {
+            Ok(Ok(bytes_received)) if bytes_received > 0 => {
                 self.m_incoming_buffer.extend(&buf[..bytes_received]);
+                
                 self.extract_packets().await;
                 self.process_packets().await;
             }
@@ -501,7 +503,7 @@ impl GamePlayer {
             Err(e) => {
             }
         }
-        println!("has_error = {}, m_delete_me = {}, get_connected = {}", self.m_delete_me, self.m_socket.has_error(), self.m_socket.get_connected());
+      //  println!("has_error = {}, m_delete_me = {}, get_connected = {}", self.m_delete_me, self.m_socket.has_error(), self.m_socket.get_connected());
         return self.m_delete_me || self.m_socket.has_error() || !self.m_socket.get_connected();
     }
     

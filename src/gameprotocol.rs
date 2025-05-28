@@ -299,9 +299,12 @@ impl GameProtocol {
         packet
     }
 
-    pub fn SEND_W3GS_SLOTINFO(&self, slots: Vec<GameSlot>, random_seed: u32, layout_style: u8, player_slots: u8) -> ByteArray {
-        let slot_info = self.EncodeSlotInfo(slots, random_seed, layout_style, player_slots);
+    pub fn SEND_W3GS_SLOTINFO(&self, slots: &Vec<GameSlot>, random_seed: u32, layout_style: u8, player_slots: u8) -> ByteArray {
+        let slot_info = self.EncodeSlotInfo(slots.to_vec(), random_seed, layout_style, player_slots);
         let mut packet = ByteArray::new();
+        // println!();
+        // println!("SLOT_INFO: {:x?}", slot_info);
+        // println!("Layout style: {}, Player slots: {}, Slots: {:?}", layout_style, player_slots, slots);
         packet.push(W3GS_HEADER_CONSTANT);
         packet.push(ProtocolG::W3GS_SLOTINFO as u8);
         packet.push(0);

@@ -238,7 +238,7 @@ impl Ghost {
             let game_option = CURRENT_GAME.write().await.as_ref().map(Arc::clone);
             if let Some(game_arc) = game_option {
                 let mut game = game_arc.lock().await;
-                timeout(Duration::from_millis(500), game.update())
+                timeout(Duration::from_millis(25), game.update())
                     .await
                     .unwrap_or(false)
             } else {

@@ -581,7 +581,7 @@ impl Map {
                                     byte_array_to_dec_string(&slot.to_bytes())
                                 ));
                             }
-                            if self.map_options & MAPOPT_MELEE != 0 {
+                            if map_options & MAPOPT_MELEE != 0 {
                                 log_info("[MAP] found melee map, initializing slots");
                                 let mut team = 0;
                                 for slot in &mut slots {
@@ -589,9 +589,9 @@ impl Map {
                                     slot.set_race(SLOTRACE_RANDOM);
                                     team += 1;
                                 }
-                                self.map_filter_type = MAPFILTER_TYPE_MELEE;
+                                //self.map_filter_type = MAPFILTER_TYPE_MELEE;
                             }
-                            if self.map_options & MAPOPT_FIXEDPLAYERSETTINGS == 0 {
+                            if map_options & MAPOPT_FIXEDPLAYERSETTINGS == 0 {
                                 for slot in &mut slots {
                                     slot.set_race(slot.race() | SLOTRACE_SELECTABLE);
                                 }

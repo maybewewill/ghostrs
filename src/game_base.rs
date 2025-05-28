@@ -400,7 +400,6 @@ impl BaseGame {
             self.send_all_chat(self.m_language.game_unlocked()).await;
             self.m_locked = false;
         }
-
         if get_time() as u32 - self.m_last_ping_time >= 5 {
             self.send_all(self.m_protocol.SEND_W3GS_PING_FROM_HOST()).await;
 
@@ -450,7 +449,7 @@ impl BaseGame {
 
         if !self.m_game_loading && !self.m_game_loaded && get_ticks() as u32 - self.m_last_download_counter_reset_ticks >= 1000 {
             if self.m_slot_info_changed {
-                self.send_all_slot_info().await;
+                self.send_all_slot_info_s().await;
             }
             self.m_download_counter = 0;
             self.m_last_download_counter_reset_ticks = get_ticks() as u32;
@@ -859,7 +858,23 @@ impl BaseGame {
             let map_num_players = self.m_map.get_map_num_players();
             for i in self.m_players.iter_mut() {
                 i.put_bytes(self.m_protocol.SEND_W3GS_SLOTINFO(
-                    self.m_slots.clone(), 
+                    &self.m_slots, 
+                    self.m_random_seed, 
+                    map_layout_style, 
+                    map_num_players)
+                ).await;
+            }   
+            self.m_slot_info_changed = false;
+        }
+    }
+
+    pub async fn send_all_slot_info_s(&mut self) {
+        if !self.m_game_loading && !self.m_game_loaded {
+            let map_layout_style = self.m_map.get_map_layout_style();
+            let map_num_players = self.m_map.get_map_num_players();
+            for i in self.m_players.iter_mut() {
+                i.send(self.m_protocol.SEND_W3GS_SLOTINFO(
+                    &self.m_slots, 
                     self.m_random_seed, 
                     map_layout_style, 
                     map_num_players)
@@ -1288,7 +1303,7 @@ impl BaseGame {
             return;
         }
 
-        if self.get_num_players() >= 11 || enforce_pid == self.m_virtual_host_pid {
+        if self.get_num_players() >= 11 {
             self.delete_virtual_host().await;
         }
         log_info(&format!("[GAME: {}] player [{}|{}] joined the game", self.m_game_name, join_player.get_name(), potential.get_external_ip_string()));
@@ -1367,14 +1382,6 @@ impl BaseGame {
             vec![0, 0, 0, 0]
         );
         new_player.put_bytes(vh_data).await;
-
-        let fp_data = self.m_protocol.SEND_W3GS_PLAYERINFO(
-            self.m_fake_player_pid,
-            "FakePlayer".to_string(),
-            vec![0, 0, 0, 0],
-            vec![0, 0, 0, 0]
-        );
-        new_player.put_bytes(fp_data).await;
     }
 
     let blank_ip = vec![0, 0, 0, 0];
@@ -1388,13 +1395,13 @@ impl BaseGame {
     for (pid, name, external_ip, internal_ip) in &player_infos {
         for p in self.m_players.iter_mut() {
             if !p.get_left_message_sent() && p.get_pid() != new_player_pid && p.get_socket().connected() {
-                p.put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), p.get_external_ip(), p.get_internal_ip())).await;
+                p.send(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), external_ip.to_vec(), internal_ip.to_vec())).await;
             }
         }
         let player_index = new_player_index;
         let player_ptr = self.m_players.get_mut(player_index).unwrap();
 
-        player_ptr.put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), player_ptr.get_external_ip(), player_ptr.get_internal_ip())).await;
+        player_ptr.send(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), player_ptr.get_external_ip(), player_ptr.get_internal_ip())).await;
         
         //self.m_players[new_player_index].put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), blank_ip.clone(), blank_ip.clone())).await;
     }
@@ -1717,7 +1724,7 @@ impl BaseGame {
                     let new_colour = self.get_new_colour();
                     self.m_slots[sid as usize].set_colour(new_colour);
                 }
-                self.send_all_slot_info().await;
+                self.send_all_slot_info_s().await;
             }
         }
     }
@@ -1842,7 +1849,6 @@ impl BaseGame {
         if self.m_game_loading || self.m_game_loaded {
             return;
         }
-        println!("event_player_map_size");
         let map_size_value = byte_array_to_uint32(&self.m_map.get_map_size(), false, 0);
         if map_size.get_size_flag() != 1 || map_size.get_map_size() != map_size_value {
             if true {
@@ -1889,7 +1895,7 @@ impl BaseGame {
         let sid = self.get_sid_from_pid(pid);
         if sid < self.m_slots.len() as u8 && self.m_slots[sid as usize].download_status() != new_download_status {
             self.m_slots[sid as usize].set_download_status(new_download_status);
-            self.m_slot_info_changed = true;
+            self.send_all_slot_info_s().await;
         }
     }
 
@@ -1936,7 +1942,7 @@ impl BaseGame {
                     self.m_slots[current_slot].set_handicap(encoding_map[(handicap_index + char_index * 6) as usize]);
                     current_slot += 1;
                 }
-                self.send_all_slot_info().await;
+                self.send_all_slot_info_s().await;
                 log_info(&format!("[GAME: {}] successfully encoded HCL command string [{}]", self.m_game_name, self.m_hcl_command_string));
             } else {
                 log_info(&format!("[GAME: {}] encoding HCL command string [{}] failed because it contains invalid characters", self.m_game_name, self.m_hcl_command_string));
@@ -1946,7 +1952,7 @@ impl BaseGame {
         }
 
         if self.m_slot_info_changed {
-            self.send_all_slot_info().await;
+            self.send_all_slot_info_s().await;
         }
 
         self.m_started_loading_ticks = get_ticks() as u32;
@@ -2232,7 +2238,7 @@ impl BaseGame {
                 self.m_slots[sid2 as usize] = slot1;
             }
         }
-        self.send_all_slot_info().await;
+        self.send_all_slot_info_s().await;
     }
 
     pub async fn open_slot(&mut self, sid: u8, kick: bool) {
