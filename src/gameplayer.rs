@@ -99,8 +99,9 @@ impl PotentialPlayer {
             Err(e) => {
             }
         }
-        return self.m_DeleteMe || self.m_Error || self.m_Socket.has_error() || self.m_Socket.get_connected();
+        return self.m_DeleteMe || self.m_Error || self.m_Socket.has_error() || !self.m_Socket.get_connected();
     }
+
     pub async fn extract_packets(&mut self) {
         while self.m_IncomingBuffer.len() >= 4 {
             let bytes = &self.m_IncomingBuffer;
@@ -488,7 +489,7 @@ impl GamePlayer {
     }
 
     pub async fn update(&mut self) -> bool {
-
+        
         let mut buf = [0u8; 4096];
         
         match timeout(Duration::from_millis(1), self.m_socket.do_recv(&mut buf)).await {
@@ -503,8 +504,54 @@ impl GamePlayer {
             Err(e) => {
             }
         }
-      //  println!("has_error = {}, m_delete_me = {}, get_connected = {}", self.m_delete_me, self.m_socket.has_error(), self.m_socket.get_connected());
-        return self.m_delete_me || self.m_socket.has_error() || !self.m_socket.get_connected();
+        let mut deleting: bool;
+        //println!("has_error = {}, m_delete_me = {}, get_connected = {}", self.m_delete_me, self.m_socket.has_error(), self.m_socket.get_connected());
+        deleting = self.m_delete_me || self.m_socket.has_error() || !self.m_socket.get_connected() || self.m_error;
+
+        if self.m_error {
+            let game_arc = Arc::clone(&self.m_game);
+            let error_string = self.m_socket.get_error_string();
+            let pid = self.m_pid;
+            tokio::spawn(async move {
+                let mut game = game_arc.lock().await;
+                game.event_player_disconnect_player_error(pid, error_string).await;
+            });
+            self.m_socket.disconnect();
+            return deleting;
+        }
+
+        if self.m_socket.connected() {
+            if self.m_socket.has_error() {
+                let game_arc = Arc::clone(&self.m_game);
+                let error_string = self.m_socket.get_error_string();
+                let name = self.get_name().clone();
+                let pid = self.m_pid;
+                let gproxy = self.m_gproxy;
+                let gproxy_sent =self.m_gproxy_disconnect_notice_sent;
+                let gproxy_wait = self.m_last_gproxy_wait_notice_sent_time;
+                tokio::spawn(async move {
+                    let mut game = game_arc.lock().await;
+                    game.event_player_disconnect_socket_error(error_string, name, pid, gproxy, gproxy_sent, gproxy_wait).await;
+                });
+                self.m_socket.disconnect();
+            }
+        } else {
+            let game_arc = Arc::clone(&self.m_game);
+                let error_string = self.m_socket.get_error_string();
+                let name = self.get_name().clone();
+                let pid = self.m_pid;
+                let gproxy = self.m_gproxy;
+                let gproxy_sent =self.m_gproxy_disconnect_notice_sent;
+                let gproxy_wait = self.m_last_gproxy_wait_notice_sent_time;
+                tokio::spawn(async move {
+                    let mut game = game_arc.lock().await;
+                    game.event_player_disconnect_connection_closed(name, pid, gproxy_wait, gproxy_sent, gproxy).await;
+                });
+                self.m_socket.disconnect();
+            self.m_socket.disconnect();
+        }
+
+        deleting
     }
     
     pub async fn extract_packets(&mut self) {
@@ -552,7 +599,6 @@ impl GamePlayer {
         let mut pong: u32 = 0;
 
         while let Some(packet) = self.m_packets.pop_front() {
-            log_info(&format!("Packet type: {}    Packet id: {}", packet.get_packet_type(), packet.get_id()));
 
             if packet.get_packet_type() == W3GS_HEADER_CONSTANT {
                 let packet_type: i32 = packet.get_id();
@@ -695,7 +741,7 @@ impl GamePlayer {
                     
                     
                     _ => {
-                        log_info(&format!("Received unknown packet type {} from player {}", packet_type, self.m_name.clone()));
+                        log_info(&format!("Received unknown packet type {} (id: {}) from player {}", packet.get_packet_type(), packet.get_id(), self.m_name.clone()));
 
                     }   
             }

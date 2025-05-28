@@ -400,7 +400,7 @@ impl BaseGame {
             self.send_all_chat(self.m_language.game_unlocked()).await;
             self.m_locked = false;
         }
-        if get_time() as u32 - self.m_last_ping_time >= 5 {
+        if get_time() as u32 - self.m_last_ping_time >= 3 {
             self.send_all(self.m_protocol.SEND_W3GS_PING_FROM_HOST()).await;
 
             if !self.m_count_down_started {
@@ -447,7 +447,7 @@ impl BaseGame {
         }
 
 
-        if !self.m_game_loading && !self.m_game_loaded && get_ticks() as u32 - self.m_last_download_counter_reset_ticks >= 1000 {
+        if !self.m_game_loading && !self.m_game_loaded && get_ticks() as u32 - self.m_last_download_counter_reset_ticks >= 500 {
             if self.m_slot_info_changed {
                 self.send_all_slot_info_s().await;
             }
@@ -681,7 +681,6 @@ impl BaseGame {
                 self.m_saving = true;
             }
             else if self.is_game_data_saved() {
-                println!("HERE DROPPED");
                 return true;
             }
         }
@@ -759,7 +758,7 @@ impl BaseGame {
     }
 
     pub async fn send_pids(&mut self, _pids: ByteArray, _data: ByteArray) {
-        for i in 0.._pids.len() {
+        for i in _pids {
             self.send_pid(i.try_into().unwrap(), _data.clone()).await;
         }
     }
@@ -1136,72 +1135,71 @@ impl BaseGame {
         }
     }
 
-    async fn event_player_disconnect_player_error(&mut self, player: &mut GamePlayer) {
-        player.set_delete_me(true);
-        player.set_left_reason(self.m_language.has_lost_connection_player_error(&player.get_error_string()));
-        player.set_left_code(PLAYERLEAVE_DISCONNECT as u32);
+    pub async fn event_player_disconnect_player_error(&mut self, pid: u8, error_string: String) {
+        self.set_delete_me(pid, true).await;
+        self.set_left_reason(pid, self.m_language.has_lost_connection_player_error(&error_string)).await;
+        self.set_left_code(pid, PLAYERLEAVE_DISCONNECT as u32).await;
 
         if !self.m_game_loading && !self.m_game_loaded {
-            self.open_slot(self.get_sid_from_pid(player.get_pid()), false).await;
+            self.open_slot(self.get_sid_from_pid(pid), false).await;
         }
     }
 
-    async fn event_player_disconnect_socket_error(&mut self, player: &mut GamePlayer) {
-        if player.get_gproxy() && self.m_game_loaded {
-            if !player.get_gproxy_disconnect_notice_sent() {
-                self.send_all_chat(format!("{} {}.", player.get_name(), self.m_language.lost_connection_error_gproxy(&player.get_socket().get_error_string()))).await;
-                player.set_gproxy_disconnect_notice_sent(true);
+    pub async fn event_player_disconnect_socket_error(&mut self, error_string: String, name: String, pid: u8, gproxy: bool, gproxy_sent: bool, gproxy_wait: u32) {
+        if gproxy && self.m_game_loaded {
+            if !gproxy_sent {
+                self.send_all_chat(format!("{} {}.", name, self.m_language.lost_connection_error_gproxy(&error_string))).await;
+                self.set_gproxy_disconnect_notice_sent(pid, true).await;
             }
 
-            if get_time() - player.get_last_gproxy_wait_notice_sent_time() >= 20 {
+            if get_time() - gproxy_wait >= 20 {
                 let mut time_remaining = (self.m_gproxy_empty_actions + 1) * 60 - ((get_time() - self.m_started_lagging_time) as u8);
                 if time_remaining > ((self.m_gproxy_empty_actions + 1) * 60) as u8 {
                     time_remaining = ((self.m_gproxy_empty_actions + 1) * 60) as u8;
                 }
-                self.send_all_chat_from_pid(player.get_pid(), self.m_language.waiting_to_reconnect(&format!("{}", time_remaining))).await;
-                player.set_last_gproxy_wait_notice_sent_time(get_time());
+                self.send_all_chat_from_pid(pid, self.m_language.waiting_to_reconnect(&format!("{}", time_remaining))).await;
+                self.set_last_gproxy_wait_notice_sent_time(pid, get_time()).await;
             }
             return;
         }
 
-        player.set_delete_me(true);
-        player.set_left_reason(self.m_language.has_lost_connection_socket_error(&player.get_socket().get_error_string()));
-        player.set_left_code(PLAYERLEAVE_DISCONNECT as u32);
+        self.set_delete_me(pid, true).await;
+        self.set_left_reason(pid, self.m_language.has_lost_connection_socket_error(&error_string)).await;
+        self.set_left_code(pid, PLAYERLEAVE_DISCONNECT as u32).await;
 
         if !self.m_game_loading && !self.m_game_loaded {
-            self.open_slot(self.get_sid_from_pid(player.get_pid()), false).await;
+            self.open_slot(self.get_sid_from_pid(pid), false).await;
         }
     }
 
-    async fn event_player_disconnect_connection_closed(&mut self, player: &mut GamePlayer) {
-        if player.get_gproxy() && self.m_game_loaded {
-            if !player.get_gproxy_disconnect_notice_sent() {
-                self.send_all_chat(format!("{} {}.", player.get_name(), self.m_language.lost_connection_closed_gproxy())).await;
-                player.set_gproxy_disconnect_notice_sent(true);
+    pub async fn event_player_disconnect_connection_closed(&mut self, name: String, pid: u8, gproxy_wait: u32, gproxy_sent: bool, gproxy: bool) {
+        if gproxy && self.m_game_loaded {
+            if !gproxy_sent {
+                self.send_all_chat(format!("{} {}.", name, self.m_language.lost_connection_closed_gproxy())).await;
+                self.set_gproxy_disconnect_notice_sent(pid, true).await;
             }
 
-            if get_time() - player.get_last_gproxy_wait_notice_sent_time() >= 20 {
+            if get_time() - gproxy_wait >= 20 {
                 let mut time_remaining = (self.m_gproxy_empty_actions + 1) * 60 - ((get_time() - self.m_started_lagging_time) as u8);
                 if time_remaining > ((self.m_gproxy_empty_actions + 1) * 60) as u8 {
                     time_remaining = ((self.m_gproxy_empty_actions + 1) * 60) as u8;
                 }
-                self.send_all_chat_from_pid(player.get_pid(), self.m_language.waiting_to_reconnect(&format!("{}", time_remaining))).await;
-                player.set_last_gproxy_wait_notice_sent_time(get_time());
+                self.send_all_chat_from_pid(pid, self.m_language.waiting_to_reconnect(&format!("{}", time_remaining))).await;
+                self.set_last_gproxy_wait_notice_sent_time(pid, get_time()).await;
             }
             return;
         }
 
-        player.set_delete_me(true);
-        player.set_left_reason(self.m_language.has_lost_connection_closed_by_remote_host());
-        player.set_left_code(PLAYERLEAVE_DISCONNECT as u32);
+        self.set_delete_me(pid, true).await;
+        self.set_left_reason(pid, self.m_language.has_lost_connection_closed_by_remote_host()).await;
+        self.set_left_code(pid,PLAYERLEAVE_DISCONNECT as u32).await;
 
         if !self.m_game_loading && !self.m_game_loaded {
-            self.open_slot(self.get_sid_from_pid(player.get_pid()), false).await;
+            self.open_slot(self.get_sid_from_pid(pid), false).await;
         }
     }
 
     pub async fn event_player_joined(&mut self,  potential:&mut PotentialPlayer, join_player: &IncomingJoinPlayer) {
-        println!("event_player_joined: {:?}", potential.m_Socket);
         if join_player.get_name().is_empty() || join_player.get_name().len() > 15 {
             log_info(&format!("[GAME: {}] player [{}|{}] is trying to join the game with an invalid name of length {}", self.m_game_name, join_player.get_name(), potential.get_external_ip_string(), join_player.get_name().len()));
             potential.send(self.m_protocol.SEND_W3GS_REJECTJOIN(REJECTJOIN_FULL.into())).await;
@@ -1260,7 +1258,6 @@ impl BaseGame {
             if sid != 255 {
                 let reason = self.m_language.was_kicked_for_reserved_player(&join_player.get_name());
                 if let Some(kicked_player) = self.get_player_from_sid_mut(sid) {
-                    println!("1");
                     kicked_player.set_delete_me(true);
                     kicked_player.set_left_reason(reason);
                     kicked_player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -1284,7 +1281,6 @@ impl BaseGame {
             }
             let reason = self.m_language.was_kicked_for_owner_player(&join_player.get_name());
             if let Some(kicked_player) = self.get_player_from_sid_mut(sid) {
-                println!("11");
                 kicked_player.set_delete_me(true);
                 kicked_player.set_left_reason(reason);
                 kicked_player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -1298,7 +1294,6 @@ impl BaseGame {
 
         if sid >= self.m_slots.len() as u8 {
             potential.send(self.m_protocol.SEND_W3GS_REJECTJOIN(REJECTJOIN_FULL as u32)).await;
-            println!("111");
             potential.set_delete_me(true);
             return;
         }
@@ -1391,20 +1386,57 @@ impl BaseGame {
         .map(|p| (p.get_pid(), p.get_name(), p.get_external_ip(), p.get_internal_ip()))
         .collect();
 
-    // Then send the info to both existing players and the new player
-    for (pid, name, external_ip, internal_ip) in &player_infos {
-        for p in self.m_players.iter_mut() {
-            if !p.get_left_message_sent() && p.get_pid() != new_player_pid && p.get_socket().connected() {
-                p.send(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), external_ip.to_vec(), internal_ip.to_vec())).await;
+        let player_pid;
+        let player_name;
+        let player_external_ip;
+        let player_internal_ip;
+
+        {
+            // временный scope, чтобы ограничить immutable borrow
+            let player = &self.m_players[new_player_index];
+            player_pid = player.get_pid();
+            player_name = player.get_name().clone();
+            
+            player_external_ip = if false {
+                vec![0, 0, 0, 0]
+            } else {
+                player.get_external_ip()
+            };
+            player_internal_ip = if false {
+                vec![0, 0, 0, 0]
+            } else {
+                player.get_internal_ip()
+            };
+        }
+
+        for i in 0..self.m_players.len() {
+            let other_player = &mut self.m_players[i];
+            if !other_player.get_left_message_sent() && other_player.get_pid() != player_pid {
+                // Отправить info другим об новом игроке
+                if other_player.m_socket.connected() {
+                    let msg = self.m_protocol.SEND_W3GS_PLAYERINFO(
+                        player_pid,
+                        player_name.clone(),
+                        player_external_ip.clone(),
+                        player_internal_ip.clone(),
+                    );
+                    //println!("→ to {}: {:x?}", other_player.get_name(), msg);
+                    other_player.put_bytes(msg).await;
+                }
+                // Отправить info новому игроку об других
+                let msg_back = self.m_protocol.SEND_W3GS_PLAYERINFO(
+                    other_player.get_pid(),
+                    other_player.get_name().clone(),
+                    if false { vec![0, 0, 0, 0] } else { other_player.get_external_ip() },
+                    if false { vec![0, 0, 0, 0] } else { other_player.get_internal_ip() },
+                );
+                //println!("← from {}: {:x?}", other_player.get_name(), msg_back);
+                self.m_players[new_player_index].put_bytes(msg_back).await;
             }
         }
-        let player_index = new_player_index;
-        let player_ptr = self.m_players.get_mut(player_index).unwrap();
-
-        player_ptr.send(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), player_ptr.get_external_ip(), player_ptr.get_internal_ip())).await;
         
-        //self.m_players[new_player_index].put_bytes(self.m_protocol.SEND_W3GS_PLAYERINFO(*pid, name.clone(), blank_ip.clone(), blank_ip.clone())).await;
-    }
+
+        
 
     
     // Now use the mutable reference to send the map check
@@ -1672,6 +1704,7 @@ impl BaseGame {
                     }
 
                     if relay {
+                        //println!("TO_PIDS = {:x?}, FROM PID = {}, EXTRA_FLAGS = {:x?}", chat_player.get_to_pids(), chat_player.get_from_pid(), chat_player.get_extra_flags());
                         self.send_pids(chat_player.get_to_pids(), self.m_protocol.SEND_W3GS_CHAT_FROM_HOST(chat_player.get_from_pid(), chat_player.get_to_pids(), chat_player.get_flag(), chat_player.get_extra_flags(), chat_player.get_message())).await;
                     }
                 } else if chat_player.get_type() == ChatToHostType::CTH_TEAMCHANGE && !self.m_count_down_started {
@@ -1812,6 +1845,20 @@ impl BaseGame {
         let player = self.get_player_from_pid_mut(pid);
         if let Some(player) = player {
             player.set_delete_me(delete_me);
+        }
+    }
+
+    pub async fn set_gproxy_disconnect_notice_sent(&mut self, pid: u8, delete_me: bool) {
+        let player = self.get_player_from_pid_mut(pid);
+        if let Some(player) = player {
+            player.set_gproxy_disconnect_notice_sent(delete_me);
+        }
+    }
+
+    pub async fn set_last_gproxy_wait_notice_sent_time(&mut self, pid: u8, _p: u32) {
+        let player = self.get_player_from_pid_mut(pid);
+        if let Some(player) = player {
+            player.set_last_gproxy_wait_notice_sent_time(_p);
         }
     }
 
@@ -2254,7 +2301,7 @@ impl BaseGame {
         }
         let slot = self.m_slots[sid as usize].clone();
         self.m_slots[sid as usize] = GameSlot::new(0, 255, SLOTSTATUS_OPEN, 0, slot.team(), slot.colour(), slot.race(), slot.computer_type(), slot.handicap());
-        self.send_all_slot_info().await;
+        self.send_all_slot_info_s().await;
     }
 
     pub async fn close_slot(&mut self, sid: u8, kick: bool) {
@@ -2270,7 +2317,7 @@ impl BaseGame {
         }
         let slot = self.m_slots[sid as usize].clone();
         self.m_slots[sid as usize] = GameSlot::new(0, 255, SLOTSTATUS_CLOSED, 0, slot.team(), slot.colour(), slot.race(), slot.computer_type(), slot.handicap());
-        self.send_all_slot_info().await;
+        self.send_all_slot_info_s().await;
     }
 
     pub async fn computer_slot(&mut self, sid: u8, skill: u8, kick: bool) {
@@ -2307,11 +2354,11 @@ impl BaseGame {
                 let sid_colour = self.m_slots[sid as usize].colour();
                 self.m_slots[taken_sid as usize].set_colour(sid_colour);
                 self.m_slots[sid as usize].set_colour(colour);
-                self.send_all_slot_info().await;
+                self.send_all_slot_info_s().await;
             }
         } else {
             self.m_slots[sid as usize].set_colour(colour);
-            self.send_all_slot_info().await;
+            self.send_all_slot_info_s().await;
         }
     }
 

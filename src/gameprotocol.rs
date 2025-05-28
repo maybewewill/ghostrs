@@ -204,7 +204,9 @@ impl GameProtocol {
 
     pub fn SEND_W3GS_SLOTINFOJOIN(&self, pid: u8, port: ByteArray, external_ip: ByteArray, slots: Vec<GameSlot>, random_seed: u32, layout_style: u8, player_slots: u8) -> ByteArray {
         let zeros = [0, 0, 0, 0];
+        //println!("{:?}", slots);
         let slot_info = self.EncodeSlotInfo(slots, random_seed, layout_style, player_slots);
+        
         let mut packet = ByteArray::new();
         if port.len() == 2 && external_ip.len() == 4 {
             packet.push(W3GS_HEADER_CONSTANT);
@@ -222,9 +224,9 @@ impl GameProtocol {
             packet.extend_from_slice(&zeros);
             self.AssignLength(&mut packet);
         }
-        for byte in &packet {
-            print!("{:02x} ", byte);
-        }
+        // for byte in &packet {
+        //     print!("{:02x} ", byte);
+        // }
         packet
     }
 
@@ -240,6 +242,7 @@ impl GameProtocol {
     }
 
     pub fn SEND_W3GS_PLAYERINFO(&self, pid: u8, name: String, external_ip: ByteArray, internal_ip: ByteArray) -> ByteArray {
+        //println!("INFO ABOUT name = {}, PID = {}", name, pid);
         let player_join_counter = [2, 0, 0, 0];
         let zeros = [0, 0, 0, 0];
         let mut packet = ByteArray::new();
