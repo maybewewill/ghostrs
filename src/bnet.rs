@@ -1,12 +1,15 @@
 
 use libc::wait;
+use rand::rand_core::le;
 use tokio::time::timeout;
 
 use crate::config;
+use crate::game;
 use crate::game::Game;
 use crate::gameprotocol::GAME_PRIVATE;
 use crate::gameprotocol::GAME_PUBLIC;
 use crate::ghost;
+use crate::lang::Language;
 use crate::logger::log_error;
 use crate::logger::log_info;
 use crate::logger::log_warning;
@@ -18,7 +21,9 @@ use crate::util::{ByteArray};
 use crate::ghost::*;
 use crate::commandpacket::*;
 use crate::bncsutilinterface::*;
+use std::fs;
 use std::io::Read;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
@@ -77,12 +82,14 @@ pub struct BNET {
     m_HoldClan: bool,
     m_PublicCommands: bool,
     m_LastInviteCreation: bool,
+    m_Admins: Vec<String>,
+    m_CurrentMap: Map
 }
 
 impl BNET {
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         ghost: Arc<Mutex<Ghost>>,
         nServer: String,
         nServerAlias: String,
@@ -109,6 +116,7 @@ impl BNET {
         nPVPGNRealmName: String,
         nMaxMessageLength: u32,
         nHostCounterID: u32,
+        nAdmins: Vec<String>
     ) -> Self {
         let ghost_ptr = Arc::as_ptr(&ghost) as usize;
         log_info(&format!("[BNET: {}] Ghost instance ptr: {:#x}", nServerAlias, ghost_ptr));
@@ -135,7 +143,8 @@ impl BNET {
         if ghost_tft && nCDKeyTFT.len() != 26 {
             log_info(&format!("[BNET: {}] warning - your TFT CD key is not 26 characters long and is probably invalid", server_alias));
         }
-
+        let mut map = Map::new(Arc::clone(&ghost), "iCCup DotA 454.w3x".to_owned());
+        map.load("iCCup DotA 454.w3x".to_string()).await;
         BNET {
             m_Ghost: ghost,
             m_Socket: TcpClient::new(),
@@ -186,6 +195,8 @@ impl BNET {
             m_HoldClan: nHoldClan,
             m_PublicCommands: nPublicCommands,
             m_LastInviteCreation: false,
+            m_Admins: nAdmins,
+            m_CurrentMap: map
         }
     }
 
@@ -521,60 +532,181 @@ pub async fn update(&mut self) -> bool {
                 log_info(&format!("[LOCAL: {}] [{}] {}", self.m_ServerAlias, user, message));
             }
 
-            if message == "unhost" {
-                self.queue_game_uncreate().await;
-                self.queue_enter_chat().await;
-            }
-            if message == "host" {
-                log_info("[GHOST] trying to host game...");
-                let map_path = config::get_string("map_path2", "iCCup DotA 454.w3x");
-                let mut map = Map::new(Arc::clone(&self.m_Ghost), map_path.clone());
-                map.load(map_path).await;
-                let host_counter = HOST_COUNTER.fetch_add(1, Ordering::SeqCst);
-                if map.get_valid() {
-                    let game_name = "TEST2";
-                    let host_name = user.clone();
-                    let game_state = GAME_PUBLIC;
+            if !message.is_empty() && message.starts_with(self.m_CommandTrigger) {
+                let content = &message[1..]; // обрезаем символ команды
+                let (command, payload) = match content.find(' ') {
+                    Some(index) => {
+                        let cmd = &content[..index];
+                        let pl = &content[index + 1..];
+                        (cmd.to_lowercase(), pl.to_string())
+                    },
+                    None => (content.to_lowercase(), String::new()),
+                };
+                if self.is_admin(user.clone()) {
+                    
+                    log_info(&format!("[BNET: {}] админ [{}] отправил команду [{}]", self.m_ServerAlias, user, message));
 
-                    log_info(&format!("[BNET: {}] Creating game: {}", self.m_ServerAlias, game_name));
-                    if game_state == GAME_PRIVATE {
-                        self.queue_chat_command(format!(
-                            "Creating private game [{}] by user [{}]",
-                            game_name, "BOT"
-                        ))
-                        .await;
-                    } else {
-                        self.queue_chat_command(format!(
-                            "Creating public game [{}] by user [{}]",
-                            game_name, "BOT"
-                        ))
-                        .await;
+                    let game_arc = {
+                        let current_game = CURRENT_GAME.read().await;
+                        current_game.as_ref().map(Arc::clone)
+                    };
+
+                    if (command == "channel" || command == "j") && !payload.is_empty() {
+                        self.queue_chat_command(format!("/join {}", payload)).await;
                     }
+                    else if command == "close" && !payload.is_empty() {
+                        if let Some(game_arc) = game_arc {
+                            game_arc.lock().await.close_slot(payload.parse::<u8>().unwrap(), true).await;
+                        }
+                    }
+                    else if command == "closeall" {
+                        if let Some(game_arc) = game_arc {
+                            game_arc.lock().await.close_all_slots().await;
+                        }
+                    }
+                    else if command == "hold" && !payload.is_empty() {
+                        if let Some(game_arc) = game_arc {
+                            game_arc.lock().await.add_to_reserved(payload);
+                        }
+                    } 
+                    else if command == "map" {
+                        if payload.is_empty() {
+                            let current_cfg = self.m_CurrentMap.get_map_path();
+                            self.queue_chat_command2(
+                                Language::new().currently_loaded_map_cfg_is(&current_cfg),
+                                user.clone(),
+                                whisper
+                            ).await;
+                        } else {
+                            let mut found_maps = vec![];
+                            let map_path = Path::new("maps/");
+                            let pattern = payload.to_lowercase();
 
-                    let mut game = Game::new(
-                        Arc::clone(&self.m_Ghost),
-                        map.clone(),
-                        6112,
-                        game_state,
-                        game_name.to_owned(),
-                        host_name.clone(),
-                        host_name.clone(),
-                        self.m_Server.clone(),
-                        host_counter
-                    );
-                    
-                    // Create Arc<Mutex<BaseGame>> here
-                    let base_game_arc = Arc::new(AsyncMutex::new(game.base));
-                    
-                    // Store the Arc in CURRENT_GAME
-                    *CURRENT_GAME.write().await = Some(Arc::clone(&base_game_arc));
-                    
-                    let m = CURRENT_GAME.read().await.clone().unwrap();
-                    self.queue_game_create(game_state, game_name.clone().to_owned(), "BOT".to_owned(), &mut map, host_counter)
-                        .await;
-                } else {
-                    self.queue_chat_command(format!("/w {} Invalid map configuration", user))
-                        .await;
+                            if !map_path.exists() {
+                                log_info(&format!("[BNET: {}] error listing maps - map path doesn't exist", self.m_ServerAlias));
+                                self.queue_chat_command2(Language::new().error_listing_maps(), user.clone(), whisper).await;
+                            } else {
+                                let mut last_match = None;
+                                let mut matches = 0;
+
+                                let read_dir = match fs::read_dir(map_path) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        println!("[BNET: {}] error listing maps - {}", self.m_ServerAlias, e);
+                                        self.queue_chat_command2(Language::new().error_listing_maps(), user.clone(), whisper).await;
+                                        return;
+                                    }
+                                };
+
+                                for entry in read_dir.flatten() {
+                                    let path = entry.path();
+                                    let file_name = entry.file_name().to_string_lossy().to_lowercase();
+                                    let stem = path.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+
+                                    if path.is_file() && file_name.contains(&pattern) {
+                                        last_match = Some(path.clone());
+                                        matches += 1;
+
+                                        let file_str = path.file_name().unwrap_or_default().to_string_lossy();
+                                        found_maps.push(file_str.to_string());
+
+                                        // точное совпадение — сразу прерываем
+                                        if file_name == pattern || stem == pattern {
+                                            matches = 1;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                match matches {
+                                    0 => {
+                                        let response = Language::new().no_maps_found();
+                                        self.queue_chat_command2(response, user.clone(), whisper).await;
+                                    }
+                                    1 => {
+                                        let file = last_match.unwrap().file_name().unwrap().to_string_lossy().to_string();
+                                        let response = Language::new().loading_config_file(&file);
+                                        self.queue_chat_command2(response, user.clone(), whisper).await;
+
+                                        // Загружаем карту
+                                        // let mut cfg = Config::new();
+                                        // cfg.set("map_path", &format!("Maps\\Download\\{}", file));
+                                        // cfg.set("map_localpath", &file);
+                                        let _ = self.m_CurrentMap.load(file).await;
+                                        //self.ghost.map_mut().load(&cfg, &file);
+                                    }
+                                    _ => {
+                                        let response = Language::new().found_maps(&found_maps.join(", "));
+                                        self.queue_chat_command2(response, user.clone(), whisper).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if command == "open" && !payload.is_empty() {
+                        if let Some(game_arc) = game_arc {
+                            game_arc.lock().await.open_slot(payload.parse::<u8>().unwrap(), true).await;
+                        }
+                    } 
+                    else if command == "openall" && !payload.is_empty() {
+                        if let Some(game_arc) = game_arc {
+                            game_arc.lock().await.open_all_slots().await;
+                        }
+                    } 
+                    else if command == "priv" && !payload.is_empty() {
+                        self.create_game(payload, user, GAME_PRIVATE).await;
+                    }
+                    else if command == "pub" && !payload.is_empty() {
+                        self.create_game(payload, user, GAME_PUBLIC).await;
+                    }
+                    else if command == "say" {
+                        self.queue_chat_command(payload).await;
+                    } 
+                    else if command == "sp" || command == "shuffle" {
+                        if let Some(game_arc) = game_arc {
+                            let mut game = game_arc.lock().await;
+                            if !game.get_count_down_started() {
+                                game.shuffle_slots().await;
+                            }
+                        }
+                    }
+                    else if command == "start" {
+                        if let Some(game_arc) = game_arc {
+                            let mut game = game_arc.lock().await;
+                            if !game.get_count_down_started() && game.get_num_human_players() > 0 {
+                                if !game.get_locked() {
+                                    game.start_count_down( false ).await;
+                                }
+                            }
+                        }
+                    }
+                    else if command == "swap" {
+                        if let Some(game_arc) = game_arc {
+                            let mut game = game_arc.lock().await;
+                            let pl: Vec<u8> = payload.split_whitespace().filter_map(
+                                |s| s.parse().ok()
+                            ).collect();
+                            if pl.len() != 2 {
+                                log_info(&format!("[BNET: {}] неправильные аргументы команды \"swap\"", self.m_ServerAlias));
+                            } else {
+                                game.swap_slots(pl[0], pl[1]).await;
+                            }
+                        }
+                    }
+                    else if command == "unhost" {
+                        if let Some(game_arc) = game_arc {
+                            let mut game = game_arc.lock().await;
+
+                            if game.get_count_down_started() {
+                                self.queue_chat_command2(Language::new().unable_to_unhost_game_countdown_started(&game.get_description()), user, whisper).await;
+                            } else {
+                                self.queue_chat_command2(Language::new().unhosting_game(&game.get_description()), user, whisper).await;
+                                game.set_exiting(true);
+                            }
+                        } else {
+                            self.queue_chat_command2(Language::new().unable_to_unhost_game_no_game_in_lobby(), user, whisper).await;
+                        }
+                    }
                 }
             }
         } else if event == IncomingChatEventEnum::EID_CHANNEL {
@@ -642,7 +774,7 @@ pub async fn update(&mut self) -> bool {
 
     pub async fn queue_enter_chat(&mut self) {
         if self.m_LoggedIn {
-            self.m_OutPackets.push_back( self.m_Protocol.SEND_SID_ENTERCHAT());
+            let _ = self.m_Socket.do_send( &self.m_Protocol.SEND_SID_ENTERCHAT()).await;
         }
     }
 
@@ -769,9 +901,7 @@ pub async fn update(&mut self) -> bool {
 
     pub async fn queue_game_uncreate( &mut self ) {
         if self.m_LoggedIn {
-            log_info("[BNET: iCCup] unhosted game");
             let _ = self.m_Socket.do_send( &self.m_Protocol.SEND_SID_STOPADV() ).await;
-            CURRENT_GAME.read().await.as_ref().unwrap().lock().await.set_exiting(true);
         }
     }
 
@@ -816,10 +946,53 @@ pub async fn update(&mut self) -> bool {
         }
     }
 
+    pub fn is_admin(&mut self, nick: String) -> bool {
+        self.m_Admins.contains(&nick)
+    }
+
     pub fn unqueue_game_refreshes(&mut self) {
         self.unqueue_packets(Protocol::SID_STARTADVEX3 as u8);
     }
 
+    pub async fn create_game(&mut self, payload: String, user: String, game_state: u8) {
+        let host_counter = HOST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        if self.m_CurrentMap.get_valid() {
+            let game_name = payload;
+            let host_name = user.clone();
+            log_info(&format!("[BNET: {}] Creating game: {}", self.m_ServerAlias, game_name));
+            if game_state == GAME_PRIVATE {
+                self.queue_chat_command(format!(
+                    "Creating private game [{}] by user [{}]",
+                    game_name, "BOT"
+                ))
+                .await;
+            } else if game_state == GAME_PUBLIC {
+                self.queue_chat_command(format!(
+                    "Creating public game [{}] by user [{}]",
+                    game_name, "BOT"
+                ))
+                .await;
+            }
+            let game = Game::new(
+                Arc::clone(&self.m_Ghost),
+                self.m_CurrentMap.clone(),
+                6112,
+                game_state,
+                game_name.to_owned(),
+                host_name.clone(),
+                host_name.clone(),
+                self.m_Server.clone(),
+                host_counter
+            );
+            let base_game_arc = Arc::new(AsyncMutex::new(game.base));
+            *CURRENT_GAME.write().await = Some(Arc::clone(&base_game_arc));
+            self.queue_game_create(game_state, game_name.to_owned(), "BOT".to_owned(), &mut self.m_CurrentMap.clone(), host_counter)
+                .await;
+        } else {
+            self.queue_chat_command(format!("/w {} Invalid map configuration", user))
+                .await;
+        }
+    }
     pub fn get_server(&self) -> String {
         return self.m_Server.clone();
     }

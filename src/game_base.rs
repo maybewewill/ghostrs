@@ -353,7 +353,6 @@ impl BaseGame {
     }
 
     pub async fn update(&mut self) -> bool {
-       // println!("{:?}", self.m_socket);
         let mut indices_to_remove = Vec::new();
         let mut players_to_delete = Vec::new();
 
@@ -670,7 +669,7 @@ impl BaseGame {
             }
             if !already_stopped {
                 log_info(&format!("[GAME: {}] is over (gameover timer finished)", self.m_game_name));
-                self.stop_players("was disconnected (gameover timer finished".to_owned());
+                self.stop_players("was disconnected (gameover timer finished)".to_owned());
             }
         }
 
@@ -683,6 +682,9 @@ impl BaseGame {
             else if self.is_game_data_saved() {
                 return true;
             }
+        }
+        if self.m_exiting {
+            return self.m_exiting;
         }
         // In game_base.rs (update method)
         if !self.m_socket.has_error() && self.m_socket.is_connected() {
@@ -710,8 +712,6 @@ impl BaseGame {
                 }
             }
         }
-
-        
 
         return self.m_exiting;
         
@@ -924,6 +924,7 @@ impl BaseGame {
                     let player_ptr = self.m_players.as_mut_ptr();
                     // SAFETY: idx is from a valid index in m_players, and we don't alias mutable borrows
                     let player = unsafe { &mut *player_ptr.add(idx) };
+                    //println!("{:?}", player.m_socket);
                     self.send(player, protocol.SEND_W3GS_INCOMING_ACTION(data, 0)).await;
                 }
             }
@@ -932,6 +933,7 @@ impl BaseGame {
         self.m_sync_counter += 1;
 
         if !self.m_actions.is_empty() {
+            println!("self.m_actions: {:?}", self.m_actions);
             let mut sub_actions: VecDeque<CIncomingAction> = VecDeque::<CIncomingAction>::new();
             let mut action: CIncomingAction = self.m_actions.pop_front().unwrap();
             sub_actions.push_back( action.clone() );
@@ -952,13 +954,13 @@ impl BaseGame {
                 sub_actions_length += action.get_length();
             }
 
-            self.send_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION(sub_actions.clone(), self.m_latency.try_into().unwrap())).await;
+            self.put_bytes_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION(sub_actions.clone(), self.m_latency.try_into().unwrap())).await;
 
             while !sub_actions.is_empty() {
                 let _ = sub_actions.pop_front();
             }
         } else {
-            self.send_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION(self.m_actions.clone(), self.m_latency.try_into().unwrap())).await;
+            self.put_bytes_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION(self.m_actions.clone(), self.m_latency.try_into().unwrap())).await;
         }
 
         let mut actual_send_interval = (get_ticks() as u32 - self.m_last_action_sent_ticks);
@@ -969,9 +971,22 @@ impl BaseGame {
             log_warning(&format!("[GAME: {}] warning - the latency is {} ms but the last update was late by {} ms", self.m_game_name, self.m_latency, self.m_last_action_late_by));
             self.m_last_action_late_by = self.m_latency;
         }
-
+        self.send_bytes_all().await;
         self.m_last_action_sent_ticks = get_ticks() as u32;
     }
+
+    pub async fn put_bytes_all(&mut self, _data: ByteArray) {
+        for i in self.m_players.iter_mut() {
+            i.put_bytes(_data.clone()).await;
+        }
+    }
+
+    pub async fn send_bytes_all(&mut self) {
+        for i in self.m_players.iter_mut() {
+            i.send_buff().await;
+        }
+    }
+
     pub async fn send_welcome_message(&mut self, mut player: GamePlayer) {
         let motd_path = Path::new("motd.txt");
         if let Ok(file) = File::open(motd_path) {
@@ -1125,6 +1140,8 @@ impl BaseGame {
         }
 
         if get_time() - self.m_last_lag_screen_time >= 10 {
+            println!("on m_last_lag_screen_time");
+
             player.set_delete_me(true);
             player.set_left_reason(self.m_language.has_lost_connection_timed_out());
             player.set_left_code(PLAYERLEAVE_DISCONNECT as u32);
@@ -1136,6 +1153,7 @@ impl BaseGame {
     }
 
     pub async fn event_player_disconnect_player_error(&mut self, pid: u8, error_string: String) {
+        println!("event_player_disconnect_player_error");
         self.set_delete_me(pid, true).await;
         self.set_left_reason(pid, self.m_language.has_lost_connection_player_error(&error_string)).await;
         self.set_left_code(pid, PLAYERLEAVE_DISCONNECT as u32).await;
@@ -1162,7 +1180,7 @@ impl BaseGame {
             }
             return;
         }
-
+        
         self.set_delete_me(pid, true).await;
         self.set_left_reason(pid, self.m_language.has_lost_connection_socket_error(&error_string)).await;
         self.set_left_code(pid, PLAYERLEAVE_DISCONNECT as u32).await;
@@ -1189,6 +1207,7 @@ impl BaseGame {
             }
             return;
         }
+        println!("event_player_disconnect_connection_closed");
 
         self.set_delete_me(pid, true).await;
         self.set_left_reason(pid, self.m_language.has_lost_connection_closed_by_remote_host()).await;
@@ -1258,6 +1277,7 @@ impl BaseGame {
             if sid != 255 {
                 let reason = self.m_language.was_kicked_for_reserved_player(&join_player.get_name());
                 if let Some(kicked_player) = self.get_player_from_sid_mut(sid) {
+                    println!("on kicked_player");
                     kicked_player.set_delete_me(true);
                     kicked_player.set_left_reason(reason);
                     kicked_player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -1281,6 +1301,7 @@ impl BaseGame {
             }
             let reason = self.m_language.was_kicked_for_owner_player(&join_player.get_name());
             if let Some(kicked_player) = self.get_player_from_sid_mut(sid) {
+                println!("on kicked_player2");
                 kicked_player.set_delete_me(true);
                 kicked_player.set_left_reason(reason);
                 kicked_player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -1317,6 +1338,7 @@ impl BaseGame {
     // new_player.set_whois_should_be_sent(self.m_ghost.m_spoof_checks == 1 || (self.m_ghost.m_spoof_checks == 2 && any_admin_check));
     self.m_players.push(new_player);
     potential.set_socket(TcpClient::new());
+    println!("izza potentiala");
     potential.set_delete_me(true);
 
     if self.m_map.get_map_options() & MAPOPT_CUSTOMFORCES > 0 {
@@ -1534,7 +1556,6 @@ impl BaseGame {
     }
 
     pub async fn event_player_keep_alive(&mut self, checksum: u32) {
-        print!("event_player_keep_alive");
         for p in self.m_players.iter() {
             if !p.get_delete_me() && p.get_check_sums().is_empty() {
                 return;
@@ -1638,6 +1659,7 @@ impl BaseGame {
                 // Теперь безопасно изменяем игроков
                 for player in self.m_players.iter_mut() {
                     if !player.get_left_message_sent() && pids_to_kick.contains(&player.get_pid()) {
+                        println!("on keep_alive");
                         player.set_delete_me(true);
                         player.set_left_reason(self.m_language.kicked_due_to_desync());
                         player.set_left_code(PLAYERLEAVE_LOST as u32);
@@ -1653,7 +1675,7 @@ impl BaseGame {
                 // Предполагая, что есть метод для удаления checksum
                 // self.m_players[i].remove_first_checksum();
                 // Или если checksum - это поле, доступное напрямую:
-                // self.m_players[i].check_sums.pop_front();
+                self.m_players[i].m_check_sums.pop_back();
             }
         }
     }
@@ -1842,6 +1864,8 @@ impl BaseGame {
     }
 
     pub async fn set_delete_me(&mut self, pid: u8, delete_me: bool) {
+        println!("set_delete_me2: {}", delete_me);
+
         let player = self.get_player_from_pid_mut(pid);
         if let Some(player) = player {
             player.set_delete_me(delete_me);
@@ -1912,6 +1936,8 @@ impl BaseGame {
                         }
                     }
                 } else {
+                    println!("on map_size");
+
                     self.set_delete_me(pid, true).await;
                     self.set_left_reason(pid, "doesn't have the map and there is no local copy of the map to send".to_owned()).await;
                     self.set_left_code(pid, PLAYERLEAVE_LOBBY.into()).await;
@@ -1949,6 +1975,8 @@ impl BaseGame {
     pub async fn event_player_pong_to_host(&mut self, _pong: u32, reserved: bool, pid: u8, ping: u32, delete_me: bool, num_pings: u8, name: String) {
         if !self.m_game_loading && !self.m_game_loaded && !delete_me && !reserved && num_pings >= 3 && ping > 599 {
             self.send_all_chat(self.m_language.autokicking_player_for_excessive_ping(&name, &ping.to_string())).await;
+            println!("on event_player_pong_to_host");
+
             self.set_delete_me(pid ,true).await;
             self.set_left_reason(pid,format!("was autokicked for excessive ping of {}", ping)).await;
             self.set_left_code(pid, PLAYERLEAVE_LOBBY.into()).await;
@@ -2013,16 +2041,43 @@ impl BaseGame {
             self.send_all(self.m_protocol.SEND_W3GS_GAMELOADED_OTHERS(self.m_fake_player_pid)).await;
         }
 
+        
+        println!("PREPARE SAVING!");
+
+        let maybe_current_game = {
+            let current_game_guard = CURRENT_GAME.read().await;
+            println!("LOCKED READ CURRENT_GAME");
+            current_game_guard.as_ref().map(|game| Arc::clone(game))
+        };
+
+        println!("GOT CURRENT_GAME REF");
+
+        if let Some(current_game) = maybe_current_game {
+            let mut games = m_GAMES.write().await;
+            println!("LOCKED WRITE GAMES");
+            games.push(current_game);
+            println!("GAMES LENGTH: {:?}", games.len());
+        }
+
+        println!("BEFORE START PLAYER");
         self.m_start_players = self.get_num_human_players();
+        println!("AFTER START PLAYER");
+
         self.m_socket = TcpServer::new();
+
+
         self.m_potentials.clear();
-        self.m_ghost.clone().lock().unwrap().set_current_game(None);
-        self.m_ghost.clone().lock().unwrap().add_game(self.clone());
+        println!("AFTER CLEAR");
+
+        let mut current_game_del = CURRENT_GAME.write().await;
+        *current_game_del = None;
+        println!("DELETED!");
+
 
         let bnets = m_BNETs.read().await;
         for bnet_arc in bnets.iter() {
             let mut bnet = bnet_arc.lock().await;
-            bnet.queue_game_uncreate();
+            bnet.queue_game_uncreate().await;
             bnet.queue_enter_chat().await;
         }
 
@@ -2034,6 +2089,7 @@ impl BaseGame {
         let mut shortest: Option<&GamePlayer> = None;
         let mut longest: Option<&GamePlayer> = None;
         for p in self.m_players.iter() {
+            println!("Name: {}, Socket: {:?}", p.get_name(), p.m_socket);
             if shortest.is_none() || p.get_finished_loading_ticks() < shortest.unwrap().get_finished_loading_ticks() {
                 shortest = Some(p);
             }
@@ -2043,10 +2099,6 @@ impl BaseGame {
         }
 
         if let (Some(shortest), Some(longest)) = (shortest, longest) {
-            let shortest_name = shortest.get_name().clone();
-            let shortest_time = ((shortest.get_finished_loading_ticks() - self.m_started_loading_ticks) as f32 / 1000.0).to_string();
-            let shortest_name_clone = shortest_name.clone();
-            let shortest_time_clone = shortest_time.clone();
             let shortest_name_clone = shortest.get_name().clone();
             let shortest_time_clone = ((shortest.get_finished_loading_ticks() - self.m_started_loading_ticks) as f32 / 1000.0).to_string();
             let longest_name_clone = longest.get_name().clone();
@@ -2294,6 +2346,7 @@ impl BaseGame {
         }
         if kick {
             if let Some(player) = self.m_players.iter_mut().find(|p| !p.get_left_message_sent() && p.get_pid() == self.m_slots[sid as usize].pid()) {
+                println!("on open_slot");
                 player.set_delete_me(true);
                 player.set_left_reason("was kicked when opening a slot".to_string());
                 player.set_left_code(PLAYERLEAVE_LOBBY.into());
@@ -2310,6 +2363,8 @@ impl BaseGame {
         }
         if kick {
             if let Some(player) = self.m_players.iter_mut().find(|p| !p.get_left_message_sent() && p.get_pid() == self.m_slots[sid as usize].pid()) {
+                println!("on close_slot");
+                
                 player.set_delete_me(true);
                 player.set_left_reason("was kicked when closing a slot".to_string());
                 player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -2327,6 +2382,8 @@ impl BaseGame {
         if kick {
             if let Some(slot_pid) = self.m_slots.get(sid as usize).map(|slot| slot.pid()) {
                 if let Some(player) = self.m_players.iter_mut().find(|p| !p.get_left_message_sent() && p.get_pid() == slot_pid) {
+                    println!("on computer slot");
+
                     player.set_delete_me(true);
                     player.set_left_reason("was kicked when creating a computer in a slot".to_string());
                     player.set_left_code(PLAYERLEAVE_LOBBY as u32);
@@ -2633,6 +2690,7 @@ impl BaseGame {
     }
 
     pub fn stop_players(&mut self, reason: String) {
+        println!("stop_players");
         for player in self.m_players.iter_mut() {
             player.set_delete_me(true);
             player.set_left_reason(reason.clone());

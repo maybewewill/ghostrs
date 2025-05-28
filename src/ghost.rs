@@ -26,6 +26,9 @@ static START: Lazy<Instant> = Lazy::new(Instant::now);
 pub static m_BNETs: Lazy<RwLock<Vec<Arc<AsyncMutex<BNET>>>>> =
     Lazy::new(|| RwLock::new(Vec::new()));
 
+pub static m_GAMES: Lazy<RwLock<Vec<Arc<AsyncMutex<BaseGame>>>>> =
+    Lazy::new(|| RwLock::new(Vec::new()));
+
 pub static CURRENT_GAME: Lazy<RwLock<Option<Arc<AsyncMutex<BaseGame>>>>> = 
     Lazy::new(|| RwLock::new(None));
 
@@ -157,6 +160,11 @@ impl Ghost {
         let username = config::get_string("bnet_username", "BOT");
         let userpassword = config::get_string("bnet_password", "");
         let firstchannel = config::get_string("bnet_firstchannel", "iccup.pro");
+        let admin_string = config::get_string("bnet_rootadmin", "slash -_-");
+        let mut admins: Vec<String> = Vec::new();
+        for i in admin_string.split(" ") {
+            admins.push(i.to_owned());
+        }
 
         log_info("[GHOST] Creating BNET instance");
         let ghost_clone = (*self).clone();
@@ -188,8 +196,9 @@ impl Ghost {
             "PvPGN Realm".to_owned(),
             500,
             1,
+            admins
         );
-        m_BNETs.write().await.push(Arc::new(AsyncMutex::new(bnet)));
+        m_BNETs.write().await.push(Arc::new(AsyncMutex::new(bnet.await)));
         log_info("[GHOST] BNET instance added");
 
         log_info("[GHOST] Extracting scripts");
@@ -205,12 +214,19 @@ impl Ghost {
             bnet.update().await;
         }
     
-        // Обновляем список игр (возможно, можно упростить)
-        let mut updated_games = Vec::new();
-        for game in self.m_Games.iter() {
-            updated_games.push(game.clone());
+        let game_arcs;
+        {
+            let games = m_GAMES.read().await;
+            game_arcs = games.iter().map(Arc::clone).collect::<Vec<_>>();
+        } 
+
+        for game_arc in game_arcs {
+            let mut game = game_arc.lock().await;
+            //println!("{:?}", game.m_socket);
+            game.update().await;
         }
-        self.m_Games = updated_games;
+
+
     
         let need_init = {
             let current = CURRENT_GAME.read().await;
@@ -234,23 +250,34 @@ impl Ghost {
             }
         }
     
-        let should_delete = {
-            let game_option = CURRENT_GAME.write().await.as_ref().map(Arc::clone);
-            if let Some(game_arc) = game_option {
-                let mut game = game_arc.lock().await;
-                timeout(Duration::from_millis(3), game.update())
-                    .await
-                    .unwrap_or(false)
-            } else {
-                false
-            }
+        let game_option = {
+            let current_game_lock = CURRENT_GAME.write().await;
+            current_game_lock.as_ref().map(Arc::clone)
+            // lock отпускается тут
         };
+        
+        let should_delete = if let Some(game_arc) = game_option {
+            let mut game = game_arc.lock().await;
+            timeout(Duration::from_millis(500), game.update())
+                .await
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        
     
         if should_delete {
             let mut current_game = CURRENT_GAME.write().await;
             if current_game.is_some() {
                 log_info("[GHOST] deleting current game");
                 *current_game = None;
+
+                let bnets = m_BNETs.read().await;
+                for bnet_arc in bnets.iter() {
+                    let mut bnet = bnet_arc.lock().await;
+                    bnet.queue_game_uncreate().await;
+                    bnet.queue_enter_chat().await;
+                }
             }
         }
     

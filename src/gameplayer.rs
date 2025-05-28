@@ -185,7 +185,7 @@ pub struct GamePlayer {
     m_internal_ip: ByteArray,
     m_pings: Vec<u32>,
 
-    m_check_sums: VecDeque<u32>,
+    pub m_check_sums: VecDeque<u32>,
     m_left_reason: String,
     m_spoofed_realm: String,
     m_joined_realm: String,
@@ -424,7 +424,10 @@ impl GamePlayer {
     pub fn get_error_string(&self) -> String { self.m_error_string.clone() }
     pub fn get_delete_me(&self) -> bool {self.m_delete_me}
 
-    pub fn set_delete_me(&mut self, delete: bool) { self.m_delete_me = delete; }
+    pub fn set_delete_me(&mut self, delete: bool) { 
+        println!("set_delete_me: {}", delete);
+        self.m_delete_me = delete; 
+    }
     pub fn set_left_reason(&mut self, left_reason: String) { self.m_left_reason = left_reason; }
     pub fn set_spoofed_realm(&mut self, spoofed_realm: String) { self.m_spoofed_realm = spoofed_realm; }
     pub fn set_left_code(&mut self, left_code: u32) { self.m_left_code = left_code; }
@@ -606,6 +609,7 @@ impl GamePlayer {
                     x if x == ProtocolG::W3GS_LEAVEGAME as i32 => {
                         
                         if let reason = self.m_protocol.RECEIVE_W3GS_LEAVEGAME(packet.get_data().clone()) {
+                            println!("on process_packets");
                             self.set_delete_me(true);
                             if reason == PLAYERLEAVE_GPROXY as u32 {
                                 self.set_left_reason(Language::new().permanently_kicked_gproxy());
@@ -642,9 +646,11 @@ impl GamePlayer {
                         }
                     }
                     x if x == ProtocolG::W3GS_OUTGOING_ACTION as i32 => {
+                        println!("W3GS_OUTGOING_ACTION = {:?}", packet.get_data().clone());
                         if let Some(_action) = self.m_protocol.RECEIVE_W3GS_OUTGOING_ACTION(packet.get_data().clone(), self.m_pid) {    
                             let game_arc = Arc::clone(&self.m_game);
                             let name = self.m_name.clone();
+                            
                             tokio::spawn(async move {
                                 let mut game = game_arc.lock().await;
                                 game.event_player_action(name, &_action).await;
@@ -768,6 +774,10 @@ impl GamePlayer {
             self.m_socket.do_send_buff().await;
         }
     }
+
+    // pub async fn get_check_sums(&mut self) -> VecDeque<u32> {
+    //     self.m_check_sums.clone()
+    // }
 
     pub fn event_gproxy_reconnect(&mut self, _new_socket: TcpClient, _last_packet: u32) {
     }
