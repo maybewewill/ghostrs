@@ -214,16 +214,19 @@ impl Ghost {
             bnet.update().await;
         }
     
-        let game_arcs;
-        {
-            let games = m_GAMES.read().await;
-            game_arcs = games.iter().map(Arc::clone).collect::<Vec<_>>();
-        } 
+        let mut games_to_remove_indices = Vec::new();
+        let game_arcs_for_update = {
+            let games_guard = m_GAMES.read().await; // Блокировка на чтение
+            games_guard.iter().map(Arc::clone).collect::<Vec<_>>()
+        }; // Блокировка на чтение освобождается здесь
 
-        for game_arc in game_arcs {
-            let mut game = game_arc.lock().await;
-            //println!("{:?}", game.m_socket);
-            game.update().await;
+        for (index, game_arc) in game_arcs_for_update.iter().enumerate() {
+            let mut game_instance = game_arc.lock().await; // Блокировка на запись для конкретной игры
+            if game_instance.update().await {
+                games_to_remove_indices.push(index);
+            } else {
+                game_instance.update_post().await;
+            }// game_instance.UpdatePost(&send_fd); // Если у вас есть UpdatePost
         }
 
 
@@ -258,7 +261,7 @@ impl Ghost {
         
         let should_delete = if let Some(game_arc) = game_option {
             let mut game = game_arc.lock().await;
-            timeout(Duration::from_millis(500), game.update())
+            timeout(Duration::from_millis(10), game.update())
                 .await
                 .unwrap_or(false)
         } else {

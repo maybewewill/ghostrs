@@ -338,23 +338,60 @@ impl GameProtocol {
         packet
     }
 
+    // В CGameProtocol
     pub fn SEND_W3GS_INCOMING_ACTION(&self, actions: VecDeque<CIncomingAction>, send_interval: u16) -> ByteArray {
         let mut packet = ByteArray::new();
         packet.push(W3GS_HEADER_CONSTANT);
         packet.push(ProtocolG::W3GS_INCOMING_ACTION as u8);
-        packet.push(0);
-        packet.push(0);
-        append_byte_array_from_u16(&mut packet, send_interval, false);
-        let mut subpacket = ByteArray::new();
-        for action in actions {
-            subpacket.push(action.get_pid());
-            append_byte_array_from_u16(&mut packet, action.get_action().len() as u16, false);
-            packet.extend_from_slice(&action.get_action());
+        packet.push(0); // Длина
+        packet.push(0); // Длина
+
+        append_byte_array_from_u16(&mut packet, send_interval, false); // send_interval
+
+        let mut subpacket_actions_data = ByteArray::new();
+        if !actions.is_empty() {
+            for action in actions {
+                subpacket_actions_data.push(action.get_pid());
+                append_byte_array_from_u16(&mut subpacket_actions_data, action.get_action().len() as u16, false);
+                subpacket_actions_data.extend_from_slice(&action.get_action());
+            }
         }
-        let ghost = self.ghost.lock().unwrap();
-        let crc32 = create_byte_array_from_u32(ghost.m_CRC.full_crc(&subpacket, subpacket.len().try_into().unwrap()), false);
-        packet.extend_from_slice(&crc32[..2]);
-        packet.extend_from_slice(&subpacket);
+        // else: subpacket_actions_data остается пустым
+
+        // Рассчитываем CRC от subpacket_actions_data (даже если он пустой)
+        let ghost_guard = self.ghost.lock().unwrap();
+        let crc_val = ghost_guard.m_CRC.full_crc(&subpacket_actions_data, subpacket_actions_data.len() as u32);
+        let crc_bytes = create_byte_array_from_u32(crc_val, false);
+
+        // Используем только первые 2 байта CRC
+        if crc_bytes.len() >= 2 {
+            packet.push(crc_bytes[0]);
+            packet.push(crc_bytes[1]);
+        } else {
+            packet.push(0); // Заглушка, если CRC некоррекdтен
+            packet.push(0);
+        }
+
+        if !subpacket_actions_data.is_empty() {
+            packet.extend_from_slice(&subpacket_actions_data);
+        }
+        // else: если subpacket_actions_data пуст, то пакет будет состоять из заголовка, send_interval и CRC.
+        // Это как раз 4 + 2 + 2 = 8 байт. НО! Трафик от C++ GHost++ показывает 6 байт.
+        // Это означает, что CRC для пустого набора действий НЕ отправляется.
+
+        // ***** ВАЖНОЕ ИСПРАВЛЕНИЕ ДЛЯ ПУСТЫХ ПАКЕТОВ *****
+        if subpacket_actions_data.is_empty() {
+            // Если нет действий, CRC не добавляется, и пакет должен быть 6 байт
+            // Удаляем ранее добавленные байты CRC, если они были для пустого пакета.
+            // Мы уже добавили заголовок (4) и send_interval (2), итого 6.
+            // Если packet сейчас больше 6, значит, мы добавили CRC.
+            if packet.len() > 6 {
+                packet.truncate(6); // Оставляем только заголовок и send_interval
+            }
+        }
+        // ***** КОНЕЦ ИСПРАВЛЕНИЯ *****
+
+
         self.AssignLength(&mut packet);
         packet
     }

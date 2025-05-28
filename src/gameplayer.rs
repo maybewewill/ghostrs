@@ -540,18 +540,32 @@ impl GamePlayer {
             }
         } else {
             let game_arc = Arc::clone(&self.m_game);
-                let error_string = self.m_socket.get_error_string();
-                let name = self.get_name().clone();
-                let pid = self.m_pid;
-                let gproxy = self.m_gproxy;
-                let gproxy_sent =self.m_gproxy_disconnect_notice_sent;
-                let gproxy_wait = self.m_last_gproxy_wait_notice_sent_time;
-                tokio::spawn(async move {
-                    let mut game = game_arc.lock().await;
-                    game.event_player_disconnect_connection_closed(name, pid, gproxy_wait, gproxy_sent, gproxy).await;
-                });
-                self.m_socket.disconnect();
-            self.m_socket.disconnect();
+            let error_string = self.m_socket.get_error_string();
+            let name = self.get_name().clone();
+            let pid = self.m_pid;
+            let gproxy = self.m_gproxy;
+            let gproxy_sent =self.m_gproxy_disconnect_notice_sent;
+            let gproxy_wait = self.m_last_gproxy_wait_notice_sent_time;
+            tokio::spawn(async move {
+                let mut game = game_arc.lock().await;
+                game.event_player_disconnect_connection_closed(name, pid, gproxy_wait, gproxy_sent, gproxy).await;
+            });
+        }
+
+        if deleting && self.m_left_reason.is_empty() {
+            let reason_connected = self.m_socket.get_connected();
+            let reason_has_error = self.m_socket.has_error();
+            let reason_self_error = self.m_error;
+            log_warning(&format!(
+                "[GAME: {}] Player [{}] is being deleted with an EMPTY reason! Socket connected: {}, socket has_error: {}, self.m_error: {}",
+                self.m_game.lock().await.get_game_name(), // Нужно получить имя игры
+                self.m_name,
+                reason_connected,
+                reason_has_error,
+                reason_self_error
+            ));
+            // Для отладки можно даже запаниковать здесь, чтобы получить стек вызовов:
+            // panic!("Player deleted with empty reason!");
         }
 
         deleting
@@ -624,7 +638,6 @@ impl GamePlayer {
                                 
                             });
                             self.set_left_code(PLAYERLEAVE_LOST as u32);
-                            return;
                         }
                     }
                     x if x == ProtocolG::W3GS_GAMELOADED_SELF as i32 => {

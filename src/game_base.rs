@@ -209,7 +209,6 @@ impl BaseGame {
     pub async fn init(&mut self) {
         let mut ghost = self.m_ghost.lock().unwrap();
         self.m_socket = TcpServer::new();
-        self.m_protocol = GameProtocol::new(self.m_ghost.clone());
         
         if ghost.m_ReconnectWaitTime != 0 {
             self.m_gproxy_empty_actions = (ghost.m_ReconnectWaitTime - 1) as u8;
@@ -481,7 +480,7 @@ impl BaseGame {
             self.m_last_announce_time = get_time() as u32;
         }
 
-        if self.m_count_down_started && get_ticks() as u32 - self.m_last_count_down_ticks >= 500 {
+        if self.m_count_down_started && get_ticks() as u32 - self.m_last_count_down_ticks >= 10000 {
             if self.m_count_down_counter > 0 {
                 self.send_all_chat(format!("{}. . .", self.m_count_down_counter)).await;
                 self.m_count_down_counter -= 1;
@@ -642,8 +641,13 @@ impl BaseGame {
             }
         }
 
-        if self.m_game_loaded && !self.m_lagging && get_ticks() as u32 - self.m_last_action_sent_ticks >= self.m_latency - self.m_last_action_late_by {
-            self.send_all_actions().await;
+        if self.m_game_loaded && !self.m_lagging {
+            let ticks_now = get_ticks() as u32;
+            let time_since_last_send = ticks_now.saturating_sub(self.m_last_action_sent_ticks);
+        
+            if self.m_last_action_sent_ticks == 0 || time_since_last_send >= self.m_latency as u32 {
+                self.send_all_actions().await;
+            }
         }
 
         if !self.m_kick_vote_player.is_empty() && get_time() - self.m_started_kick_vote_time >= 60 {
@@ -659,6 +663,7 @@ impl BaseGame {
         }
 
         if self.m_game_over_time != 0 && get_time() - self.m_game_over_time >= 60 {
+            println!("here dropped");
             let mut already_stopped = true;
 
             for i in self.m_players.iter_mut() {
@@ -896,82 +901,75 @@ impl BaseGame {
         let ip: ByteArray = vec![0,0,0,0];
         self.send(_player, self.m_protocol.SEND_W3GS_PLAYERINFO( self.m_virtual_host_pid, "FakePlayer".to_owned(), ip.clone(), ip)).await;
     }
+    // В BaseGame
     pub async fn send_all_actions(&mut self) {
-        let mut using_gproxy = false;
+        // 1. Увеличиваем игровые тики и счетчик синхронизации игры
+        self.m_game_ticks = self.m_game_ticks.wrapping_add(self.m_latency as u32);
+        self.m_sync_counter = self.m_sync_counter.wrapping_add(1);
 
-        for i in self.m_players.iter_mut() {
-            if i.get_gproxy() {
-                using_gproxy = true;
-            }
-        }
-
-        self.m_game_ticks += self.m_latency;
-
-        if using_gproxy {
-            // Collect the indices of players who do not use gproxy
-            let player_indices: Vec<usize> = self.m_players
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| !p.get_gproxy())
-                .map(|(idx, _)| idx)
-                .collect();
-
-            for idx in player_indices {
-                for _ in 0..self.m_gproxy_empty_actions {
-                    let data = VecDeque::<CIncomingAction>::new();
-                    // Avoid multiple mutable borrows by splitting the borrow here
-                    let protocol = &self.m_protocol;
-                    let player_ptr = self.m_players.as_mut_ptr();
-                    // SAFETY: idx is from a valid index in m_players, and we don't alias mutable borrows
-                    let player = unsafe { &mut *player_ptr.add(idx) };
-                    //println!("{:?}", player.m_socket);
-                    self.send(player, protocol.SEND_W3GS_INCOMING_ACTION(data, 0)).await;
-                }
-            }
-        }
-
-        self.m_sync_counter += 1;
-
-        if !self.m_actions.is_empty() {
-            println!("self.m_actions: {:?}", self.m_actions);
-            let mut sub_actions: VecDeque<CIncomingAction> = VecDeque::<CIncomingAction>::new();
-            let mut action: CIncomingAction = self.m_actions.pop_front().unwrap();
-            sub_actions.push_back( action.clone() );
-            let mut sub_actions_length: u32 = action.get_length();
-            
-            while !self.m_actions.is_empty() {
-                action = self.m_actions.pop_front().unwrap();
-                if sub_actions_length + action.get_length() > 1452 {
-                    self.send_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION2(sub_actions.clone())).await;
-                    
-                    while !sub_actions.is_empty() {
-                        let _ = sub_actions.pop_front();
-                    }
-
-                    sub_actions_length = 0;
-                }
-                sub_actions.push_back(action.clone());
-                sub_actions_length += action.get_length();
-            }
-
-            self.put_bytes_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION(sub_actions.clone(), self.m_latency.try_into().unwrap())).await;
-
-            while !sub_actions.is_empty() {
-                let _ = sub_actions.pop_front();
-            }
+        // 2. Рассчитываем send_interval
+        let mut current_send_interval: u16;
+        if self.m_last_action_sent_ticks == 0 { // Первая отправка
+            current_send_interval = self.m_latency as u16; // Начинаем с m_latency
         } else {
-            self.put_bytes_all(self.m_protocol.SEND_W3GS_INCOMING_ACTION(self.m_actions.clone(), self.m_latency.try_into().unwrap())).await;
+            current_send_interval = (get_ticks() as u32).saturating_sub(self.m_last_action_sent_ticks) as u16;
         }
 
-        let mut actual_send_interval = (get_ticks() as u32 - self.m_last_action_sent_ticks);
-        let mut expected_send_interval = self.m_latency - self.m_last_action_late_by;
-        self.m_last_action_late_by = actual_send_interval - expected_send_interval;
-
-        if self.m_last_action_late_by > self.m_latency {
-            log_warning(&format!("[GAME: {}] warning - the latency is {} ms but the last update was late by {} ms", self.m_game_name, self.m_latency, self.m_last_action_late_by));
-            self.m_last_action_late_by = self.m_latency;
+        // Ограничиваем send_interval разумным значением
+        if current_send_interval > 250 { // Максимум, например, 250 мс
+            current_send_interval = self.m_latency as u16;
         }
+        // Минимальный интервал, чтобы не спамить слишком сильно, если latency очень маленькая
+        // Хотя обычно m_latency само по себе является минимальным интервалом.
+        // Если current_send_interval получился 0 из-за быстрого вызова, можно использовать m_latency.
+        if current_send_interval == 0 && self.m_last_action_sent_ticks != 0 {
+            current_send_interval = self.m_latency as u16;
+        }
+
+        // 3. Подготавливаем действия для отправки
+        let mut actions_for_main_packet: VecDeque<CIncomingAction> = VecDeque::new();
+        let mut current_packet_actions_size: usize = 0;
+        const MAX_ACTIONS_PAYLOAD_SIZE: usize = 1400; // Примерный лимит
+
+        // Сначала обрабатываем очередь m_actions, отправляя пакеты W3GS_INCOMING_ACTION2 при переполнении
+        while let Some(action) = self.m_actions.pop_front() {
+            let action_length = action.get_length() as usize;
+
+            if current_packet_actions_size + action_length > MAX_ACTIONS_PAYLOAD_SIZE && !actions_for_main_packet.is_empty() {
+                // Пакет переполнения (ACTION2)
+                // Он не содержит send_interval, поэтому передаем 0 или специальное значение,
+                // которое CGameProtocol::SEND_W3GS_INCOMING_ACTION2 обработает как отсутствие интервала.
+                let overflow_packet_data = self.m_protocol.SEND_W3GS_INCOMING_ACTION2(
+                    actions_for_main_packet.clone()
+                );
+                self.put_bytes_all(overflow_packet_data).await;
+                // Запись в реплей для ACTION2
+                // ...
+
+                actions_for_main_packet.clear();
+                current_packet_actions_size = 0;
+            }
+
+            actions_for_main_packet.push_back(action.clone());
+            current_packet_actions_size += action_length;
+        }
+
+        // 4. Формируем и отправляем основной пакет W3GS_INCOMING_ACTION (0x0C)
+        // Этот пакет ВСЕГДА отправляется, даже если actions_for_main_packet пуст.
+        // В этом случае он будет содержать только send_interval и CRC для пустого набора действий.
+        let main_packet_data = self.m_protocol.SEND_W3GS_INCOMING_ACTION(
+            actions_for_main_packet.clone(), // Может быть пустым
+            current_send_interval,
+        );
+        self.put_bytes_all(main_packet_data).await;
+
+        // Запись в реплей для основного ACTION
+        // ...
+
+        // Фактически отправляем все буферизованные пакеты
         self.send_bytes_all().await;
+
+        // 5. Обновляем время последней отправки
         self.m_last_action_sent_ticks = get_ticks() as u32;
     }
 
@@ -1047,6 +1045,12 @@ impl BaseGame {
     }
 
     async fn event_player_deleted(&mut self, _player: &mut GamePlayer) {
+        let reason = _player.get_left_reason();
+        if reason.is_empty() {
+            log_warning(&format!("[GAME: {}] Player [{}] is being deleted with an EMPTY reason! Backtrace:\n{:?}", self.m_game_name, _player.get_name(), std::backtrace::Backtrace::capture()));
+            // Возможно, здесь стоит установить какую-то дефолтную причину, чтобы не сбивать с толку.
+            // player.set_left_reason("Unknown reason or internal error".to_string()); // Осторожно с &mut player здесь
+        }
         let mut player = _player.clone();
         log_info(&format!("[GAME: {}] deleting player [{}]: {}", self.m_game_name, player.get_name(), player.get_left_reason()));
 
