@@ -659,8 +659,10 @@ impl GamePlayer {
                         }
                     }
                     x if x == ProtocolG::W3GS_OUTGOING_ACTION as i32 => {
-                        println!("W3GS_OUTGOING_ACTION = {:?}", packet.get_data().clone());
+                        let packet_bytes_for_log = packet.get_data().clone();
+                      //  log_info(&format!("[PLAYER: {}] Received W3GS_OUTGOING_ACTION, data_len: {}", self.m_name, packet.get_data().len()));
                         if let Some(_action) = self.m_protocol.RECEIVE_W3GS_OUTGOING_ACTION(packet.get_data().clone(), self.m_pid) {    
+                       //     log_info(&format!("[PLAYER: {}] Parsed action successfully.", self.m_name));
                             let game_arc = Arc::clone(&self.m_game);
                             let name = self.m_name.clone();
                             
@@ -669,7 +671,7 @@ impl GamePlayer {
                                 game.event_player_action(name, &_action).await;
                             });
                         } else {
-                            log_info(&format!("Received invalid action packet from player {}", self.m_name));
+                            log_error(&format!("[PLAYER: {}] FAILED to parse W3GS_OUTGOING_ACTION. Data: {:?}", self.m_name, packet_bytes_for_log));
                         }
                     }
                     x if x == ProtocolG::W3GS_OUTGOING_KEEPALIVE as i32 => {
@@ -677,10 +679,11 @@ impl GamePlayer {
                             check_num = self.m_protocol.RECEIVE_W3GS_OUTGOING_KEEPALIVE(packet.get_data().clone());
                             self.m_check_sums.push_back(check_num);
                             self.m_sync_counter += 1;
+                            let pid = self.m_pid;
                             let game_arc = Arc::clone(&self.m_game);
                             tokio::spawn(async move {
                                 let mut game = game_arc.lock().await;
-                                game.event_player_keep_alive(check_num).await;
+                                game.event_player_keep_alive(pid, check_num).await;
                             });
                         }
                     }

@@ -556,7 +556,7 @@ pub async fn update(&mut self) -> bool {
                     }
                     else if command == "close" && !payload.is_empty() {
                         if let Some(game_arc) = game_arc {
-                            game_arc.lock().await.close_slot(payload.parse::<u8>().unwrap(), true).await;
+                            game_arc.lock().await.close_slot(payload.parse::<u8>().unwrap()-1, true).await;
                         }
                     }
                     else if command == "closeall" {
@@ -645,7 +645,7 @@ pub async fn update(&mut self) -> bool {
                     }
                     else if command == "open" && !payload.is_empty() {
                         if let Some(game_arc) = game_arc {
-                            game_arc.lock().await.open_slot(payload.parse::<u8>().unwrap(), true).await;
+                            game_arc.lock().await.open_slot(payload.parse::<u8>().unwrap()-1, true).await;
                         }
                     } 
                     else if command == "openall" && !payload.is_empty() {
@@ -689,7 +689,7 @@ pub async fn update(&mut self) -> bool {
                             if pl.len() != 2 {
                                 log_info(&format!("[BNET: {}] неправильные аргументы команды \"swap\"", self.m_ServerAlias));
                             } else {
-                                game.swap_slots(pl[0], pl[1]).await;
+                                game.swap_slots(pl[0]-1, pl[1]-1).await;
                             }
                         }
                     }

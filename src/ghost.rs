@@ -1,5 +1,5 @@
 use crate::game;
-use crate::logger::{log_info, log_warning};
+use crate::logger::{log_error, log_info, log_warning};
 use crate::socket::*;
 use crate::gpsprotocol::*;
 use crate::config;
@@ -214,19 +214,40 @@ impl Ghost {
             bnet.update().await;
         }
     
-        let mut games_to_remove_indices = Vec::new();
-        let game_arcs_for_update = {
-            let games_guard = m_GAMES.read().await; // Блокировка на чтение
-            games_guard.iter().map(Arc::clone).collect::<Vec<_>>()
-        }; // Блокировка на чтение освобождается здесь
+        let mut games_to_remove_indices: Vec<usize> = Vec::new();
 
-        for (index, game_arc) in game_arcs_for_update.iter().enumerate() {
-            let mut game_instance = game_arc.lock().await; // Блокировка на запись для конкретной игры
-            if game_instance.update().await {
-                games_to_remove_indices.push(index);
-            } else {
-                game_instance.update_post().await;
-            }// game_instance.UpdatePost(&send_fd); // Если у вас есть UpdatePost
+        {
+            let games_guard = m_GAMES.read().await;
+            let game_arcs_for_update = games_guard.iter().map(Arc::clone).collect::<Vec<_>>();
+            
+            for (index, game_arc) in game_arcs_for_update.iter().enumerate() {
+                let mut game_instance = game_arc.lock().await;
+
+                if game_instance.update().await {
+                    log_info(&format!(
+                        "[GHOST] Active game [{}] marked for deletion.",
+                        game_instance.get_game_name()
+                    ));
+                    games_to_remove_indices.push(index);
+                } else {
+                    // mozhet nado udalit'? xz poka chto
+                    game_instance.update_post().await;
+                }
+            }
+        } 
+
+        if !games_to_remove_indices.is_empty() {
+            games_to_remove_indices.sort_unstable_by(|a, b| b.cmp(a));
+
+            let mut games_guard = m_GAMES.write().await;
+
+            for index_to_remove in games_to_remove_indices {
+                if index_to_remove < games_guard.len() { // Проверка, что индекс все еще валиден
+                    let removed_game_arc = games_guard.remove(index_to_remove);
+                } else {
+                    log_error(&format!("[GHOST] Attempted to remove game at invalid index {} (m_GAMES len: {}). This shouldn't happen if logic is correct.", index_to_remove, games_guard.len()));
+                }
+            }
         }
 
 
@@ -261,7 +282,7 @@ impl Ghost {
         
         let should_delete = if let Some(game_arc) = game_option {
             let mut game = game_arc.lock().await;
-            timeout(Duration::from_millis(10), game.update())
+            timeout(Duration::from_millis(1), game.update())
                 .await
                 .unwrap_or(false)
         } else {

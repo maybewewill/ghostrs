@@ -398,6 +398,10 @@ impl BaseGame {
             self.send_all_chat(self.m_language.game_unlocked()).await;
             self.m_locked = false;
         }
+        
+        let current_time_sec = get_time();
+        let current_ticks_ms = get_ticks() as u32;
+
         if get_time() as u32 - self.m_last_ping_time >= 3 {
             self.send_all(self.m_protocol.SEND_W3GS_PING_FROM_HOST()).await;
 
@@ -546,99 +550,149 @@ impl BaseGame {
         }
 
         if self.m_game_loaded {
-            if !self.m_lagging {
-                let mut lagging_string:String = String::new();
-                let mut players = self.m_players.clone();
-
-                for i in players.iter_mut() {
-                    if self.m_sync_counter - i.get_sync_counter() > self.m_sync_limit {
-                        i.set_lagging(true);
-                        i.set_started_lagging_ticks( get_ticks() as u32);
-                        self.m_lagging = true;
-                        self.m_started_lagging_time = get_time();
-
-                        if lagging_string.is_empty() {
-                            lagging_string = i.get_name();
-                        } else {
-                            lagging_string.push_str(&format!(", {}", i.get_name()));
-                        }
-                    }
-                }
-
-                if self.m_lagging {
-                    log_info(&format!("[GAME: {}] started lagging on [{}]", self.m_game_name, lagging_string));
-                    
-                    self.send_all(self.m_protocol.SEND_W3GS_START_LAG(players.clone(), false)).await;
-                    players = self.m_players.clone();
-
-                    for i in players.iter_mut() {
-                        i.set_drop_vote(false);
-                    }
-                    self.m_last_lag_screen_reset_time = get_time();
-                    
-                }
-            }
+                        // В CBaseGame::update, ВНУТРИ if self.m_game_loaded { ... }
 
             if self.m_lagging {
-                let mut using_gproxy = false;
-                let mut players = self.m_players.clone();
-                for i in players.iter_mut() {
-                    if i.get_gproxy() {
-                        using_gproxy = true;
+                const LAG_KICK_WAIT_TIME_SECONDS: u32 = 60; // из конфига
+                const LAG_SCREEN_RESET_INTERVAL_SECONDS: u32 = 30; // из конфига
+                let current_time_sec = get_time();
+                let current_ticks_ms = get_ticks() as u32;
+
+                // Кик по таймауту лага
+                if current_time_sec.saturating_sub(self.m_started_lagging_time) >= LAG_KICK_WAIT_TIME_SECONDS {
+                    self.stop_laggers(Language::new().auto_kicked_after_seconds(&LAG_KICK_WAIT_TIME_SECONDS.to_string()));
+                    // После stop_laggers нужно проверить, остались ли еще лагающие,
+                    // и если нет - установить self.m_lagging = false;
+                    let mut any_still_truly_lagging = false;
+                    for p_check in self.m_players.iter() {
+                        if p_check.get_lagging() && !p_check.get_delete_me() {
+                            any_still_truly_lagging = true;
+                            break;
+                        }
+                    }
+                    if !any_still_truly_lagging {
+                        self.m_lagging = false;
+                        log_info(&format!("[GAME: {}] Lag screen deactivated after kicking laggers.", self.m_game_name));
                     }
                 }
 
-                let mut wait_time: u32 = 60;
+                // Периодический "сброс" лагскрина И ОТПРАВКА ТИКА НЕЛАГАЮЩИМ
+                if current_time_sec.saturating_sub(self.m_last_lag_screen_reset_time) >= LAG_SCREEN_RESET_INTERVAL_SECONDS {
+                    log_info(&format!("[GAME: {}] Resetting lag screen.", self.m_game_name));
 
-                if using_gproxy {
-                    wait_time = (self.m_gproxy_empty_actions as u32 + 1) * 60;
-                }
+                    let mut non_lagger_pids_to_send_tick: Vec<u8> = Vec::new();
+                    let mut laggers_for_stop_start_lag: Vec<GamePlayer> = Vec::new(); // Клоны для SEND_..._LAG
 
-                if get_time() - self.m_started_lagging_time >= wait_time {
-                    self.stop_laggers(self.m_language.auto_kicked_after_seconds(&wait_time.to_string()));
-                }
-
-                if get_time() - self.m_last_lag_screen_reset_time >= 60 {
-                    players = self.m_players.clone();
-                    for i in players.clone().iter_mut() {
-                        for j in players.iter_mut() {
-                            if j.get_lagging() {
-                                self.send(i, self.m_protocol.SEND_W3GS_STOP_LAG(j, false)).await;
+                    for p_idx in 0..self.m_players.len() {
+                        if !self.m_players[p_idx].get_delete_me() {
+                            if self.m_players[p_idx].get_lagging() {
+                                laggers_for_stop_start_lag.push(self.m_players[p_idx].clone());
+                            } else {
+                                non_lagger_pids_to_send_tick.push(self.m_players[p_idx].get_pid());
                             }
                         }
-
-                        if using_gproxy && !i.get_gproxy() {
-                            for _ in 0..self.m_gproxy_empty_actions {
-                                self.send(i, self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0)).await;
+                    }
+                    
+                    // 1. Отправить STOP_LAG для актуальных лаггеров всем НЕлагающим.
+                    //    Если нелагающих нет, этот шаг можно пропустить.
+                    if !non_lagger_pids_to_send_tick.is_empty() {
+                        for lagger_clone in laggers_for_stop_start_lag.iter() {
+                            let stop_lag_packet = self.m_protocol.SEND_W3GS_STOP_LAG(lagger_clone, false);
+                            for nl_pid in &non_lagger_pids_to_send_tick {
+                                if let Some(nl_player) = self.get_player_from_pid_mut(*nl_pid) {
+                                    // Предполагаем, что GamePlayer::send(&mut self, data)
+                                    nl_player.send(stop_lag_packet.clone()).await;
+                                }
                             }
                         }
-                        self.send(i, self.m_protocol.SEND_W3GS_INCOMING_ACTION(VecDeque::<CIncomingAction>::new(), 0)).await;
-                        self.send(i, self.m_protocol.SEND_W3GS_START_LAG(self.m_players.clone(), false)).await;
                     }
 
-                    self.m_last_lag_screen_reset_time = get_time();
+                    // 2. Отправить "пустой" INCOMING_ACTION НЕлагающим.
+                    // Это инкрементирует self.m_sync_counter игры и дает шанс лагающим догнать.
+                    let time_passed = current_ticks_ms.saturating_sub(self.m_last_action_sent_ticks);
+                    let mut send_interval_for_tick = time_passed;
+                    if send_interval_for_tick > 250 || send_interval_for_tick == 0 {
+                        send_interval_for_tick = self.m_latency as u32;
+                    }
+
+                    if !non_lagger_pids_to_send_tick.is_empty() {
+                        self.m_sync_counter = self.m_sync_counter.wrapping_add(1);
+                        let empty_actions_packet = self.m_protocol.SEND_W3GS_INCOMING_ACTION(
+                            VecDeque::new(),
+                            send_interval_for_tick as u16
+                        );
+
+                        for nl_pid in &non_lagger_pids_to_send_tick {
+                            if let Some(nl_player) = self.get_player_from_pid_mut(*nl_pid) {
+                                nl_player.put_bytes(empty_actions_packet.clone()).await;
+                                nl_player.send_buff().await;
+                            }
+                        }
+                        self.m_last_action_sent_ticks = current_ticks_ms; // Обновляем время последнего "тика"
+                    }
+
+
+                    // 3. Снова отправить START_LAG НЕлагающим, перечисляя тех, кто ВСЕ ЕЩЕ лагает
+                    //    (laggers_for_stop_start_lag содержит актуальный список)
+                    if !non_lagger_pids_to_send_tick.is_empty() {
+                        let start_lag_packet = self.m_protocol.SEND_W3GS_START_LAG(laggers_for_stop_start_lag, false);
+                        for nl_pid in &non_lagger_pids_to_send_tick {
+                            if let Some(nl_player) = self.get_player_from_pid_mut(*nl_pid) {
+                                nl_player.send(start_lag_packet.clone()).await;
+                            }
+                        }
+                    }
+                    self.m_last_lag_screen_reset_time = current_time_sec;
                 }
 
-                for i in players.iter_mut() {
-                    if i.get_lagging() && self.m_sync_counter - i.get_sync_counter() < self.m_sync_limit / 2 {
-                        log_info(&format!("[GAME: {}] stopped lagging on [{}]", self.m_game_name, i.get_name()));
-                        self.send_all(self.m_protocol.SEND_W3GS_STOP_LAG(i, false)).await;
-                        i.set_lagging(false);
-                        i.set_started_lagging_ticks(0);
+                // Проверяем, не перестал ли кто-то из игроков лагать
+                let mut any_player_still_truly_lagging = false;
+                let mut pids_stopped_lagging: Vec<u8> = Vec::new();
+
+                for player_idx_check_stop_lag in 0..self.m_players.len() {
+                    let (pid, name, is_lagging, is_deleted, sync_counter_val) = {
+                        let p = &self.m_players[player_idx_check_stop_lag];
+                        (p.get_pid(), p.get_name(), p.get_lagging(), p.get_delete_me(), p.get_sync_counter())
+                    };
+
+                    if is_lagging && !is_deleted {
+                        if self.m_sync_counter > sync_counter_val &&
+                        self.m_sync_counter.saturating_sub(sync_counter_val) < self.m_sync_limit / 2 {
+                            pids_stopped_lagging.push(pid); // Собираем PIDы тех, кто перестал лагать
+                            if let Some(p_mut) = self.m_players.get_mut(player_idx_check_stop_lag) {
+                                p_mut.set_lagging(false);
+                                p_mut.set_started_lagging_ticks(0);
+                            }
+                            log_info(&format!("[GAME: {}] Player [{}] stopped lagging.", self.m_game_name, name));
+                        } else {
+                            any_player_still_truly_lagging = true;
+                        }
                     }
                 }
 
-                let mut lagging = false;
-                for i in players.iter_mut() {
-                    if i.get_lagging() {
-                        lagging = true;
+                // Отправляем STOP_LAG для тех, кто перестал лагать, всем остальным
+                for stopped_lagger_pid in pids_stopped_lagging {
+                    if let Some(stopped_lagger_player_clone) = self.get_player_from_pid(stopped_lagger_pid).cloned() { // Клонируем, чтобы передать в SEND_W3GS_STOP_LAG
+                        if self.get_num_human_players() > 0 {
+                            self.send_all(self.m_protocol.SEND_W3GS_STOP_LAG(&stopped_lagger_player_clone, false)).await;
+                        }
                     }
                 }
-                self.m_lagging = lagging;
 
-                self.m_last_action_sent_ticks = get_ticks() as u32;
-                self.m_last_lag_screen_time = get_time();
+                if !any_player_still_truly_lagging && self.m_lagging {
+                    log_info(&format!("[GAME: {}] Lag screen deactivated, all players caught up.", self.m_game_name));
+                    self.m_lagging = false;
+                    // После выхода из лагскрина, следующая итерация update вызовет send_all_actions для всех.
+                }
+                self.m_last_lag_screen_time = current_time_sec; // Обновляем время последнего активного лагскрина
+            } else { // Если self.m_lagging == false
+                // C. Отправка игровых действий (если не активен общий лагскрин)
+                if self.m_last_action_sent_ticks == 0 ||
+                current_ticks_ms.saturating_sub(self.m_last_action_sent_ticks) >= self.m_latency as u32 {
+                    self.send_all_actions().await;
+                }
             }
+
         }
 
         if self.m_game_loaded && !self.m_lagging {
@@ -663,7 +717,6 @@ impl BaseGame {
         }
 
         if self.m_game_over_time != 0 && get_time() - self.m_game_over_time >= 60 {
-            println!("here dropped");
             let mut already_stopped = true;
 
             for i in self.m_players.iter_mut() {
@@ -903,48 +956,37 @@ impl BaseGame {
     }
     // В BaseGame
     pub async fn send_all_actions(&mut self) {
-        // 1. Увеличиваем игровые тики и счетчик синхронизации игры
+       // log_info(&format!("[GAME: {}] send_all_actions START. Actions in queue: {}", self.m_game_name.clone(), self.m_actions.len()));
         self.m_game_ticks = self.m_game_ticks.wrapping_add(self.m_latency as u32);
         self.m_sync_counter = self.m_sync_counter.wrapping_add(1);
 
-        // 2. Рассчитываем send_interval
         let mut current_send_interval: u16;
-        if self.m_last_action_sent_ticks == 0 { // Первая отправка
-            current_send_interval = self.m_latency as u16; // Начинаем с m_latency
+        if self.m_last_action_sent_ticks == 0 {
+            current_send_interval = self.m_latency as u16;
         } else {
             current_send_interval = (get_ticks() as u32).saturating_sub(self.m_last_action_sent_ticks) as u16;
         }
 
-        // Ограничиваем send_interval разумным значением
-        if current_send_interval > 250 { // Максимум, например, 250 мс
+        if current_send_interval > 50 /* 250 */ {
             current_send_interval = self.m_latency as u16;
         }
-        // Минимальный интервал, чтобы не спамить слишком сильно, если latency очень маленькая
-        // Хотя обычно m_latency само по себе является минимальным интервалом.
-        // Если current_send_interval получился 0 из-за быстрого вызова, можно использовать m_latency.
         if current_send_interval == 0 && self.m_last_action_sent_ticks != 0 {
             current_send_interval = self.m_latency as u16;
         }
 
-        // 3. Подготавливаем действия для отправки
+
         let mut actions_for_main_packet: VecDeque<CIncomingAction> = VecDeque::new();
         let mut current_packet_actions_size: usize = 0;
-        const MAX_ACTIONS_PAYLOAD_SIZE: usize = 1400; // Примерный лимит
+        const MAX_ACTIONS_PAYLOAD_SIZE: usize = 1400;
 
-        // Сначала обрабатываем очередь m_actions, отправляя пакеты W3GS_INCOMING_ACTION2 при переполнении
         while let Some(action) = self.m_actions.pop_front() {
             let action_length = action.get_length() as usize;
 
             if current_packet_actions_size + action_length > MAX_ACTIONS_PAYLOAD_SIZE && !actions_for_main_packet.is_empty() {
-                // Пакет переполнения (ACTION2)
-                // Он не содержит send_interval, поэтому передаем 0 или специальное значение,
-                // которое CGameProtocol::SEND_W3GS_INCOMING_ACTION2 обработает как отсутствие интервала.
                 let overflow_packet_data = self.m_protocol.SEND_W3GS_INCOMING_ACTION2(
                     actions_for_main_packet.clone()
                 );
                 self.put_bytes_all(overflow_packet_data).await;
-                // Запись в реплей для ACTION2
-                // ...
 
                 actions_for_main_packet.clear();
                 current_packet_actions_size = 0;
@@ -954,23 +996,16 @@ impl BaseGame {
             current_packet_actions_size += action_length;
         }
 
-        // 4. Формируем и отправляем основной пакет W3GS_INCOMING_ACTION (0x0C)
-        // Этот пакет ВСЕГДА отправляется, даже если actions_for_main_packet пуст.
-        // В этом случае он будет содержать только send_interval и CRC для пустого набора действий.
         let main_packet_data = self.m_protocol.SEND_W3GS_INCOMING_ACTION(
             actions_for_main_packet.clone(), // Может быть пустым
             current_send_interval,
         );
         self.put_bytes_all(main_packet_data).await;
 
-        // Запись в реплей для основного ACTION
-        // ...
-
-        // Фактически отправляем все буферизованные пакеты
         self.send_bytes_all().await;
 
-        // 5. Обновляем время последней отправки
         self.m_last_action_sent_ticks = get_ticks() as u32;
+     //   log_info(&format!("[GAME: {}] send_all_actions END.", self.m_game_name.clone()));
     }
 
     pub async fn put_bytes_all(&mut self, _data: ByteArray) {
@@ -1559,129 +1594,158 @@ impl BaseGame {
         }
     }
 
-    pub async fn event_player_keep_alive(&mut self, checksum: u32) {
-        for p in self.m_players.iter() {
-            if !p.get_delete_me() && p.get_check_sums().is_empty() {
-                return;
-            }
+    pub async fn set_sync_counter(&mut self, pid: u8, counter: u32) {
+        let player = self.get_player_from_pid_mut(pid);
+        if let Some(player) = player {
+            player.set_sync_counter(counter);
         }
-    
-        // Собираем checksums без изменения состояния
-        let mut player_checksums = Vec::new();
-        let mut found_player = false;
-    
-        for (i, p) in self.m_players.iter().enumerate() {
-            if !p.get_delete_me() {
-                if let Some(checksum) = p.get_check_sums().front() {
-                    player_checksums.push((i, *checksum));
-                    found_player = true;
-                }
-            }
+    }
+    // В CBaseGame
+pub async fn event_player_keep_alive(&mut self, pid_from_player: u8, checksum_from_player: u32) {
+    // 1. Найти игрока и сохранить его чексумму и обновить его sync_counter
+    let mut player_found_and_updated = false;
+    if let Some(player) = self.get_player_from_pid_mut(pid_from_player) {
+        if !player.get_delete_me() { // Обрабатываем только активных игроков
+            player.m_check_sums.push_back(checksum_from_player); // Добавляем в очередь чексумм игрока
+            self.set_sync_counter(pid_from_player, self.m_sync_counter);     // Помечаем, что игрок ответил на текущий игровой тик
+            player_found_and_updated = true;
+
+            // Ограничиваем размер очереди чексумм, если нужно (например, хранить только последние N)
+            // const MAX_CHECKSUMS_PER_PLAYER: usize = 5;
+            // if player.m_check_sums.len() > MAX_CHECKSUMS_PER_PLAYER {
+            //     player.m_check_sums.pop_front();
+            // }
         }
-    
-        if !found_player {
-            return;
-        }
-    
-        let first_checksum = player_checksums[0].1;
-        
-        // Проверяем на desync
-        let mut desync_detected = false;
-        for (_, checksum) in &player_checksums {
-            if *checksum != first_checksum {
-                desync_detected = true;
+    }
+
+    if !player_found_and_updated {
+        log_warning(&format!("[GAME: {}] Received keepalive from unknown or deleted PID: {}", self.m_game_name, pid_from_player));
+        return;
+    }
+
+    // 2. Проверить, все ли активные игроки прислали чексумму для текущего m_sync_counter игры
+    let mut all_active_players_responded = true;
+    let mut num_active_players_for_check = 0;
+
+    for p in self.m_players.iter() {
+        if !p.get_delete_me() && !p.get_lagging() { // Игнорируем удаляемых и уже лагающих (их чексуммы могут не приходить)
+            num_active_players_for_check += 1;
+            if p.get_sync_counter() < self.m_sync_counter || p.m_check_sums.is_empty() {
+                // Этот игрок еще не прислал чексумму для текущего m_sync_counter игры
+                // или его очередь чексумм пуста (что не должно быть, если sync_counter обновлен)
+                all_active_players_responded = false;
                 break;
             }
         }
-    
-        let mut add_to_replay = true;
-    
-        if desync_detected {
-            log_info(&format!("[GAME: {}] desync detected", self.m_game_name));
-            self.send_all_chat(self.m_language.desync_detected()).await;
-    
-            // Группируем игроков по checksums
-            let mut bins: HashMap<u32, Vec<u8>> = HashMap::new();
-            for (i, checksum) in &player_checksums {
-                if let Some(player) = self.m_players.get(*i) {
-                    if !player.get_delete_me() {
-                        bins.entry(*checksum)
-                            .or_insert_with(Vec::new)
-                            .push(player.get_pid());
+    }
+
+    // Если игроков для проверки нет (например, все вышли или игра только началась и еще никто не ответил на первый action)
+    if num_active_players_for_check == 0 {
+        return;
+    }
+
+    // 3. Если все ответили, можно сравнивать чексуммы
+        if all_active_players_responded {
+            log_info(&format!("[GAME: {}] All active players responded for sync_counter: {}. Comparing checksums.", self.m_game_name, self.m_sync_counter));
+
+            let mut first_checksum: Option<u32> = None;
+            let mut desync_detected_this_tick = false;
+            let mut player_checksums_for_log: Vec<(String, u32)> = Vec::new();
+
+            // Извлекаем последние чексуммы (те, что соответствуют текущему m_sync_counter)
+            // и проверяем их на совпадение.
+            for p in self.m_players.iter_mut() {
+                if !p.get_delete_me() && !p.get_lagging() && p.get_sync_counter() == self.m_sync_counter {
+                    if let Some(chk) = p.m_check_sums.pop_front() { // Берем самую старую из полученных (FIFO)
+                        player_checksums_for_log.push((p.get_name(), chk));
+                        if first_checksum.is_none() {
+                            first_checksum = Some(chk);
+                        } else if first_checksum != Some(chk) {
+                            desync_detected_this_tick = true;
+                        }
+                    } else {
+                        // Этого не должно произойти, если all_active_players_responded == true
+                        log_error(&format!("[GAME: {}] Player {} responded for tick {} but checksum queue is empty!", self.m_game_name, p.get_name(), self.m_sync_counter));
+                        desync_detected_this_tick = true; // Считаем это десинхроном
                     }
                 }
             }
-    
-            // Находим самую большую группу
-            let mut state_number = 1;
-            let mut largest_bin = bins.iter().next().unwrap();
-            let mut tied = false;
-    
-            for bin in bins.iter() {
-                if bin.1.len() > largest_bin.1.len() {
-                    largest_bin = bin;
-                    tied = false;
-                } else if bin != largest_bin && bin.1.len() == largest_bin.1.len() {
-                    tied = true;
+
+            if desync_detected_this_tick {
+                log_warning(&format!("[GAME: {}] DESYNC DETECTED at sync_counter: {}", self.m_game_name, self.m_sync_counter));
+                for (name, chk) in player_checksums_for_log.clone() {
+                    log_warning(&format!("[GAME: {}]   Player [{}]: Checksum 0x{:X}", self.m_game_name, name, chk));
                 }
-    
-                // Формируем список имен игроков
-                let mut players = String::new();
-                for pid in bin.1.iter() {
-                    if let Some(player) = self.get_player_from_pid(*pid) {
-                        if players.is_empty() {
-                            players = player.get_name();
-                        } else {
-                            players.push_str(&format!(", {}", player.get_name()));
+                self.send_all_chat(self.m_language.desync_detected()).await;
+
+                // Логика определения "виновных" (как в C++ GHost++)
+                // Группируем игроков по чексуммам
+                let mut bins: std::collections::HashMap<u32, Vec<u8>> = std::collections::HashMap::new();
+                for p_info in player_checksums_for_log { // Используем уже извлеченные чексуммы
+                    if let Some(player_obj) = self.get_player_from_name(p_info.0.clone(), true) { // Находим игрока по имени
+                        bins.entry(p_info.1).or_default().push(player_obj.get_pid());
+                    }
+                }
+
+
+                if bins.len() <= 1 {
+                    // Все чексуммы одинаковы (или только один игрок прислал), или нет данных для сравнения.
+                    // Этого не должно произойти, если desync_detected_this_tick == true и есть >1 игрока.
+                    // Возможно, это означает, что проблема была только в одном игроке, который отвалился.
+                    log_info(&format!("[GAME: {}] Desync detected, but bins logic found <= 1 unique checksum groups. No one kicked by bin logic.", self.m_game_name));
+                } else {
+                    // Находим самый большой "бин" (группу игроков с одинаковой чексуммой)
+                    let mut largest_bin_checksum: Option<u32> = None;
+                    let mut largest_bin_size = 0;
+                    let mut tied = false;
+
+                    for (chk, pids_in_bin) in bins.iter() {
+                        self.send_all_chat(Language::new().players_in_game_number(
+                            &format!("0x{:X}", chk), // Отображаем чексумму состояния
+                            &pids_in_bin.iter().map(|pid| self.get_player_from_pid(*pid).map_or_else(|| format!("PID:{}", pid), |p| p.get_name())).collect::<Vec<_>>().join(", ")
+                        )).await;
+
+                        if pids_in_bin.len() > largest_bin_size {
+                            largest_bin_size = pids_in_bin.len();
+                            largest_bin_checksum = Some(*chk);
+                            tied = false;
+                        } else if pids_in_bin.len() == largest_bin_size {
+                            tied = true;
+                        }
+                    }
+
+                    if tied || largest_bin_checksum.is_none() {
+                        log_warning(&format!("[GAME: {}] Desync: Can't kick desynced players due to a tie or no majority. Kicking all players.", self.m_game_name));
+                        self.send_all_chat(Language::new().desync_detected()).await; // Добавьте такую строку в Language
+                        self.stop_players(Language::new().desync_detected());
+                    } else {
+                        let majority_checksum = largest_bin_checksum.unwrap();
+                        log_info(&format!("[GAME: {}] Desync: Kicking players not matching majority checksum 0x{:X}", self.m_game_name, majority_checksum));
+                        let mut players_to_kick_pids = Vec::new();
+                        for (chk, pids_in_bin) in bins.iter() {
+                            if *chk != majority_checksum {
+                                players_to_kick_pids.extend(pids_in_bin);
+                            }
+                        }
+                        let game_name = self.m_game_name.clone();
+                        for pid_to_kick in players_to_kick_pids {
+                            if let Some(player_to_kick) = self.get_player_from_pid_mut(pid_to_kick) {
+                                if !player_to_kick.get_delete_me() { // Проверяем, что еще не помечен на удаление
+                                    log_info(&format!("[GAME: {}] Kicking player [{}] (PID: {}) due to desync.", game_name, player_to_kick.get_name(), pid_to_kick));
+                                    player_to_kick.set_delete_me(true);
+                                    player_to_kick.set_left_reason(Language::new().kicked_due_to_desync());
+                                    player_to_kick.set_left_code(PLAYERLEAVE_LOST as u32); // Или другой код для десинхрона
+                                }
+                            }
                         }
                     }
                 }
-                self.send_all_chat(
-                    self.m_language.players_in_game_number(&state_number.to_string(), &players)
-                ).await;
-                state_number += 1;
-            }
-    
-            if tied {
-                log_info(&format!(
-                    "[GAME: {}] can't kick desynced players because there is a tie, kicking all players instead", 
-                    self.m_game_name
-                ));
-                self.stop_players(self.m_language.kicked_due_to_desync());
-                add_to_replay = false;
             } else {
-                log_info(&format!("[GAME: {}] kicking desynced players", self.m_game_name));
-                
-                // Собираем PID игроков для исключения
-                let mut pids_to_kick = Vec::new();
-                for bin in bins.iter() {
-                    if bin.0 != largest_bin.0 {
-                        pids_to_kick.extend(bin.1.iter());
-                    }
-                }
-    
-                // Теперь безопасно изменяем игроков
-                for player in self.m_players.iter_mut() {
-                    if !player.get_left_message_sent() && pids_to_kick.contains(&player.get_pid()) {
-                        println!("on keep_alive");
-                        player.set_delete_me(true);
-                        player.set_left_reason(self.m_language.kicked_due_to_desync());
-                        player.set_left_code(PLAYERLEAVE_LOST as u32);
-                    }
-                }
+                // Десинхрон не обнаружен для этого тика
+                log_info(&format!("[GAME: {}] Checksums match for sync_counter: {}", self.m_game_name, self.m_sync_counter));
             }
         }
-    
-        // Удаляем первый checksum у всех активных игроков
-        // Если нет get_check_sums_mut(), используйте индексы:
-        for i in 0..self.m_players.len() {
-            if !self.m_players[i].get_delete_me() {
-                // Предполагая, что есть метод для удаления checksum
-                // self.m_players[i].remove_first_checksum();
-                // Или если checksum - это поле, доступное напрямую:
-                self.m_players[i].m_check_sums.pop_back();
-            }
-        }
+        // else: не все игроки еще прислали чексумму для этого m_sync_counter, ждем.
     }
 
     pub async fn event_player_chat_to_host(&mut self, chat_player: &CIncomingChatPlayer, pid: u8, muted: bool, name: String) {
@@ -2067,7 +2131,7 @@ impl BaseGame {
         self.m_start_players = self.get_num_human_players();
         println!("AFTER START PLAYER");
 
-        self.m_socket = TcpServer::new();
+        self.m_socket.shutdown();
 
 
         self.m_potentials.clear();

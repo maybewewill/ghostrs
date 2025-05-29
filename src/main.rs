@@ -1,3 +1,5 @@
+use std::env;
+
 use tokio::time::{timeout, Duration};
 use util::file_read_full_bytes;
 
@@ -26,6 +28,9 @@ mod savegame;
 
 #[tokio::main]
 async fn main() {
+    unsafe {
+        env::set_var("RUST_BACKTRACE", "1");
+    }
     logger::log_info("[GHOSTRS] Starting GHOSTRS...");
     config::init("default.cfg");
 
@@ -44,6 +49,9 @@ async fn main() {
         }
     }
     loop {
-        if ghost.update().await{}
+        if ghost.update().await{
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(15)).await;
     }
 }
