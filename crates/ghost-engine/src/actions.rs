@@ -90,6 +90,48 @@ impl GameState {
             self.actions.extend(hcl_actions);
             tracing::info!(hcl = %hcl, "injected HCL game mode actions on match start");
         }
+
+        if let Some(r) = &self.relay {
+            let mut raw =
+                Vec::with_capacity(64 + self.cfg.map.path.len() + self.cfg.virtual_host_name.len());
+            raw.extend_from_slice(&self.cfg.map.flags.to_le_bytes());
+            raw.push(0);
+            raw.extend_from_slice(&self.cfg.map.width.to_le_bytes());
+            raw.extend_from_slice(&self.cfg.map.height.to_le_bytes());
+            raw.extend_from_slice(&self.cfg.map.crc.to_le_bytes());
+            raw.extend_from_slice(self.cfg.map.path.as_bytes());
+            raw.push(0);
+            raw.extend_from_slice(self.cfg.virtual_host_name.as_bytes());
+            raw.push(0);
+            raw.push(0);
+            raw.extend_from_slice(&self.cfg.map.sha1);
+            let stat_string = ghost_protocol::encode_statstring(&raw);
+
+            let snap = ghost_protocol::dotatv::GameStartSnapshot {
+                game_name: self.cfg.name.clone(),
+                map_path: self.cfg.map.path.clone(),
+                map_size: self.cfg.map.size,
+                map_info_crc: self.cfg.map.info,
+                map_crc: self.cfg.map.crc,
+                map_sha1: self.cfg.map.sha1,
+                stat_string,
+                random_seed: self.random_seed,
+                layout_style: self.cfg.map.layout_style,
+                player_slots: self.cfg.map.num_players,
+                war3_version: 26,
+                is_tft: true,
+                slots: self.slots.as_wire().to_vec(),
+            };
+            r.send_game_start(snap);
+
+            for p in self.players.iter().filter(|p| !p.virtual_host) {
+                let slot = self.slots.as_wire().iter().find(|s| s.pid == p.pid);
+                let colour = slot.map(|s| s.colour).unwrap_or(0);
+                let team = slot.map(|s| s.team).unwrap_or(0);
+                let race = slot.map(|s| s.race).unwrap_or(0x20);
+                r.send_player_info(p.pid, &p.name, colour, team, race);
+            }
+        }
     }
 
     /// One scheduled tick. `skipped` counts periods lost to a stall.
@@ -363,12 +405,21 @@ mod tests {
 
         // 2. Verify relay received overflow (0x48) before main (0x0C) with exact packet payloads
         let mut relay_packets = Vec::new();
+        let mut saw_game_start = false;
+        let mut saw_player_info = false;
         while let Ok(cmd) = relay_rx.try_recv() {
             match cmd {
+                ghost_spectator::RelayCmd::GameStart(_) => saw_game_start = true,
+                ghost_spectator::RelayCmd::PlayerInfo { .. } => saw_player_info = true,
                 ghost_spectator::RelayCmd::GameBlock(b) => relay_packets.push(b),
                 other => panic!("unexpected relay command: {other:?}"),
             }
         }
+        assert!(
+            saw_game_start,
+            "must receive GameStart snapshot on match start"
+        );
+        assert!(saw_player_info, "must receive PlayerInfo on match start");
         let relay_ids: Vec<u8> = relay_packets.iter().map(|b| b[1]).collect();
         assert_eq!(relay_ids, vec![ids::INCOMING_ACTION2, ids::INCOMING_ACTION]);
         assert_eq!(relay_ids, vec![0x48, 0x0C]);

@@ -85,6 +85,7 @@ impl Supervisor {
                 delay: cfg.spectator.delay,
                 max_viewers: cfg.spectator.max_viewers,
                 game_name: "DotaTV".into(),
+                history_max_mb: cfg.spectator.history_max_mb,
             });
             Some(handle)
         } else {
@@ -123,6 +124,7 @@ impl Supervisor {
         tracing::info!("supervisor ready, awaiting battle.net and player events");
 
         let mut lan_timer = tokio::time::interval(Duration::from_secs(3));
+        let mut cleanup_timer = tokio::time::interval(Duration::from_secs(1));
         let auto_start = start_after.map(|s| {
             Box::pin(tokio::time::sleep(Duration::from_secs(s)))
                 as std::pin::Pin<Box<tokio::time::Sleep>>
@@ -156,6 +158,11 @@ impl Supervisor {
                     self.broadcast_lan_game().await;
                 }
 
+                _ = cleanup_timer.tick() => {
+                    self.clean_finished_games();
+                    self.check_autohost();
+                }
+
                 Some((conn_id, stream, peer)) = self.listener_rx.recv() => {
                     self.handle_new_connection(conn_id, stream, peer);
                 }
@@ -168,9 +175,6 @@ impl Supervisor {
                     self.handle_bnet_event(bnet_ev);
                 }
             }
-
-            self.clean_finished_games();
-            self.check_autohost();
         }
 
         Ok(())
@@ -595,16 +599,16 @@ impl Supervisor {
     }
 
     fn check_autohost(&mut self) {
-        if self.current_game.is_none()
-            && let Some(auto) = self.autohost.clone()
-            && self.running_games.len() < auto.max_games
-        {
-            let name = format!("{} #{}", auto.game_prefix, self.autohost_counter);
-            self.autohost_counter += 1;
-            self.selected_map_file = Some(auto.map_file.clone());
-            let bot_name = self.cfg.bnet.username.clone();
-            self.create_game(&name, &bot_name, ghost_protocol::GameVisibility::Public);
+        let Some(auto) = &self.autohost else { return };
+        if self.current_game.is_some() || self.running_games.len() >= auto.max_games {
+            return;
         }
+        let name = format!("{} #{}", auto.game_prefix, self.autohost_counter);
+        let map_file = auto.map_file.clone();
+        self.autohost_counter += 1;
+        self.selected_map_file = Some(map_file);
+        let bot_name = self.cfg.bnet.username.clone();
+        self.create_game(&name, &bot_name, ghost_protocol::GameVisibility::Public);
     }
 
     async fn shutdown(&mut self) {
@@ -633,5 +637,17 @@ mod tests {
             "host_counter must produce distinct random values, got {}",
             seen.len()
         );
+    }
+
+    #[test]
+    fn autohost_config_stores_settings() {
+        let auto = super::AutohostConfig {
+            map_file: "dota.w3x".into(),
+            game_prefix: "Dota AP".into(),
+            max_games: 5,
+        };
+        assert_eq!(auto.map_file, "dota.w3x");
+        assert_eq!(auto.game_prefix, "Dota AP");
+        assert_eq!(auto.max_games, 5);
     }
 }
