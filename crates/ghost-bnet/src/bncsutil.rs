@@ -3,6 +3,8 @@ use std::os::raw::{c_char, c_uint};
 use std::path::Path;
 use std::sync::OnceLock;
 
+pub mod mpq_num;
+
 use libloading::{Library, Symbol};
 
 pub struct BncsUtil {
