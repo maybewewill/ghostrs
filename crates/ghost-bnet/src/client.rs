@@ -42,7 +42,12 @@ pub enum BnetEvent {
 
 #[derive(Debug)]
 pub enum BnetCmd {
-    CreateGame { name: String, map: MapAdvert, host_counter: u32 },
+    CreateGame {
+        name: String,
+        map: MapAdvert,
+        host_counter: u32,
+        visibility: ghost_protocol::GameVisibility,
+    },
     RefreshGame { players: u32, slots: u32 },
     UnhostGame,
     SendChat(String),
@@ -90,6 +95,19 @@ struct ActiveAdvert {
     map: MapAdvert,
     host_counter: u32,
     stat_string: Vec<u8>,
+    visibility: ghost_protocol::GameVisibility,
+}
+
+/// `bnet.cpp:2284` ORs MAPGAMETYPE_PRIVATEGAME into the game type for a private
+/// game, so it stays out of the public game list.
+const MAPGAMETYPE_PRIVATEGAME: u32 = 0x0000_0800;
+
+fn advert_game_type(map: &MapAdvert, visibility: ghost_protocol::GameVisibility) -> [u8; 4] {
+    let mut t = map.game_type;
+    if visibility == ghost_protocol::GameVisibility::Private {
+        t |= MAPGAMETYPE_PRIVATEGAME;
+    }
+    t.to_le_bytes()
 }
 
 async fn run(
@@ -167,12 +185,12 @@ async fn run(
                                 let _ = framed_write.send(p).await;
                             }
                         }
-                        Some(BnetCmd::CreateGame { name, map, host_counter }) => {
+                        Some(BnetCmd::CreateGame { name, map, host_counter, visibility }) => {
                             let stat_string = encode_game_statstring(&map, &name, &cfg.username);
                             if stage == Stage::InChat
                                 && let Ok(p) = outgoing::startadvex3(
-                                    0,
-                                    map.game_type.to_le_bytes(),
+                                    visibility,
+                                    advert_game_type(&map, visibility),
                                     &name,
                                     &cfg.username,
                                     0,
@@ -180,16 +198,16 @@ async fn run(
                                     host_counter,
                                 )
                             {
-                                tracing::info!("--> [SEND] SID_STARTADVEX3 (0x1C) [game=\"{}\", host_counter={}]", name, host_counter);
+                                tracing::info!("--> [SEND] SID_STARTADVEX3 (0x1C) [game=\"{}\", host_counter={}, visibility={:?}]", name, host_counter, visibility);
                                 let _ = framed_write.send(p).await;
                             }
-                            active_advert = Some(ActiveAdvert { name, map, host_counter, stat_string });
+                            active_advert = Some(ActiveAdvert { name, map, host_counter, stat_string, visibility });
                         }
                         Some(BnetCmd::RefreshGame { players: _, slots: _ }) => {
                             if let (Stage::InChat, Some(adv)) = (stage, &active_advert)
                                 && let Ok(p) = outgoing::startadvex3(
-                                    0,
-                                    adv.map.game_type.to_le_bytes(),
+                                    adv.visibility,
+                                    advert_game_type(&adv.map, adv.visibility),
                                     &adv.name,
                                     &cfg.username,
                                     0,
@@ -219,8 +237,8 @@ async fn run(
                 _ = adv_timer.tick() => {
                     if let (Stage::InChat, Some(adv)) = (stage, &active_advert)
                         && let Ok(p) = outgoing::startadvex3(
-                            0,
-                            adv.map.game_type.to_le_bytes(),
+                            adv.visibility,
+                            advert_game_type(&adv.map, adv.visibility),
                             &adv.name,
                             &cfg.username,
                             0,
