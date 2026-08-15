@@ -205,7 +205,17 @@ impl GameState {
             let len = action.wire_len();
             if batch_len + len > MAX_ACTION_PAYLOAD && !batch.is_empty() {
                 match outgoing::incoming_action2(&batch) {
-                    Ok(b) => self.broadcast(b),
+                    Ok(b) => {
+                        if let Some(r) = &self.relay {
+                            r.push(b.clone());
+                        }
+                        if let Some(rep) = self.replay.as_mut()
+                            && b.len() >= 6
+                        {
+                            rep.add_timeslot(0, &b[6..]);
+                        }
+                        self.broadcast(b);
+                    }
                     Err(e) => tracing::warn!(error = %e, "failed to build overflow packet"),
                 }
                 batch.clear();
@@ -315,6 +325,85 @@ mod tests {
             Some(&ids::INCOMING_ACTION),
             "main packet goes last"
         );
+    }
+
+    #[tokio::test]
+    async fn oversized_action_batches_are_relayed_and_recorded_in_order() {
+        let (mut st, mut rxs) = seated_game(1);
+        let (relay_tx, mut relay_rx) = tokio::sync::mpsc::channel(16);
+        st.relay = Some(ghost_spectator::RelayHandle::new(relay_tx));
+
+        st.begin_playing();
+        let _ = drain_ids(&mut rxs[0]);
+
+        let action1 = ActionBlock {
+            pid: 1,
+            data: Bytes::from(vec![0xAA; 800]),
+        };
+        let action2 = ActionBlock {
+            pid: 1,
+            data: Bytes::from(vec![0xBB; 800]),
+        };
+
+        st.actions.push(action1.clone());
+        st.actions.push(action2.clone());
+
+        let expected_overflow =
+            outgoing::incoming_action2(&[action1]).expect("build overflow packet");
+        let expected_main = outgoing::incoming_action(&[action2], 100).expect("build main packet");
+
+        st.on_tick(0);
+
+        // 1. Verify player received overflow then main packet
+        let client_ids = drain_ids(&mut rxs[0]);
+        assert_eq!(
+            client_ids,
+            vec![ids::INCOMING_ACTION2, ids::INCOMING_ACTION]
+        );
+
+        // 2. Verify relay received overflow (0x48) before main (0x0C) with exact packet payloads
+        let mut relay_packets = Vec::new();
+        while let Ok(cmd) = relay_rx.try_recv() {
+            match cmd {
+                ghost_spectator::RelayCmd::GameBlock(b) => relay_packets.push(b),
+                other => panic!("unexpected relay command: {other:?}"),
+            }
+        }
+        let relay_ids: Vec<u8> = relay_packets.iter().map(|b| b[1]).collect();
+        assert_eq!(relay_ids, vec![ids::INCOMING_ACTION2, ids::INCOMING_ACTION]);
+        assert_eq!(relay_ids, vec![0x48, 0x0C]);
+        assert_eq!(
+            relay_packets,
+            vec![expected_overflow.clone(), expected_main.clone()]
+        );
+
+        // 3. Verify replay body recorded timeslots in order with exact bytes and time increments
+        let rep = st.replay.take().expect("replay must exist");
+        let (body, duration_ms) = rep.finish().expect("replay finish must succeed");
+        assert_eq!(duration_ms, 100);
+
+        let mut expected_timeslot_bytes = Vec::new();
+        // Overflow timeslot: record id 0x1E, length, time increment 0, payload after interval (&b[6..])
+        expected_timeslot_bytes.push(0x1E);
+        expected_timeslot_bytes
+            .extend_from_slice(&((2 + expected_overflow[6..].len()) as u16).to_le_bytes());
+        expected_timeslot_bytes.extend_from_slice(&0u16.to_le_bytes());
+        expected_timeslot_bytes.extend_from_slice(&expected_overflow[6..]);
+
+        // Main timeslot: record id 0x1E, length, time increment 100, payload after interval (&b[6..])
+        expected_timeslot_bytes.push(0x1E);
+        expected_timeslot_bytes
+            .extend_from_slice(&((2 + expected_main[6..].len()) as u16).to_le_bytes());
+        expected_timeslot_bytes.extend_from_slice(&100u16.to_le_bytes());
+        expected_timeslot_bytes.extend_from_slice(&expected_main[6..]);
+
+        let start_marker = &[0x1A, 1, 0, 0, 0, 0x1B, 1, 0, 0, 0, 0x1C, 1, 0, 0, 0];
+        let start_idx = body
+            .windows(start_marker.len())
+            .position(|w| w == start_marker)
+            .expect("GameStartRecord start blocks marker");
+        let timeslot_bytes = &body[start_idx + start_marker.len()..];
+        assert_eq!(timeslot_bytes, expected_timeslot_bytes.as_slice());
     }
 
     #[test]
