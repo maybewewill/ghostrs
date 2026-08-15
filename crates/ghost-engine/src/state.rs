@@ -28,7 +28,6 @@ pub struct MapInfo {
 }
 
 impl MapInfo {
-    #[cfg(test)]
     pub fn test_default() -> Self {
         Self {
             path: "Maps\\Download\\test.w3x".into(),
