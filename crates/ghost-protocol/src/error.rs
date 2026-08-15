@@ -14,6 +14,18 @@ pub enum ProtoError {
     Io(#[from] std::io::Error),
 }
 
+impl Clone for ProtoError {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Truncated { need, have } => Self::Truncated { need: *need, have: *have },
+            Self::UnterminatedString => Self::UnterminatedString,
+            Self::BadValue(s) => Self::BadValue(s),
+            Self::TooLarge(l) => Self::TooLarge(*l),
+            Self::Io(e) => Self::Io(std::io::Error::new(e.kind(), e.to_string())),
+        }
+    }
+}
+
 impl PartialEq for ProtoError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
