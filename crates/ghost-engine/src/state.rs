@@ -59,6 +59,7 @@ pub struct GameConfig {
     pub virtual_host_name: String,
     pub reconnect_wait: Duration,
     pub custom_slots: Option<Vec<ghost_protocol::w3gs::SlotInfo>>,
+    pub replay_path: std::path::PathBuf,
     pub relay: Option<ghost_spectator::RelayHandle>,
 }
 
@@ -100,6 +101,7 @@ pub struct GameState {
     pub finished: bool,
     pub downloads: Vec<crate::mapxfer::Download>,
     pub relay: Option<ghost_spectator::RelayHandle>,
+    pub replay: Option<ghost_spectator::ReplayBody>,
     pub jitter_histogram: [u64; 5],
     pub last_jitter_report: Instant,
     pub dota: Option<crate::stats_dota::StatsDotA>,
@@ -126,6 +128,8 @@ impl GameState {
         };
         let tick = TickScheduler::new(cfg.latency);
         let relay = cfg.relay.clone();
+        let mut replay = ghost_spectator::ReplayBody::new(1, &cfg.virtual_host_name);
+        replay.set_game(&cfg.name, &[0u8; 4], cfg.map.game_type);
         Self {
             phase: GamePhase::Lobby,
             slots,
@@ -142,6 +146,7 @@ impl GameState {
             finished: false,
             downloads: Vec::new(),
             relay,
+            replay: Some(replay),
             jitter_histogram: [0; 5],
             last_jitter_report: Instant::now(),
             dota: Some(crate::stats_dota::StatsDotA::new(cfg.name.clone())),
@@ -213,6 +218,9 @@ impl GameState {
         if pids.is_empty() {
             return;
         }
+        if let Some(rep) = self.replay.as_mut() {
+            rep.add_chat(from, flag, 0, message);
+        }
         match outgoing::chat_from_host(from, &pids, flag, extra, message) {
             Ok(b) => self.broadcast(b),
             Err(e) => tracing::warn!(error = %e, "failed to build chat packet"),
@@ -240,6 +248,9 @@ impl GameState {
         }
 
         for (pid, reason) in gone {
+            if let Some(rep) = self.replay.as_mut() {
+                rep.add_leaver(pid, 13, 0); // 13 = PLAYERLEAVE_LOBBY / disconnect
+            }
             self.players.remove_pid(pid);
             self.slots.release(pid);
             tracing::info!(game = %self.cfg.name, pid, %reason, "player left");

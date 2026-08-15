@@ -486,6 +486,7 @@ impl Supervisor {
             virtual_host_name: self.cfg.game.virtual_host_name.clone(),
             reconnect_wait: self.cfg.game.reconnect_wait,
             custom_slots,
+            replay_path: std::path::PathBuf::from(format!("replays/{}.w3g", name)),
             relay: self.spectator_relay.clone(),
         };
 

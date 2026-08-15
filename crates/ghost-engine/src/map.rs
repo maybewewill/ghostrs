@@ -492,6 +492,7 @@ mod tests {
             virtual_host_name: "|cFFEB0000iCCup".into(),
             reconnect_wait: Duration::from_secs(180),
             custom_slots: Some(parsed.slots.clone()),
+            replay_path: PathBuf::from("replays/dota_test.w3g"),
             relay: None,
         };
 

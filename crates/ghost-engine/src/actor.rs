@@ -59,6 +59,20 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
             break;
         }
     }
+
+    if let Some(rep) = state.replay.take() {
+        let replay_path = state.cfg.replay_path.clone();
+        tokio::spawn(async move {
+            if let Some(parent) = replay_path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            if let Err(e) = ghost_spectator::save_replay(replay_path.clone(), rep, 26, 6059, true).await {
+                tracing::error!(path = ?replay_path, error = %e, "failed to save .w3g replay file");
+            } else {
+                tracing::info!(path = ?replay_path, "successfully saved .w3g replay file off-thread");
+            }
+        });
+    }
 }
 
 impl GameState {
@@ -165,6 +179,7 @@ pub mod tests_support {
             virtual_host_name: "|cFF4080C0Ghost".into(),
             reconnect_wait: Duration::from_secs(180),
             custom_slots: None,
+            replay_path: std::path::PathBuf::from("replays/test.w3g"),
             relay: None,
         }
     }

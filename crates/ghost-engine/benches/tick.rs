@@ -33,6 +33,7 @@ fn seated_state(n: usize) -> GameState {
         virtual_host_name: "|cFF4080C0Ghost".into(),
         reconnect_wait: Duration::from_secs(180),
         custom_slots: None,
+        replay_path: std::path::PathBuf::from("replays/bench.w3g"),
         relay: None,
     };
     let mut st = GameState::new(cfg);
