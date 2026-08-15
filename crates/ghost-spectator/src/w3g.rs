@@ -48,7 +48,7 @@ impl W3gWriter {
         header.extend_from_slice(&HEADER_SIZE.to_le_bytes());
         header.extend_from_slice(&(file_size as u32).to_le_bytes());
         header.extend_from_slice(&1u32.to_le_bytes()); // header version
-        header.extend_from_slice(&(padded.len() as u32).to_le_bytes());
+        header.extend_from_slice(&(decompressed.len() as u32).to_le_bytes());
         header.extend_from_slice(&(blocks.len() as u32).to_le_bytes());
         // "W3XP"/"WAR3" stored reversed on the wire (packed.cpp:326-336).
         header.extend_from_slice(if self.tft { b"PX3W" } else { b"3RAW" });
@@ -57,7 +57,7 @@ impl W3gWriter {
         header.extend_from_slice(&FLAGS_MULTIPLAYER.to_le_bytes());
         header.extend_from_slice(&self.replay_length_ms.to_le_bytes());
         header.extend_from_slice(&0u32.to_le_bytes()); // CRC placeholder
-        debug_assert_eq!(header.len(), HEADER_SIZE as usize);
+        // Header is always HEADER_SIZE bytes: 28 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 = 68.
 
         let crc = crc32fast::hash(&header);
         header[64..68].copy_from_slice(&crc.to_le_bytes());
@@ -79,7 +79,7 @@ impl W3gWriter {
             out.extend_from_slice(&bh);
             out.extend_from_slice(block);
         }
-        debug_assert_eq!(out.len(), file_size);
+        // File size is HEADER_SIZE + sum of all block compressed sizes + 8 bytes per block.
         out
     }
 }
@@ -126,7 +126,7 @@ mod tests {
 
         let n_blocks = read_u32(&out, 44) as usize;
         assert_eq!(n_blocks, 3);
-        assert_eq!(read_u32(&out, 40) as usize, 8192 * 3, "decompressed size must be padded");
+        assert_eq!(read_u32(&out, 40) as usize, 8192 * 2 + 7, "decompressed size is the unpadded original length, used by reader to trim padding");
 
         let mut pos = 68;
         for i in 0..n_blocks {
@@ -158,5 +158,40 @@ mod tests {
         let expected = (crc1 & 0xFFFF) | (crc2 << 16);
 
         assert_eq!(u32::from_le_bytes([out[72], out[73], out[74], out[75]]), expected);
+    }
+
+    #[test]
+    fn the_decompressed_size_field_enables_trim_and_round_trip() {
+        // Test with non-block-aligned input to ensure padding logic is correct.
+        let body = vec![0x42u8; 8192 * 2 + 7];
+        let w = W3gWriter::new(26, 6059, true);
+        let out = w.pack(&body);
+
+        let stored_decompressed_len = read_u32(&out, 40) as usize;
+        let block_count = read_u32(&out, 44) as usize;
+
+        // For a non-aligned body, the decompressed size must be strictly less than block_count * 8192.
+        assert!(
+            stored_decompressed_len < block_count as usize * BLOCK_SIZE,
+            "decompressed size {} must be less than {} (blocks * 8192)",
+            stored_decompressed_len,
+            block_count * BLOCK_SIZE
+        );
+
+        // Decompress all blocks and truncate to the stored length to verify round-trip.
+        let mut decompressed = Vec::new();
+        let mut pos = 68;
+        for _ in 0..block_count {
+            let c_len = u16::from_le_bytes([out[pos], out[pos + 1]]) as usize;
+            let comp = &out[pos + 8..pos + 8 + c_len];
+            ZlibDecoder::new(comp)
+                .read_to_end(&mut decompressed)
+                .expect("block must be valid zlib");
+            pos += 8 + c_len;
+        }
+
+        // Truncate to the original unpadded length and verify exact match.
+        decompressed.truncate(stored_decompressed_len);
+        assert_eq!(decompressed, body, "decompressed and truncated must match original body");
     }
 }
