@@ -56,6 +56,12 @@ impl PlayerLink {
     pub fn is_closed(&self) -> bool {
         self.tx.is_closed()
     }
+
+    /// Builds a link over a caller-supplied channel. For tests and for the
+    /// virtual host player, which has no socket behind it.
+    pub fn for_test(tx: mpsc::Sender<Bytes>) -> Self {
+        Self { tx }
+    }
 }
 
 /// Spawns the reader and writer tasks for one connection.
