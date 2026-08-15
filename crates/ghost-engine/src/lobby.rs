@@ -39,9 +39,7 @@ impl GameState {
             return;
         };
 
-        let colour = self.players.next_free_colour(&self.slots);
-        let team = sid / 6;
-        self.slots.occupy(sid, pid, team, colour);
+        self.slots.occupy_slot(sid, pid);
 
         let mut player = Player::new(pid, req.name.clone(), conn_id, link);
         player.external_ip = external_ip;
@@ -55,7 +53,7 @@ impl GameState {
             external_ip,
             self.slots.as_wire(),
             self.random_seed,
-            self.cfg.map.num_teams,
+            self.cfg.map.layout_style,
             self.cfg.map.num_players,
         ) {
             Ok(b) => {

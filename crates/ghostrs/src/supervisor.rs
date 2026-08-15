@@ -16,6 +16,13 @@ use tokio::task::JoinHandle;
 
 use crate::config::Config;
 
+#[derive(Debug, Clone)]
+pub struct AutohostConfig {
+    pub map_file: String,
+    pub game_prefix: String,
+    pub max_games: usize,
+}
+
 pub struct Supervisor {
     cfg: Config,
     store: Store,
@@ -33,6 +40,8 @@ pub struct Supervisor {
     #[allow(dead_code)]
     spectator_relay: Option<RelayHandle>,
     selected_map_file: Option<String>,
+    autohost: Option<AutohostConfig>,
+    autohost_counter: u32,
 }
 
 struct ActiveLobbyAdvert {
@@ -94,6 +103,8 @@ impl Supervisor {
             udp_broadcaster,
             spectator_relay,
             selected_map_file: None,
+            autohost: None,
+            autohost_counter: 1,
         };
 
         sup.event_loop().await
@@ -130,6 +141,7 @@ impl Supervisor {
             }
 
             self.clean_finished_games();
+            self.check_autohost();
         }
 
         Ok(())
@@ -232,6 +244,29 @@ impl Supervisor {
                     self.bnet.send(BnetCmd::SendChat(format!("/w {user} Map set to [{map_name}]")));
                 }
             }
+            "autohost" => {
+                let args: Vec<&str> = parts.collect();
+                if args.first() == Some(&"off") {
+                    self.autohost = None;
+                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Autohost disabled.")));
+                } else if args.len() >= 2 {
+                    let map_file = args[0].to_string();
+                    let game_prefix = args[1..].join(" ");
+                    self.autohost = Some(AutohostConfig {
+                        map_file: map_file.clone(),
+                        game_prefix: game_prefix.clone(),
+                        max_games: self.cfg.bot.max_games,
+                    });
+                    self.selected_map_file = Some(map_file.clone());
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Autohost enabled for map [{map_file}] prefix [{game_prefix}]."
+                    )));
+                } else {
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Usage: !autohost <mapfile> <prefix> | !autohost off"
+                    )));
+                }
+            }
             "unhost" => {
                 if let Some(g) = self.current_game.take() {
                     g.send(GameCmd::Unhost);
@@ -264,6 +299,40 @@ impl Supervisor {
                     self.bnet.send(BnetCmd::SendChat(format!("/w {user} Unbanned [{target}]")));
                 }
             }
+            "checkban" => {
+                if let Some(target) = parts.next() {
+                    let store = self.store.clone();
+                    let bnet = self.bnet.clone();
+                    let user_str = user.to_string();
+                    let target_str = target.to_string();
+                    tokio::spawn(async move {
+                        if let Some(b) = store.is_banned(&target_str, "").await {
+                            bnet.send(BnetCmd::SendChat(format!(
+                                "/w {user_str} [{target_str}] was banned by [{}] for [{}]",
+                                b.admin, b.reason
+                            )));
+                        } else {
+                            bnet.send(BnetCmd::SendChat(format!("/w {user_str} [{target_str}] is not banned")));
+                        }
+                    });
+                }
+            }
+            "statsdota" | "stats" => {
+                let target = parts.next().unwrap_or(user).to_string();
+                let store = self.store.clone();
+                let bnet = self.bnet.clone();
+                let user_str = user.to_string();
+                tokio::spawn(async move {
+                    if let Some(stats) = store.get_dota_stats(&target).await {
+                        bnet.send(BnetCmd::SendChat(format!(
+                            "/w {user_str} [{target}] Games: {}, K/D/A: {}/{}/{}, CS: {}/{}",
+                            stats.games, stats.kills, stats.deaths, stats.assists, stats.creep_kills, stats.creep_denies
+                        )));
+                    } else {
+                        bnet.send(BnetCmd::SendChat(format!("/w {user_str} No stats recorded for [{target}].")));
+                    }
+                });
+            }
             "status" => {
                 let running = self.running_games.len();
                 let active = if self.current_game.is_some() { "1 lobby" } else { "none" };
@@ -275,17 +344,25 @@ impl Supervisor {
         }
     }
 
-    fn resolve_map_info(&self, game_name: &str) -> (MapInfo, [u8; 4]) {
-        let candidate_filename = self
-            .selected_map_file
-            .clone()
-            .unwrap_or_else(|| format!("{game_name}.w3x"));
-
-        let candidate_paths = [
-            PathBuf::from(&self.cfg.bot.map_path).join(&candidate_filename),
-            PathBuf::from("maps").join(&candidate_filename),
-            PathBuf::from(&candidate_filename),
-        ];
+    fn resolve_map_info(&self, game_name: &str) -> (MapInfo, [u8; 4], Option<Vec<ghost_protocol::w3gs::SlotInfo>>) {
+        let mut candidate_filenames = Vec::new();
+        if let Some(sel) = &self.selected_map_file {
+            candidate_filenames.push(sel.clone());
+            if !sel.ends_with(".w3x") && !sel.ends_with(".w3m") {
+                candidate_filenames.push(format!("{sel}.w3x"));
+                candidate_filenames.push(format!("{sel}.w3m"));
+            }
+        }
+        if let Some(def) = &self.cfg.bot.default_map {
+            candidate_filenames.push(def.clone());
+            if !def.ends_with(".w3x") && !def.ends_with(".w3m") {
+                candidate_filenames.push(format!("{def}.w3x"));
+                candidate_filenames.push(format!("{def}.w3m"));
+            }
+        }
+        candidate_filenames.push(format!("{game_name}.w3x"));
+        candidate_filenames.push(format!("{game_name}.w3m"));
+        candidate_filenames.push(game_name.to_string());
 
         let common_j = std::fs::read("war3/common.j")
             .or_else(|_| std::fs::read("maps/common.j"))
@@ -294,19 +371,27 @@ impl Supervisor {
             .or_else(|_| std::fs::read("maps/blizzard.j"))
             .ok();
 
-        for path in &candidate_paths {
-            if path.exists()
-                && let Ok(parsed) = ParsedMap::load_mpq(path, common_j.as_deref(), blizzard_j.as_deref())
-            {
-                tracing::info!(
-                    path = %path.display(),
-                    crc = format!("0x{:08X}", parsed.info.crc),
-                    size = parsed.info.size,
-                    players = parsed.info.num_players,
-                    "loaded map MPQ successfully"
-                );
-                let game_type = parsed.info.game_type.to_le_bytes();
-                return (parsed.info, game_type);
+        for candidate_filename in &candidate_filenames {
+            let candidate_paths = [
+                PathBuf::from(&self.cfg.bot.map_path).join(candidate_filename),
+                PathBuf::from("maps").join(candidate_filename),
+                PathBuf::from(candidate_filename),
+            ];
+
+            for path in &candidate_paths {
+                if path.exists()
+                    && let Ok(parsed) = ParsedMap::load_mpq(path, common_j.as_deref(), blizzard_j.as_deref())
+                {
+                    tracing::info!(
+                        path = %path.display(),
+                        crc = format!("0x{:08X}", parsed.info.crc),
+                        size = parsed.info.size,
+                        players = parsed.info.num_players,
+                        "loaded map MPQ successfully"
+                    );
+                    let game_type = parsed.info.game_type.to_le_bytes();
+                    return (parsed.info, game_type, Some(parsed.slots));
+                }
             }
         }
 
@@ -316,7 +401,7 @@ impl Supervisor {
         );
 
         let fallback_info = MapInfo {
-            path: format!("Maps\\Download\\{candidate_filename}"),
+            path: format!("Maps\\Download\\{game_name}.w3x"),
             size: 1000,
             info: 1,
             crc: 0x1234_5678,
@@ -328,12 +413,13 @@ impl Supervisor {
             game_type: 1,
             flags: 0x0000_0002 | 0x0000_0800 | 0x0000_4000 | 0x0006_0000,
             data: None,
+            layout_style: 0,
         };
-        (fallback_info, [1, 0, 0, 0])
+        (fallback_info, [1, 0, 0, 0], None)
     }
 
     fn create_game(&mut self, name: &str, owner: &str) {
-        let (map_info, map_game_type) = self.resolve_map_info(name);
+        let (map_info, map_game_type, custom_slots) = self.resolve_map_info(name);
         let host_counter: u32 = rand::random();
 
         let advert_map = MapAdvert {
@@ -362,6 +448,8 @@ impl Supervisor {
             map: map_info,
             virtual_host_name: self.cfg.game.virtual_host_name.clone(),
             reconnect_wait: self.cfg.game.reconnect_wait,
+            custom_slots,
+            relay: self.spectator_relay.clone(),
         };
 
         let (handle, join) = spawn_game(game_cfg);
@@ -396,6 +484,19 @@ impl Supervisor {
             self.current_game_name = None;
             self.current_game_advert = None;
             self.bnet.send(BnetCmd::UnhostGame);
+        }
+    }
+
+    fn check_autohost(&mut self) {
+        if self.current_game.is_none()
+            && let Some(auto) = self.autohost.clone()
+            && self.running_games.len() < auto.max_games
+        {
+            let name = format!("{} #{}", auto.game_prefix, self.autohost_counter);
+            self.autohost_counter += 1;
+            self.selected_map_file = Some(auto.map_file.clone());
+            let bot_name = self.cfg.bnet.username.clone();
+            self.create_game(&name, &bot_name);
         }
     }
 

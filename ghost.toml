@@ -1,0 +1,97 @@
+# =============================================================================
+# Ghost-RS Configuration (ghost.toml)
+# Converted from default.cfg with all original values preserved
+# =============================================================================
+
+[bot]
+# Bind address and port for player connections
+bind_address = "0.0.0.0"
+host_port = 6112
+
+# Maximum concurrent games
+max_games = 10
+
+# Expansion pack (The Frozen Throne = true)
+tft = true
+
+# Default map (e.g. "iCCup DotA 454.w3x")
+default_map = "iCCup DotA 454.w3x"
+
+# Directory where maps are stored
+map_path = "maps"
+
+# Directory where Warcraft III mpq / scripts are located (common.j, blizzard.j)
+war3_path = "war3"
+
+# Download settings
+allow_downloads = true
+max_downloaders = 3
+max_download_speed = 1000000
+
+# Ping settings
+autokick_ping = 400
+lc_pings = true
+
+# LAN and Broadcast settings
+udp_broadcast_target = "13.36.52.2"
+udp_cmd_port = 6969
+
+[bnet]
+# Battle.net / PvPGN server address and port
+server = "wc3.theabyss.ru"
+server_alias = "The Abyss"
+port = 6112
+
+# Bot account credentials
+username = "BOT"
+password = "18c79c7c686d%"
+
+# CD Keys (ROC & TFT)
+cdkey_roc = "E2CDWX92HKY68XCFT2F9BJVZGK"
+cdkey_tft = "RTG4KBRCZB2PKPX8PKZVHM9ZK9"
+
+# Channel to join upon login
+first_channel = "iccup.pro"
+
+# Root administrators who have full control over the bot
+root_admins = ["slash", "bonjour"]
+
+# Command trigger prefix character
+command_trigger = "!"
+
+# Warcraft III version (26 = 1.26a)
+war3_version = 26
+exe_version = [1, 0, 26, 1]
+password_hash_type = "pvpgn"
+pvpgn_realm_name = "PvPGN Realm"
+
+[game]
+# Latency in milliseconds (tick rate: 15ms as in default.cfg)
+latency_ms = 15
+
+# Sync limit in milliseconds before lag screen appears
+sync_limit = 500
+
+# Virtual host name displayed in player slot list
+virtual_host_name = "|cFFEB0000iCCup"
+
+# Reconnect wait time for GProxy++ clients (in seconds)
+reconnect_wait_sec = 180
+
+# Automatic HCL mode from game name (e.g. "-ap", "-ar", "-sd")
+hcl_from_game_name = true
+
+# Votekick settings
+votekick_allowed = true
+votekick_percentage = 100
+
+[spectator]
+# DotaTV / Spectator relay server
+enabled = true
+port = 6114
+delay_sec = 120
+max_viewers = 32
+
+[database]
+# SQLite database file path
+path = "ghost.db"

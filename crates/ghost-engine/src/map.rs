@@ -362,8 +362,14 @@ impl ParsedMap {
         flags |= 0x0000_4000;             // MAPFLAG_TEAMSTOGETHER
         flags |= 0x0006_0000;             // MAPFLAG_FIXEDTEAMS
 
+        let file_name = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("map.w3x");
+        let wc3_map_path = format!("Maps\\Download\\{file_name}");
+
         let info = MapInfo {
-            path: path.to_string_lossy().to_string(),
+            path: wc3_map_path,
             size: map_size,
             info: map_size,
             crc: map_crc,
@@ -375,6 +381,7 @@ impl ParsedMap {
             game_type,
             flags,
             data: Some(Arc::new(map_data)),
+            layout_style,
         };
 
         Ok(Self {
@@ -384,3 +391,203 @@ impl ParsedMap {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_parse_iccup_dota_map() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_dir = manifest_dir.parent().unwrap().parent().unwrap();
+        let map_path = workspace_dir.join("maps").join("iCCup DotA 454.w3x");
+
+        if !map_path.exists() {
+            eprintln!("Map file not found at {:?}", map_path);
+            return;
+        }
+
+        let common_j_path = workspace_dir.join("maps").join("common.j");
+        let blizzard_j_path = workspace_dir.join("maps").join("blizzard.j");
+
+        let common_j = fs::read(&common_j_path).ok();
+        let blizzard_j = fs::read(&blizzard_j_path).ok();
+
+        let parsed = ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
+            .expect("Failed to parse iCCup DotA 454.w3x");
+
+        println!("=== MAP INFO ===");
+        println!("Path: {}", parsed.info.path);
+        println!("Size: {} bytes", parsed.info.size);
+        println!("CRC: 0x{:08X}", parsed.info.crc);
+        println!("SHA1: {:02x?}", parsed.info.sha1);
+        println!("Dimensions: {}x{}", parsed.info.width, parsed.info.height);
+        println!("Players: {}, Teams: {}", parsed.info.num_players, parsed.info.num_teams);
+        println!("Layout Style: {}", parsed.layout_style);
+        println!("Game Type: 0x{:08X}", parsed.info.game_type);
+        println!("Flags: 0x{:08X}", parsed.info.flags);
+        println!("Slots count: {}", parsed.slots.len());
+        for (i, slot) in parsed.slots.iter().enumerate() {
+            println!("  Slot {}: team={}, colour={}, status={}, race=0x{:02X}, computer={}", 
+                i, slot.team, slot.colour, slot.slot_status, slot.race, slot.computer);
+        }
+
+        assert_eq!(parsed.info.path, "Maps\\Download\\iCCup DotA 454.w3x");
+        assert_eq!(parsed.info.size, 17020779);
+        assert_eq!(parsed.info.crc, 0x4308685B);
+        assert_eq!(parsed.info.width, 118);
+        assert_eq!(parsed.info.height, 120);
+        assert_eq!(parsed.info.num_players, 10);
+        assert_eq!(parsed.info.num_teams, 2);
+        assert_eq!(parsed.layout_style, 3);
+        assert_eq!(parsed.slots.len(), 10);
+
+        // Sentinel team 0 (slots 0..5), colours 1..5
+        for s in &parsed.slots[0..5] {
+            assert_eq!(s.team, 0);
+            assert_eq!(s.race, 0x08); // NightElf
+        }
+        // Scourge team 1 (slots 5..10), colours 7..11
+        for s in &parsed.slots[5..10] {
+            assert_eq!(s.team, 1);
+            assert_eq!(s.race, 0x04); // Undead
+        }
+    }
+
+    #[test]
+    fn test_iccup_dota_game_simulation_and_packets() {
+        use std::time::Duration;
+        use bytes::{BufMut, BytesMut};
+        use tokio::sync::mpsc;
+        use ghost_net::{AnyFrame, PlayerLink};
+        use ghost_protocol::frame::Frame;
+        use ghost_protocol::w3gs::ids;
+        use crate::actor::tests_support::reqjoin_bytes;
+        use crate::state::{GameConfig, GamePhase, GameState};
+        use crate::handle::GameCmd;
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_dir = manifest_dir.parent().unwrap().parent().unwrap();
+        let map_path = workspace_dir.join("maps").join("iCCup DotA 454.w3x");
+
+        if !map_path.exists() {
+            return;
+        }
+
+        let common_j = fs::read(workspace_dir.join("maps").join("common.j")).ok();
+        let blizzard_j = fs::read(workspace_dir.join("maps").join("blizzard.j")).ok();
+
+        let parsed = ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
+            .expect("Failed to parse map");
+
+        let game_cfg = GameConfig {
+            name: "DotA 5v5 -ap #1".into(),
+            owner: "slash".into(),
+            host_counter: 12345,
+            num_slots: parsed.slots.len(),
+            latency: Duration::from_millis(50),
+            sync_limit: 50,
+            map: parsed.info.clone(),
+            virtual_host_name: "|cFFEB0000iCCup".into(),
+            reconnect_wait: Duration::from_secs(180),
+            custom_slots: Some(parsed.slots.clone()),
+            relay: None,
+        };
+
+        let mut st = GameState::new(game_cfg);
+
+        // Verify DotA stats tracker and HCL initialized
+        assert!(st.dota.is_some());
+        assert_eq!(st.phase, GamePhase::Lobby);
+        assert_eq!(st.slots.len(), 10);
+
+        // 1. Connect Player 1 (Alice)
+        let (tx1, mut rx1) = mpsc::channel(128);
+        st.add_conn(1, PlayerLink::for_test(tx1), [192, 168, 1, 10]);
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Alice"))));
+
+        // Verify Alice seated in Sentinel Slot 0
+        let p1 = st.players.by_name_partial("Alice").unwrap();
+        assert_eq!(p1.pid, 1);
+        let wire_slots = st.slots.as_wire();
+        assert_eq!(wire_slots[0].slot_status, 2); // Occupied
+        assert_eq!(wire_slots[0].pid, 1);
+        assert_eq!(wire_slots[0].team, 0); // Sentinel
+        assert_eq!(wire_slots[0].colour, 1); // Blue
+
+        // Drain Alice's packets: should contain SLOT_INFO_JOIN, MAP_CHECK, GPS_INIT, SLOT_INFO
+        let mut alice_packets = Vec::new();
+        while let Ok(b) = rx1.try_recv() {
+            alice_packets.push(b[1]); // Packet ID byte
+        }
+        assert!(alice_packets.contains(&ids::SLOT_INFO_JOIN));
+        assert!(alice_packets.contains(&ids::MAP_CHECK));
+
+        // 2. Connect Player 2 (Bob)
+        let (tx2, mut rx2) = mpsc::channel(128);
+        st.add_conn(2, PlayerLink::for_test(tx2), [192, 168, 1, 11]);
+        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Bob"))));
+
+        let p2 = st.players.by_name_partial("Bob").unwrap();
+        assert_eq!(p2.pid, 2);
+        let wire_slots = st.slots.as_wire();
+        assert_eq!(wire_slots[1].slot_status, 2); // Occupied
+        assert_eq!(wire_slots[1].pid, 2);
+        assert_eq!(wire_slots[1].team, 0); // Sentinel
+        assert_eq!(wire_slots[1].colour, 2); // Teal
+
+        // 3. Start game with !start command
+        st.handle_cmd(GameCmd::Start { by: "slash".into() });
+        assert!(matches!(st.phase, GamePhase::Countdown { .. }));
+
+        // Tick countdown down to 0
+        for _ in 0..6 {
+            st.on_tick(0);
+        }
+        assert_eq!(st.phase, GamePhase::Loading);
+
+        // 4. Both players report GAME_LOADED_SELF
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())));
+        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())));
+
+        // All players loaded -> Game is live Playing!
+        assert_eq!(st.phase, GamePhase::Playing);
+
+        // Drain pending packets from rx1 and rx2
+        while rx1.try_recv().is_ok() {}
+        while rx2.try_recv().is_ok() {}
+
+        // 5. Game tick in Playing state: Action packet W3GS_INCOMING_ACTION is broadcast
+        st.on_tick(0);
+
+        let p1_pkt = rx1.try_recv().expect("Alice must receive INCOMING_ACTION clock tick");
+        let p2_pkt = rx2.try_recv().expect("Bob must receive INCOMING_ACTION clock tick");
+        assert_eq!(p1_pkt[1], ids::INCOMING_ACTION);
+        assert_eq!(p2_pkt[1], ids::INCOMING_ACTION);
+
+        // 6. Alice sends an action (e.g. hero order)
+        let mut action_body = BytesMut::new();
+        action_body.put_u32_le(0); // crc
+        action_body.put_slice(&[0x10, 0x01, 0x02, 0x03]); // arbitrary action payload
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::OUTGOING_ACTION, action_body.freeze())));
+
+        // Alice sends keepalive
+        let mut keepalive = BytesMut::new();
+        keepalive.put_u32_le(0);
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::OUTGOING_KEEPALIVE, keepalive.freeze())));
+
+        // Next tick: the action is bundled into INCOMING_ACTION and sent to all players
+        st.on_tick(0);
+
+        let p1_action_tick = rx1.try_recv().expect("Alice must receive action tick");
+        let p2_action_tick = rx2.try_recv().expect("Bob must receive action tick");
+        assert_eq!(p1_action_tick[1], ids::INCOMING_ACTION);
+        assert_eq!(p2_action_tick[1], ids::INCOMING_ACTION);
+
+        println!("Simulation completed successfully: Map resolved, Lobby seated, Game started, Loading finished, Playing ticks & Actions streamed!");
+    }
+}
+
+
+

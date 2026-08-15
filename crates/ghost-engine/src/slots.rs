@@ -33,6 +33,10 @@ impl SlotTable {
         Self { slots }
     }
 
+    pub fn from_slots(slots: Vec<SlotInfo>) -> Self {
+        Self { slots }
+    }
+
     pub fn as_wire(&self) -> &[SlotInfo] {
         &self.slots
     }
@@ -70,6 +74,18 @@ impl SlotTable {
         }
         self.slots.swap(a, b);
         true
+    }
+
+    pub fn occupy_slot(&mut self, sid: u8, pid: u8) -> bool {
+        match self.get_mut(sid) {
+            Some(s) => {
+                s.slot_status = SlotStatus::Occupied as u8;
+                s.pid = pid;
+                s.computer = 0;
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn occupy(&mut self, sid: u8, pid: u8, team: u8, colour: u8) -> bool {

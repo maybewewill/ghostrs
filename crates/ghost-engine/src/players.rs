@@ -34,6 +34,8 @@ pub struct Player {
     pub gproxy: bool,
     pub gproxy_buffer: Option<crate::gproxy::GProxyBuffer>,
     pub disconnected_since: Option<Instant>,
+    pub muted: bool,
+    pub reserved: bool,
     /// Set once the player is scheduled for removal; carries the reason.
     pub left: Option<String>,
 }
@@ -57,6 +59,8 @@ impl Player {
             gproxy: false,
             gproxy_buffer: None,
             disconnected_since: None,
+            muted: false,
+            reserved: false,
             left: None,
         }
     }
