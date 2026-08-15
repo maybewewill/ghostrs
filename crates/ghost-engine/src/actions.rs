@@ -82,11 +82,25 @@ impl GameState {
         self.reap_gproxy_timeouts(self.cfg.reconnect_wait);
         match self.phase {
             GamePhase::Lobby => {}
-            GamePhase::Countdown { remaining } => {
-                if remaining == 0 {
+            GamePhase::Countdown {
+                started_at,
+                total_duration,
+                ref mut last_announced_step,
+            } => {
+                let elapsed = started_at.elapsed();
+                if elapsed >= total_duration {
                     self.begin_loading();
                 } else {
-                    self.phase = GamePhase::Countdown { remaining: remaining - 1 };
+                    let steps_elapsed =
+                        (elapsed.as_millis() / crate::state::COUNTDOWN_STEP.as_millis()) as u8;
+                    let step = crate::state::COUNTDOWN_STEPS.saturating_sub(steps_elapsed);
+                    if step < *last_announced_step
+                        && step >= 1
+                        && step <= crate::state::COUNTDOWN_STEPS
+                    {
+                        *last_announced_step = step;
+                        self.send_chat_all(&format!("{step}. . ."));
+                    }
                 }
             }
             GamePhase::Loading => {}
@@ -234,12 +248,52 @@ mod tests {
     }
 
     #[test]
+    fn countdown_progresses_by_wall_clock_time() {
+        let (mut st, mut rxs) = seated_game(2);
+        st.phase = GamePhase::Countdown {
+            started_at: std::time::Instant::now() - std::time::Duration::from_millis(2600),
+            total_duration: crate::state::COUNTDOWN_TOTAL,
+            last_announced_step: 1,
+        };
+
+        st.on_tick(0);
+        assert_eq!(st.phase, GamePhase::Loading);
+        let sent = drain_ids(&mut rxs[0]);
+        assert!(sent.contains(&ids::COUNTDOWN_START));
+        assert!(sent.contains(&ids::COUNTDOWN_END));
+    }
+
+    #[test]
+    fn countdown_announces_steps_at_500ms_intervals() {
+        let (mut st, mut rxs) = seated_game(2);
+        for rx in &mut rxs {
+            let _ = drain_ids(rx);
+        }
+        st.start_countdown("host");
+        assert!(matches!(st.phase, GamePhase::Countdown { .. }));
+
+        // Initial tick at t=0 announces "5. . ."
+        st.on_tick(0);
+        let sent = drain_ids(&mut rxs[0]);
+        assert!(sent.contains(&ids::CHAT_FROM_HOST));
+
+        // Advance time by 500ms -> step 4
+        if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+            *started_at = std::time::Instant::now() - std::time::Duration::from_millis(500);
+        }
+        st.on_tick(0);
+        let sent = drain_ids(&mut rxs[0]);
+        assert!(sent.contains(&ids::CHAT_FROM_HOST));
+    }
+
+    #[test]
     fn countdown_reaching_zero_starts_loading() {
         let (mut st, mut rxs) = seated_game(1);
         st.start_countdown("slash");
-        for _ in 0..6 {
-            st.on_tick(0);
+        if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+            *started_at = std::time::Instant::now() - crate::state::COUNTDOWN_TOTAL;
         }
+        st.on_tick(0);
         assert_eq!(st.phase, GamePhase::Loading);
         let sent = drain_ids(&mut rxs[0]);
         assert!(sent.contains(&ids::COUNTDOWN_START));
