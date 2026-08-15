@@ -1,0 +1,13 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          components: clippy, rustfmt
+      - run: cargo check --workspace
+      - run: cargo test --workspace --exclude ghostrs-legacy
+      - run: cargo clippy -p ghost-protocol -- -D warnings
