@@ -136,7 +136,11 @@ impl GameState {
     pub fn start_countdown(&mut self, by: &str) {
         if matches!(self.phase, GamePhase::Lobby) {
             tracing::info!(game = %self.cfg.name, %by, "countdown started");
-            self.phase = GamePhase::Countdown { remaining: 5 };
+            self.phase = GamePhase::Countdown {
+                started_at: std::time::Instant::now(),
+                total_duration: crate::state::COUNTDOWN_TOTAL,
+                last_announced_step: crate::state::COUNTDOWN_STEPS + 1,
+            };
         }
     }
 }

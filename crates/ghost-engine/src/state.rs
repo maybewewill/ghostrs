@@ -63,10 +63,20 @@ pub struct GameConfig {
     pub relay: Option<ghost_spectator::RelayHandle>,
 }
 
+/// GHost++ steps the countdown every 500 ms (`game_base.cpp:707`), so five steps
+/// "5 . . . 4 . . . 3 . . . 2 . . . 1" take 2.5 s in total — not 5 s, and not 75 ms.
+pub const COUNTDOWN_STEP: Duration = Duration::from_millis(500);
+pub const COUNTDOWN_STEPS: u8 = 5;
+pub const COUNTDOWN_TOTAL: Duration = Duration::from_millis(500 * COUNTDOWN_STEPS as u64);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GamePhase {
     Lobby,
-    Countdown { remaining: u8 },
+    Countdown {
+        started_at: Instant,
+        total_duration: Duration,
+        last_announced_step: u8,
+    },
     Loading,
     Playing,
     Over,

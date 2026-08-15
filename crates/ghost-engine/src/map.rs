@@ -541,10 +541,11 @@ mod tests {
         st.handle_cmd(GameCmd::Start { by: "slash".into() });
         assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
-        // Tick countdown down to 0
-        for _ in 0..6 {
-            st.on_tick(0);
+        // Fast-forward countdown duration
+        if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+            *started_at = std::time::Instant::now() - std::time::Duration::from_millis(2600);
         }
+        st.on_tick(0);
         assert_eq!(st.phase, GamePhase::Loading);
 
         // 4. Both players report GAME_LOADED_SELF
