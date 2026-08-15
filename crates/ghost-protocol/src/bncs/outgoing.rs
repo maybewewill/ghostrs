@@ -59,8 +59,28 @@ pub fn checkad() -> Bytes {
         .expect("16-byte checkad fits")
 }
 
+/// Game visibility on Battle.net, sent as the `SID_STARTADVEX3` state field.
+///
+/// `bnetprotocol.cpp:702` documents the field as
+/// "State (16 = public, 17 = private, 18 = close)", and `gameprotocol.h:32-33`
+/// defines the constants. There is no valid zero state: a game advertised with
+/// 0 is listed by name but cannot be joined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum GameVisibility {
+    Public = 16,
+    Private = 17,
+    Close = 18,
+}
+
+impl GameVisibility {
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
+
 pub fn startadvex3(
-    state: u8,
+    visibility: GameVisibility,
     map_game_type: [u8; 4],
     game_name: &str,
     _host_name: &str,
@@ -72,7 +92,7 @@ pub fn startadvex3(
     let host_counter_string: String = host_counter_string.chars().rev().collect();
 
     let mut p = BytesMut::with_capacity(40 + game_name.len() + stat_string.len());
-    p.put_u8(state);
+    p.put_u8(visibility.as_u8());
     p.put_slice(&[0, 0, 0]);
     p.put_u32_le(up_time);
     p.put_slice(&map_game_type);
@@ -80,7 +100,9 @@ pub fn startadvex3(
     p.put_slice(&[0, 0, 0, 0]);   // custom game
     put_cstring(&mut p, game_name);
     p.put_u8(0);
-    p.put_u8(98);
+    // bnetprotocol.cpp:712-714 sends 110 when MAX_SLOTS > 12; gameslot.h:39 sets MAX_SLOTS = 24.
+    // The C++ comment warns this is the number of PIDs Warcraft III allocates.
+    p.put_u8(110);
     p.put_slice(host_counter_string.as_bytes());
     p.put_slice(stat_string);
     p.put_u8(0);
@@ -236,6 +258,49 @@ pub fn account_logon_proof(client_password_proof: &[u8]) -> Result<Bytes, ProtoE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startadvex3_writes_correct_visibility_and_24_slot_capacity() {
+        let stat_string = vec![0x01, 0x02, 0x00];
+        let pkt_pub = startadvex3(
+            GameVisibility::Public,
+            [1, 0, 0, 0],
+            "DotA 5v5",
+            "iCCupHost",
+            0,
+            &stat_string,
+            0x12345678,
+        )
+        .expect("packet encoding must succeed");
+
+        assert_eq!(pkt_pub[0], 0xFF);
+        assert_eq!(pkt_pub[1], 0x1C);
+        // gameprotocol.h:32 GAME_PUBLIC = 16; bnetprotocol.cpp:702 documents the field.
+        assert_eq!(pkt_pub[4], 16, "public game state must be 16");
+        assert_eq!(&pkt_pub[5..8], &[0, 0, 0]);
+
+        // [header 4][state 4][uptime 4][game_type 4][unknown 4][custom 4]
+        // [game_name + NUL][password NUL][slots_free 1][host_counter 8]...
+        let name_len = "DotA 5v5\0".len();
+        let slots_free_offset = 4 + 4 + 4 + 4 + 4 + 4 + name_len + 1;
+        // bnetprotocol.cpp:712-714 sends 110 when MAX_SLOTS > 12; gameslot.h:39 sets it to 24.
+        assert_eq!(
+            pkt_pub[slots_free_offset], 110,
+            "slots_free must be 110 (char 'n', 23 slots free for MAX_SLOTS = 24)"
+        );
+
+        let pkt_priv = startadvex3(
+            GameVisibility::Private,
+            [1, 0, 0, 0],
+            "DotA 5v5",
+            "iCCupHost",
+            0,
+            &stat_string,
+            0x12345678,
+        )
+        .expect("packet encoding must succeed");
+        assert_eq!(pkt_priv[4], 17, "private game state must be 17");
+    }
 
     #[test]
     fn every_packet_is_framed_with_0xff_and_a_correct_length() {

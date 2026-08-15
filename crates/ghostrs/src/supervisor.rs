@@ -113,7 +113,7 @@ impl Supervisor {
 
         if let Some(name) = host_on_start {
             let owner = sup.cfg.bnet.username.clone();
-            sup.create_game(&name, &owner);
+            sup.create_game(&name, &owner, ghost_protocol::GameVisibility::Public);
         }
 
         sup.event_loop(start_after).await
@@ -256,6 +256,11 @@ impl Supervisor {
 
         match verb.to_lowercase().as_str() {
             "pub" | "priv" => {
+                let visibility = if verb.eq_ignore_ascii_case("pub") {
+                    ghost_protocol::GameVisibility::Public
+                } else {
+                    ghost_protocol::GameVisibility::Private
+                };
                 let name = parts.collect::<Vec<_>>().join(" ");
                 if name.is_empty() {
                     self.bnet.send(BnetCmd::SendChat(format!("/w {user} Usage: !pub <game name>")));
@@ -265,7 +270,7 @@ impl Supervisor {
                     self.bnet.send(BnetCmd::SendChat(format!("/w {user} Error: maximum games reached")));
                     return;
                 }
-                self.create_game(&name, user);
+                self.create_game(&name, user, visibility);
             }
             "map" | "load" => {
                 let map_name = parts.collect::<Vec<_>>().join(" ");
@@ -450,7 +455,7 @@ impl Supervisor {
         (fallback_info, [1, 0, 0, 0], None)
     }
 
-    fn create_game(&mut self, name: &str, owner: &str) {
+    fn create_game(&mut self, name: &str, owner: &str, visibility: ghost_protocol::GameVisibility) {
         let (map_info, map_game_type, custom_slots) = self.resolve_map_info(name);
         let host_counter: u32 = rand::random();
 
@@ -502,6 +507,7 @@ impl Supervisor {
             name: name.to_string(),
             map: advert_map,
             host_counter,
+            visibility,
         });
 
         tracing::info!(game = %name, %owner, "game created and advertised on Battle.net and LAN");
@@ -529,7 +535,7 @@ impl Supervisor {
             self.autohost_counter += 1;
             self.selected_map_file = Some(auto.map_file.clone());
             let bot_name = self.cfg.bnet.username.clone();
-            self.create_game(&name, &bot_name);
+            self.create_game(&name, &bot_name, ghost_protocol::GameVisibility::Public);
         }
     }
 
