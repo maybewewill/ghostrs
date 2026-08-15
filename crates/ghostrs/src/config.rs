@@ -33,6 +33,7 @@ pub struct SpectatorConfig {
     pub port: u16,
     pub delay: Duration,
     pub max_viewers: usize,
+    pub history_max_mb: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +111,9 @@ fn default_spectator_delay_sec() -> u64 {
 }
 fn default_max_viewers() -> usize {
     32
+}
+fn default_history_max_mb() -> usize {
+    64
 }
 fn default_db_path() -> PathBuf {
     PathBuf::from("ghost.db")
@@ -226,6 +230,8 @@ pub struct TomlSpectator {
     pub delay_sec: u64,
     #[serde(default = "default_max_viewers")]
     pub max_viewers: usize,
+    #[serde(default = "default_history_max_mb")]
+    pub history_max_mb: usize,
 }
 
 impl Default for TomlSpectator {
@@ -235,6 +241,7 @@ impl Default for TomlSpectator {
             port: default_spectator_port(),
             delay_sec: default_spectator_delay_sec(),
             max_viewers: default_max_viewers(),
+            history_max_mb: default_history_max_mb(),
         }
     }
 }
@@ -326,6 +333,7 @@ impl Config {
                 port: spectator.port,
                 delay: Duration::from_secs(spectator.delay_sec),
                 max_viewers: spectator.max_viewers,
+                history_max_mb: spectator.history_max_mb,
             },
             db_path: database.path,
         })
@@ -387,6 +395,7 @@ impl Config {
         let spectator_port = parse_int(&map, "spectator_port", 6114)?;
         let spectator_delay_sec = parse_int(&map, "spectator_delay", 120)?;
         let spectator_max_viewers = parse_int(&map, "spectator_maxviewers", 32)?;
+        let spectator_history_max_mb = parse_int(&map, "spectator_history_max_mb", 64)?;
 
         let db_path = map
             .get("db_path")
@@ -443,6 +452,7 @@ impl Config {
                 port: spectator_port,
                 delay: Duration::from_secs(spectator_delay_sec),
                 max_viewers: spectator_max_viewers,
+                history_max_mb: spectator_history_max_mb,
             },
             db_path,
         })
@@ -514,6 +524,7 @@ enabled = true
 port = 6114
 delay_sec = 120
 max_viewers = 32
+history_max_mb = 128
 
 [database]
 path = "custom.db"
@@ -534,6 +545,8 @@ path = "custom.db"
         assert!(c.spectator.enabled);
         assert_eq!(c.spectator.port, 6114);
         assert_eq!(c.spectator.delay.as_secs(), 120);
+        assert_eq!(c.spectator.max_viewers, 32);
+        assert_eq!(c.spectator.history_max_mb, 128);
         assert_eq!(c.db_path, PathBuf::from("custom.db"));
     }
 
@@ -544,6 +557,7 @@ path = "custom.db"
         assert_eq!(c.bnet.server, "wc3.theabyss.ru");
         assert_eq!(c.game.latency.as_millis(), 100);
         assert_eq!(c.game.sync_limit, 50);
+        assert_eq!(c.spectator.history_max_mb, 64);
     }
 
     #[test]

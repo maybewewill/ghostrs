@@ -5,7 +5,7 @@ pub mod relay;
 pub mod w3g;
 
 pub use body::ReplayBody;
-pub use relay::{Relay, RelayCmd, RelayConfig, RelayHandle, spawn_relay};
+pub use relay::{Relay, RelayCmd, RelayConfig, RelayError, RelayHandle, spawn_relay};
 pub use w3g::W3gWriter;
 
 /// Packs and writes a replay on a blocking thread. zlib on a 4 MB body takes
