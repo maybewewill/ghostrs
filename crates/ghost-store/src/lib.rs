@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod queries;
 pub mod schema;
 pub mod writer;
 

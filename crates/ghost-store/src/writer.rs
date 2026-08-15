@@ -109,6 +109,15 @@ pub enum StoreCmd {
         players: Vec<(u32, String, String)>,
         vars: Vec<W3MMDVarRecord>,
     },
+    RecordDownload {
+        map: String,
+        map_size: u64,
+        name: String,
+        ip: String,
+        spoofed: u8,
+        downloaded: u64,
+        duration: u64,
+    },
     Query(StoreQuery),
 }
 
@@ -199,6 +208,27 @@ impl Store {
             tree_hp,
             throne_hp,
             players,
+        });
+    }
+
+    pub fn record_download(
+        &self,
+        map: &str,
+        map_size: u64,
+        name: &str,
+        ip: &str,
+        spoofed: u8,
+        downloaded: u64,
+        duration: u64,
+    ) {
+        let _ = self.tx.try_send(StoreCmd::RecordDownload {
+            map: map.to_string(),
+            map_size,
+            name: name.to_string(),
+            ip: ip.to_string(),
+            spoofed,
+            downloaded,
+            duration,
         });
     }
 
@@ -346,6 +376,26 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                     let _ = tx.commit();
                 }
             }
+            StoreCmd::RecordDownload {
+                map,
+                map_size,
+                name,
+                ip,
+                spoofed,
+                downloaded,
+                duration,
+            } => {
+                let _ = crate::queries::insert_download(
+                    &conn,
+                    &map,
+                    map_size,
+                    &name,
+                    &ip,
+                    spoofed,
+                    downloaded,
+                    duration,
+                );
+            }
             StoreCmd::Query(q) => match q {
                 StoreQuery::IsBanned { name, ip, reply } => {
                     let res: rusqlite::Result<Option<Ban>> = (|| {
@@ -376,35 +426,8 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                     let _ = reply.send(res.unwrap_or(false));
                 }
                 StoreQuery::GetDotAStats { name, reply } => {
-                    let res: rusqlite::Result<Option<DotAStatsSummary>> = (|| {
-                        let mut stmt = conn.prepare(
-                            "SELECT count(*), sum(kills), sum(deaths), sum(assists), sum(creep_kills), sum(creep_denies), sum(neutral_kills), sum(tower_kills), sum(rax_kills)
-                             FROM dotaplayers WHERE name = ?1 COLLATE NOCASE"
-                        )?;
-                        let mut rows = stmt.query(rusqlite::params![name])?;
-                        if let Some(row) = rows.next()? {
-                            let games: u32 = row.get(0)?;
-                            if games == 0 {
-                                return Ok(None);
-                            }
-                            Ok(Some(DotAStatsSummary {
-                                games,
-                                wins: 0,
-                                losses: 0,
-                                kills: row.get::<_, Option<u32>>(1)?.unwrap_or(0),
-                                deaths: row.get::<_, Option<u32>>(2)?.unwrap_or(0),
-                                assists: row.get::<_, Option<u32>>(3)?.unwrap_or(0),
-                                creep_kills: row.get::<_, Option<u32>>(4)?.unwrap_or(0),
-                                creep_denies: row.get::<_, Option<u32>>(5)?.unwrap_or(0),
-                                neutral_kills: row.get::<_, Option<u32>>(6)?.unwrap_or(0),
-                                tower_kills: row.get::<_, Option<u32>>(7)?.unwrap_or(0),
-                                rax_kills: row.get::<_, Option<u32>>(8)?.unwrap_or(0),
-                            }))
-                        } else {
-                            Ok(None)
-                        }
-                    })();
-                    let _ = reply.send(res.ok().flatten());
+                    let res = crate::queries::query_dota_stats(&conn, &name);
+                    let _ = reply.send(res);
                 }
                 StoreQuery::JournalMode { reply } => {
                     let mode: String = conn

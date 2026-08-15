@@ -93,6 +93,19 @@ CREATE TABLE IF NOT EXISTS w3mmdvars (
     value_string TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_w3mmdvars_game ON w3mmdvars(game_id);
+
+CREATE TABLE IF NOT EXISTS downloads (
+    id         INTEGER PRIMARY KEY,
+    map        TEXT NOT NULL,
+    map_size   INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    ip         TEXT NOT NULL DEFAULT '',
+    spoofed    INTEGER NOT NULL DEFAULT 0,
+    downloaded INTEGER NOT NULL DEFAULT 0,
+    duration   INTEGER NOT NULL DEFAULT 0,
+    created    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_downloads_name ON downloads(name COLLATE NOCASE);
 "#;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
