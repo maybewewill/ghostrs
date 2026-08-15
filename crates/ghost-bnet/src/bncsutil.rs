@@ -8,6 +8,7 @@ pub mod xsha1;
 pub mod cdkey;
 pub mod exe_info;
 pub mod check_revision;
+pub mod nls;
 
 use libloading::{Library, Symbol};
 
