@@ -1,0 +1,22 @@
+//! Battle.net (BNCS) packet identifiers, ported from src/bnetprotocol.rs.
+pub const SID_NULL: u8 = 0x00;
+pub const SID_STOPADV: u8 = 0x02;
+pub const SID_GETADVLISTEX: u8 = 0x09;
+pub const SID_ENTERCHAT: u8 = 0x0A;
+pub const SID_JOINCHANNEL: u8 = 0x0C;
+pub const SID_CHATCOMMAND: u8 = 0x0E;
+pub const SID_CHATEVENT: u8 = 0x0F;
+pub const SID_CHECKAD: u8 = 0x15;
+pub const SID_STARTADVEX3: u8 = 0x1C;
+pub const SID_NOTIFYJOIN: u8 = 0x22;
+pub const SID_PING: u8 = 0x25;
+pub const SID_LOGONRESPONSE: u8 = 0x29;
+pub const SID_NETGAMEPORT: u8 = 0x45;
+pub const SID_AUTH_INFO: u8 = 0x50;
+pub const SID_AUTH_CHECK: u8 = 0x51;
+pub const SID_AUTH_ACCOUNTLOGON: u8 = 0x53;
+pub const SID_AUTH_ACCOUNTLOGONPROOF: u8 = 0x54;
+pub const SID_WARDEN: u8 = 0x5E;
+pub const SID_FRIENDSLIST: u8 = 0x65;
+pub const SID_CLANMEMBERLIST: u8 = 0x7D;
+pub const SID_CLANMEMBERSTATUSCHANGE: u8 = 0x7F;

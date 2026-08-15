@@ -1,6 +1,6 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use super::codec::Frame;
+use super::codec::{Frame, W3gsFrameExt};
 use super::ids;
 use super::slot::SlotInfo;
 use crate::bytes_ext::put_cstring;
