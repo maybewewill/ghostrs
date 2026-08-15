@@ -520,6 +520,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghost-bnet"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "ghost-protocol",
+ "rand",
+ "sha1",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "ghost-engine"
 version = "0.1.0"
 dependencies = [
