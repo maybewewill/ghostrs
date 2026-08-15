@@ -9,5 +9,5 @@ jobs:
         with:
           components: clippy, rustfmt
       - run: cargo check --workspace
-      - run: cargo test --workspace --exclude ghostrs-legacy
-      - run: cargo clippy -p ghost-protocol -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
