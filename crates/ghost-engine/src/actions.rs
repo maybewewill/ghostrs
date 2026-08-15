@@ -62,6 +62,7 @@ impl GameState {
 
     /// One scheduled tick. `skipped` counts periods lost to a stall.
     pub fn on_tick(&mut self, skipped: u32) {
+        self.pump_downloads();
         match self.phase {
             GamePhase::Lobby => {}
             GamePhase::Countdown { remaining } => {
