@@ -180,10 +180,11 @@ Append to `impl GameState` in `crates/ghost-engine/src/state.rs`:
         let Some(pid) = self.players.next_free_pid() else {
             return;
         };
-        // The link is a dead channel: nothing is ever read from it, and every
-        // try_send fails with Closed, which reap_left_players must not act on.
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        std::mem::forget(rx); // keep the channel open so try_send reports Backpressure, not Closed
+        // The virtual host has no socket. `broadcast` and `reap_left_players`
+        // both skip it, so nothing ever sends through this link; it exists only
+        // to satisfy the Player type. Dropping the receiver is fine and must not
+        // be worked around with a leak.
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
         let mut p = crate::players::Player::new(pid, self.cfg.virtual_host_name.clone(), u64::MAX, PlayerLink::for_test(tx));
         p.virtual_host = true;
         p.loaded = true;
@@ -722,7 +723,7 @@ impl ReplayBody {
 }
 ```
 
-Note: the three start blocks must appear *before* the accumulated blocks. The test asserts them at the tail only because that test never calls `add_timeslot`; keep the ordering above and adjust the first test's tail assertion to slice the 15 bytes that precede `self.blocks` when blocks are empty — with no blocks they are the last 15 bytes, so the assertion holds as written.
+Ordering note: the three start blocks are emitted before `self.blocks`. The first test never calls `add_timeslot`, so `self.blocks` is empty and the start blocks really are the last 15 bytes — its tail assertion is correct as written. Do not reorder to make the assertion pass.
 
 Add `pub mod body;` + `pub use body::ReplayBody;` to `crates/ghost-spectator/src/lib.rs`.
 
@@ -1171,10 +1172,12 @@ pub fn viewer_chat(text: &str) -> Result<Bytes, ProtoError> {
 pub struct PlayerList(pub Vec<(u8, u8, u8, String)>);
 
 impl PlayerList {
-    pub fn decode(mut src: &Bytes) -> Result<Self, ProtoError> {
+    pub fn decode(src: &Bytes) -> Result<Self, ProtoError> {
         let mut b = src.clone();
         let n = b.try_get_u8()?;
-        let mut out = Vec::with_capacity(n as usize);
+        // `n` is attacker-controlled, so reserve nothing up front: a malformed
+        // count of 255 must not preallocate on our behalf before the reads fail.
+        let mut out = Vec::new();
         for _ in 0..n {
             let pid = b.try_get_u8()?;
             let colour = b.try_get_u8()?;
@@ -1182,7 +1185,6 @@ impl PlayerList {
             let name = b.try_get_cstring()?;
             out.push((pid, colour, team, name));
         }
-        let _ = &mut src;
         Ok(Self(out))
     }
 }
@@ -2249,12 +2251,9 @@ impl GameState {
             self.votekick = None;
             self.send_chat_all("The votekick expired.");
         }
-        let _ = std::mem::replace(&mut self.locked, self.locked);
     }
 }
 ```
-
-Drop the no-op `mem::replace` line; it is there only to show the borrow shape — remove it when implementing.
 
 - [ ] **Step 5: Add autostart**
 
@@ -2937,21 +2936,14 @@ pub const MAX_DOWNLOAD_BYTES_PER_TICK: usize = 150 * 1024;
 
 and thread a `remaining` budget through `pump_downloads`, decrementing per chunk and breaking when it reaches zero. Round-robin the starting downloader each tick so no player is starved.
 
-- [ ] **Step 4: Assert the map is parsed off the actor**
+- [ ] **Step 4: Verify the map is parsed off the actor**
 
-Add to `crates/ghost-engine/src/map.rs` tests:
+This is a code-reading check, not a test — asserting on source text would test the spelling of the code rather than its behaviour.
 
-```rust
-#[test]
-fn parsing_a_map_never_happens_inside_the_actor() {
-    // The actor holds only the already-parsed MapInfo; ParsedMap::from_path is
-    // called by the supervisor before spawn_game. This test documents the
-    // invariant so a future refactor cannot quietly reintroduce file I/O.
-    let src = include_str!("actor.rs");
-    assert!(!src.contains("ParsedMap::from_path"), "map parsing must not appear in the actor");
-    assert!(!src.contains("std::fs::"), "the actor must not touch the filesystem");
-}
-```
+Run: `rg -n 'ParsedMap::from_path|std::fs::|File::open' crates/ghost-engine/src/actor.rs crates/ghost-engine/src/actions.rs crates/ghost-engine/src/state.rs`
+Expected: no matches. Map parsing belongs to the supervisor, before `spawn_game`.
+
+If there are matches, move the offending call into `crates/ghostrs/src/supervisor.rs` so `GameConfig` arrives with `MapInfo::data` already populated, and record what moved in the task report.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
