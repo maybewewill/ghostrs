@@ -81,6 +81,7 @@ impl GameState {
                 }
             }
             GameCmd::Shutdown => self.finished = true,
+            GameCmd::CreateVirtualHost => self.create_virtual_host(),
         }
     }
 

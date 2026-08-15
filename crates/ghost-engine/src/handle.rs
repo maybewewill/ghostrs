@@ -9,6 +9,7 @@ pub enum GameCmd {
     Chat(String),
     Unhost,
     Shutdown,
+    CreateVirtualHost,
 }
 
 /// Cheap, cloneable handle to a game actor.

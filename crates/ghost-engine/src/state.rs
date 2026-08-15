@@ -101,6 +101,9 @@ pub struct GameState {
     pub start_votes: Vec<u8>,
     pub last_player_left: Option<(String, String)>,
     pub holds: std::collections::HashMap<u8, String>,
+    /// PID of the fake "bot" player shown in the lobby, or 255 when absent.
+    /// Mirrors GHost++ `m_VirtualHostPID` (game_base.cpp:4702).
+    pub virtual_host_pid: u8,
 }
 
 impl GameState {
@@ -142,6 +145,7 @@ impl GameState {
             start_votes: Vec::new(),
             last_player_left: None,
             holds: std::collections::HashMap::new(),
+            virtual_host_pid: 255,
             cfg,
         }
     }
@@ -154,7 +158,7 @@ impl GameState {
     /// keep up is marked for removal rather than allowed to stall the tick.
     pub fn broadcast(&mut self, bytes: Bytes) {
         for p in self.players.iter_mut() {
-            if p.left.is_some() {
+            if p.left.is_some() || p.virtual_host {
                 continue;
             }
             if let Some(buf) = p.gproxy_buffer.as_mut() {
@@ -189,17 +193,18 @@ impl GameState {
     }
 
     pub fn send_chat_all(&mut self, message: &str) {
-        let pids: Vec<u8> = self.players.iter().map(|p| p.pid).collect();
-        if pids.is_empty() {
-            return;
-        }
         let flag = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
             0x10
         } else {
             0x20
         };
         let extra: &[u8] = if flag == 0x20 { &[0, 0, 0, 0] } else { &[] };
-        match outgoing::chat_from_host(255, &pids, flag, extra, message) {
+        let from = if self.virtual_host_pid != 255 { self.virtual_host_pid } else { 255 };
+        let pids: Vec<u8> = self.players.iter().filter(|p| !p.virtual_host).map(|p| p.pid).collect();
+        if pids.is_empty() {
+            return;
+        }
+        match outgoing::chat_from_host(from, &pids, flag, extra, message) {
             Ok(b) => self.broadcast(b),
             Err(e) => tracing::warn!(error = %e, "failed to build chat packet"),
         }
@@ -211,6 +216,7 @@ impl GameState {
         let gone: Vec<(u8, String)> = self
             .players
             .iter()
+            .filter(|p| !p.virtual_host)
             .filter_map(|p| p.left.as_ref().map(|r| (p.pid, r.clone())))
             .collect();
 
@@ -261,6 +267,44 @@ impl GameState {
             );
             self.last_jitter_report = Instant::now();
         }
+    }
+
+    /// Seats a socket-less player so clients have a sender to attribute bot chat
+    /// to, and so the lobby count matches GHost++. No-op when one already exists.
+    pub fn create_virtual_host(&mut self) {
+        if self.virtual_host_pid != 255 {
+            return;
+        }
+        let Some(pid) = self.players.next_free_pid() else {
+            return;
+        };
+        // The virtual host has no socket. `broadcast` and `reap_left_players`
+        // both skip it, so nothing ever sends through this link; it exists only
+        // to satisfy the Player type. Dropping the receiver is fine and must not
+        // be worked around with a leak.
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let mut p = crate::players::Player::new(pid, self.cfg.virtual_host_name.clone(), u64::MAX, PlayerLink::for_test(tx));
+        p.virtual_host = true;
+        p.loaded = true;
+        self.virtual_host_pid = pid;
+
+        let ip = [0u8; 4];
+        if let Ok(b) = outgoing::player_info(pid, &self.cfg.virtual_host_name, ip, ip) {
+            self.broadcast(b);
+        }
+        self.players.insert(p);
+    }
+
+    /// Removes the virtual host, freeing its PID for a real player.
+    pub fn delete_virtual_host(&mut self) {
+        if self.virtual_host_pid == 255 {
+            return;
+        }
+        let pid = self.virtual_host_pid;
+        self.virtual_host_pid = 255;
+        self.players.remove_pid(pid);
+        // PLAYERLEAVE_LOBBY == 13, matching game_base.cpp:4721.
+        self.broadcast(outgoing::player_leave_others(pid, 13));
     }
 }
 
