@@ -324,28 +324,9 @@ mod tests {
         let formula = "A=3845581634 B=880823580 C=1363937103 4 A=A-S B=B-C C=C-A A=A-B";
         let checksum = check_revision_flat(formula, &f1, &f2, &f3, 1).expect("checksum computed");
 
-        // If native library is present, verify bit-for-bit identical checksum
-        if let Some(native) = crate::bncsutil::BncsUtil::global() {
-            let native_checksum = native
-                .check_revision_flat(
-                    formula,
-                    f1.to_str().unwrap(),
-                    f2.to_str().unwrap(),
-                    f3.to_str().unwrap(),
-                    1,
-                )
-                .expect("native checkRevisionFlat");
-            assert_eq!(
-                checksum, native_checksum,
-                "pure-Rust check_revision_flat must match native bncsutil bit-for-bit"
-            );
-        }
-
-        // The comparison above is conditional, and once bncsutil is deleted it
-        // will never run again — a test that silently stops testing is worse
-        // than no test. This pins the value the native library produced for
-        // exactly these three files and this formula, captured 2026-08-15 with
-        // the library present and verified equal to the Rust result.
+        // Pinned value the native library produced for exactly these three files
+        // and this formula, captured 2026-08-15 with the library present and
+        // verified equal to the pure-Rust result.
         assert_eq!(
             checksum, 2_297_190_262,
             "checksum drifted from the value the native bncsutil produced"

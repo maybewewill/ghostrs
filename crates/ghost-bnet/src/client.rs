@@ -10,6 +10,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::advert::{MapAdvert, encode_game_statstring};
 use crate::auth::create_key_info;
+use crate::bncsutil::NlsSession;
 
 #[derive(Debug, Clone)]
 pub struct BnetConfig {
@@ -78,7 +79,6 @@ pub fn spawn_bnet(
 enum Stage {
     AwaitAuthInfo,
     AwaitAuthCheck,
-    AwaitLogonResponse,
     AwaitAccountLogon,
     AwaitAccountLogonProof,
     AwaitEnterChat,
@@ -147,9 +147,7 @@ async fn run(
 
         let mut stage = Stage::AwaitAuthInfo;
         let mut active_advert: Option<ActiveAdvert> = None;
-        let mut cur_client_token = 0u32;
-        let mut cur_server_token = 0u32;
-        let mut cur_nls: Option<usize> = None;
+        let mut cur_nls: Option<NlsSession> = None;
         // The advert is re-sent every 3 s, so only log the transition, not every ack.
         let mut advert_listed = false;
 
@@ -267,36 +265,72 @@ async fn run(
                     match (stage, frame.id) {
                         (Stage::AwaitAuthInfo, ids::SID_AUTH_INFO) => {
                             if let Ok(info) = incoming::AuthInfo::decode(&frame.payload) {
-                                cur_server_token = info.server_token;
-                                cur_client_token = rand::random();
+                                let cur_server_token = info.server_token;
+                                let cur_client_token: u32 = rand::random();
                                 tracing::info!(
                                     "<-- [RECV] SID_AUTH_INFO (0x50) [server_token=0x{:08X}, mpq=\"{}\"]",
                                     info.server_token,
                                     info.ix86_ver_file_name
                                 );
-                                let key_info_roc = create_key_info(&cfg.cdkey_roc, cur_client_token, cur_server_token, false);
-                                let key_info_tft = create_key_info(&cfg.cdkey_tft, cur_client_token, cur_server_token, true);
+                                let key_info_roc = match create_key_info(&cfg.cdkey_roc, cur_client_token, cur_server_token, false) {
+                                    Ok(k) => k,
+                                    Err(e) => {
+                                        let msg = format!("invalid ROC CD-key: {e}");
+                                        tracing::error!(%msg);
+                                        let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                        break 'session;
+                                    }
+                                };
+                                let key_info_tft = match create_key_info(&cfg.cdkey_tft, cur_client_token, cur_server_token, true) {
+                                    Ok(k) => k,
+                                    Err(e) => {
+                                        let msg = format!("invalid TFT CD-key: {e}");
+                                        tracing::error!(%msg);
+                                        let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                        break 'session;
+                                    }
+                                };
 
-                                let (exe_info, exe_version, exe_version_hash) = if let Some(bu) = crate::bncsutil::BncsUtil::global() {
-                                    let war3_exe = if std::path::Path::new("war3/warcraft.exe").exists() {
-                                        "war3/warcraft.exe"
-                                    } else if std::path::Path::new("war3/Warcraft III.exe").exists() {
-                                        "war3/Warcraft III.exe"
-                                    } else {
-                                        ""
-                                    };
-                                    let storm_dll = "war3/Storm.dll";
-                                    let game_dll = "war3/game.dll";
+                                let war3_files = if std::path::Path::new("war3/warcraft.exe").exists() {
+                                    Some((
+                                        std::path::PathBuf::from("war3/warcraft.exe"),
+                                        std::path::PathBuf::from("war3/Storm.dll"),
+                                        std::path::PathBuf::from("war3/game.dll"),
+                                    ))
+                                } else if std::path::Path::new("war3/Warcraft III.exe").exists() {
+                                    Some((
+                                        std::path::PathBuf::from("war3/Warcraft III.exe"),
+                                        std::path::PathBuf::from("war3/Storm.dll"),
+                                        std::path::PathBuf::from("war3/game.dll"),
+                                    ))
+                                } else {
+                                    None
+                                };
 
-                                    if !war3_exe.is_empty() && std::path::Path::new(storm_dll).exists() && std::path::Path::new(game_dll).exists() {
-                                        let mpq_num = bu.extract_mpq_number(&info.ix86_ver_file_name).unwrap_or(1);
-                                        let (info_str, ver) = bu.get_exe_info(war3_exe, 1)
-                                            .unwrap_or_else(|| (info.ix86_ver_file_name.clone(), u32::from_le_bytes(cfg.exe_version)));
-                                        let hash = bu.check_revision_flat(&info.value_string_formula, war3_exe, storm_dll, game_dll, mpq_num)
-                                            .unwrap_or_else(|| u32::from_le_bytes(cfg.exe_version_hash));
-                                        (info_str, ver.to_le_bytes(), hash.to_le_bytes())
-                                    } else {
-                                        (info.ix86_ver_file_name.clone(), cfg.exe_version, cfg.exe_version_hash)
+                                let (exe_info, exe_version, exe_version_hash) = if let Some((war3_exe, storm_dll, game_dll)) = war3_files {
+                                    let formula = info.value_string_formula.clone();
+                                    let mpq_name = info.ix86_ver_file_name.clone();
+                                    let res = tokio::task::spawn_blocking(move || -> Result<(String, [u8; 4], [u8; 4]), std::io::Error> {
+                                        let mpq_num = crate::bncsutil::extract_mpq_number(&mpq_name);
+                                        let exe_info = crate::bncsutil::get_exe_info(&war3_exe, 1)?;
+                                        let hash = crate::bncsutil::check_revision_flat(&formula, &war3_exe, &storm_dll, &game_dll, mpq_num)?;
+                                        Ok((exe_info.exe_info_string, exe_info.version.to_le_bytes(), hash.to_le_bytes()))
+                                    }).await;
+
+                                    match res {
+                                        Ok(Ok(vals)) => vals,
+                                        Ok(Err(e)) => {
+                                            let msg = format!("CheckRevision / ExeInfo failed: {e}");
+                                            tracing::error!(%msg);
+                                            let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                            break 'session;
+                                        }
+                                        Err(e) => {
+                                            let msg = format!("spawn_blocking failed: {e}");
+                                            tracing::error!(%msg);
+                                            let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                            break 'session;
+                                        }
                                     }
                                 } else {
                                     (info.ix86_ver_file_name.clone(), cfg.exe_version, cfg.exe_version_hash)
@@ -339,16 +373,9 @@ async fn run(
                                     // (0x29) instead makes PvPGN answer status=0 and then ignore
                                     // SID_ENTERCHAT forever, because the connection never leaves the
                                     // new-auth state machine it entered at SID_AUTH_INFO.
-                                    let client_key = if let Some(bu) = crate::bncsutil::BncsUtil::global() {
-                                        if let Some(nls) = bu.nls_init(&cfg.username, &cfg.password) {
-                                            cur_nls = Some(nls);
-                                            bu.nls_get_a(nls).unwrap_or([0u8; 32])
-                                        } else {
-                                            [0u8; 32]
-                                        }
-                                    } else {
-                                        [0u8; 32]
-                                    };
+                                    let nls = NlsSession::new(&cfg.username, &cfg.password);
+                                    let client_key = nls.client_public_key();
+                                    cur_nls = Some(nls);
 
                                     if let Ok(logon_pkt) = outgoing::auth_accountlogon(
                                         &client_key,
@@ -371,36 +398,6 @@ async fn run(
                             }
                         }
 
-                        (Stage::AwaitLogonResponse, ids::SID_LOGONRESPONSE2) | (Stage::AwaitLogonResponse, ids::SID_LOGONRESPONSE) => {
-                            if let Ok(proof) = incoming::LogonProof::decode(&frame.payload) {
-                                tracing::info!(
-                                    "<-- [RECV] SID_LOGONRESPONSE (0x29/0x3A) [status={}]",
-                                    proof.status
-                                );
-                                if proof.status == 0 || proof.status == 0x0E {
-                                    tracing::info!("logon successful");
-                                    stage = Stage::AwaitEnterChat;
-                                    tracing::info!("--> [SEND] SID_NETGAMEPORT (0x45) [port={}]", cfg.host_port);
-                                    let _ = framed_write.send(outgoing::netgameport(cfg.host_port)).await;
-                                    if let Ok(enter_pkt) = outgoing::enter_chat() {
-                                        tracing::info!("--> [SEND] SID_ENTERCHAT (0x0A)");
-                                        let _ = framed_write.send(enter_pkt).await;
-                                    }
-                                    if let Ok(f_pkt) = outgoing::friendslist() {
-                                        let _ = framed_write.send(f_pkt).await;
-                                    }
-                                    if let Ok(c_pkt) = outgoing::clanmemberlist() {
-                                        let _ = framed_write.send(c_pkt).await;
-                                    }
-                                } else {
-                                    let msg = format!("Logon failed - invalid password (status {})", proof.status);
-                                    tracing::error!(%msg);
-                                    let _ = events.send(BnetEvent::Disconnected(msg)).await;
-                                    break 'session;
-                                }
-                            }
-                        }
-
                         (Stage::AwaitAccountLogon, ids::SID_AUTH_ACCOUNTLOGON) => {
                             if let Ok(acc) = incoming::AccountLogon::decode(&frame.payload) {
                                 tracing::info!(
@@ -414,8 +411,16 @@ async fn run(
                                     // and public key.
                                     let proof_bytes: Vec<u8> = if cfg.password_hash_type.eq_ignore_ascii_case("pvpgn") {
                                         crate::auth::hash_password_pvpgn(&cfg.password).to_vec()
-                                    } else if let (Some(bu), Some(nls)) = (crate::bncsutil::BncsUtil::global(), cur_nls) {
-                                        bu.nls_get_m1(nls, &acc.server_public_key, &acc.salt).map(|m| m.to_vec()).unwrap_or_default()
+                                    } else if let Some(ref nls) = cur_nls {
+                                        match nls.compute_m1(&acc.server_public_key, &acc.salt) {
+                                            Ok(m1) => m1.to_vec(),
+                                            Err(e) => {
+                                                let msg = format!("NLS compute_m1 failed: {e}");
+                                                tracing::error!(%msg);
+                                                let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                                break 'session;
+                                            }
+                                        }
                                     } else {
                                         Vec::new()
                                     };

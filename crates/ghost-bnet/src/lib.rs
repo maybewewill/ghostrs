@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod advert;
 pub mod auth;
 pub mod bncsutil;

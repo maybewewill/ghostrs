@@ -1,79 +1,14 @@
 use sha1::{Digest, Sha1};
 
-#[allow(clippy::needless_range_loop)]
+pub use crate::bncsutil::cdkey::CdKeyError;
+
+/// Hashes a password using Battle.net XSHA-1.
+/// Authoritative implementation from `crates/ghost-bnet/src/bncsutil/xsha1.rs`.
 pub fn hash_password_pvpgn(password: &str) -> [u8; 20] {
-    if let Some(bu) = crate::bncsutil::BncsUtil::global() {
-        if let Some(h) = bu.hash_password(password) {
-            return h;
-        }
-    }
-
-    let lower = password.to_ascii_lowercase();
-    let bytes = lower.as_bytes();
-    let mut hash = [
-        0x67452301u32,
-        0xefcdab89u32,
-        0x98badcfeu32,
-        0x10325476u32,
-        0xc3d2e1f0u32,
-    ];
-
-    let mut padded = bytes.to_vec();
-    let rem = padded.len() % 64;
-    if rem != 0 {
-        padded.resize(padded.len() + (64 - rem), 0);
-    }
-
-    for chunk in padded.chunks_exact(64) {
-        let mut w = [0u32; 80];
-        for i in 0..16 {
-            w[i] = u32::from_le_bytes([
-                chunk[i * 4],
-                chunk[i * 4 + 1],
-                chunk[i * 4 + 2],
-                chunk[i * 4 + 3],
-            ]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-        let mut a = hash[0];
-        let mut b = hash[1];
-        let mut c = hash[2];
-        let mut d = hash[3];
-        let mut e = hash[4];
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5a827999),
-                20..=39 => (b ^ c ^ d, 0x6ed9eba1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1bbcdc),
-                _ => (b ^ c ^ d, 0xca62c1d6),
-            };
-            let temp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(w[i]);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-        hash[0] = hash[0].wrapping_add(a);
-        hash[1] = hash[1].wrapping_add(b);
-        hash[2] = hash[2].wrapping_add(c);
-        hash[3] = hash[3].wrapping_add(d);
-        hash[4] = hash[4].wrapping_add(e);
-    }
-    let mut out = [0u8; 20];
-    for (i, val) in hash.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&val.to_le_bytes());
-    }
-    out
+    crate::bncsutil::xsha1::hash_password(password)
 }
 
+/// Standard SHA-1 hash over lowercased ASCII password.
 pub fn hash_password_standard_sha1(password: &str) -> [u8; 20] {
     let lower = password.to_ascii_lowercase();
     let mut hasher = Sha1::new();
@@ -98,38 +33,15 @@ pub fn hash_password_double(password: &str, client_token: u32, server_token: u32
     out
 }
 
-/// Builds 36-byte CD-Key info for PvPGN SID_AUTH_CHECK:
+/// Builds 36-byte CD-Key info for PvPGN SID_AUTH_CHECK using the pure-Rust CD-key decoder:
 /// 4 bytes len (26), 4 bytes product (ROC=4, TFT=7), 4 bytes public_val, 4 bytes val2, 20 bytes hash.
-pub fn create_key_info(cdkey: &str, client_token: u32, server_token: u32, is_tft: bool) -> [u8; 36] {
-    let sanitized: String = cdkey.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_uppercase();
-    let mut out = [0u8; 36];
-    let key_len = if sanitized.len() == 26 { 26u32 } else { 16u32 };
-    let fallback_product = if is_tft { 7u32 } else { 4u32 };
-
-    if let Some(bu) = crate::bncsutil::BncsUtil::global() {
-        if let Some((public_val, product, hash)) = bu.kd_quick(&sanitized, client_token, server_token) {
-            out[0..4].copy_from_slice(&key_len.to_le_bytes());
-            out[4..8].copy_from_slice(&product.to_le_bytes());
-            out[8..12].copy_from_slice(&public_val.to_le_bytes());
-            out[12..16].copy_from_slice(&0u32.to_le_bytes());
-            out[16..36].copy_from_slice(&hash);
-            return out;
-        }
-    }
-
-    // Fallback if bncsutil not available or fails
-    out[0..4].copy_from_slice(&key_len.to_le_bytes());
-    out[4..8].copy_from_slice(&fallback_product.to_le_bytes());
-    out[8..12].copy_from_slice(&1u32.to_le_bytes());
-    out[12..16].copy_from_slice(&0u32.to_le_bytes());
-
-    let mut hasher = Sha1::new();
-    hasher.update(client_token.to_le_bytes());
-    hasher.update(server_token.to_le_bytes());
-    hasher.update(sanitized.as_bytes());
-    let hash = hasher.finalize();
-    out[16..36].copy_from_slice(&hash);
-    out
+pub fn create_key_info(
+    cdkey: &str,
+    client_token: u32,
+    server_token: u32,
+    is_tft: bool,
+) -> Result<[u8; 36], CdKeyError> {
+    crate::bncsutil::cdkey::create_key_info(cdkey, client_token, server_token, is_tft)
 }
 
 /// Generates a random 32-byte client public key for NLS login.
@@ -146,19 +58,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pvpgn_password_hash_returns_20_bytes() {
-        let h = hash_password_pvpgn("password123");
-        println!("hash hex: {:02x?}", h);
-        let s = h.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        println!("hash string: {}", s);
-        assert_eq!(h.len(), 20);
-        assert_ne!(h, [0u8; 20]);
+    fn pvpgn_password_hash_matches_authoritative_xsha1() {
+        let h = hash_password_pvpgn("password");
+        assert_eq!(
+            h,
+            [
+                0xec, 0xc8, 0x0d, 0x1d, 0x76, 0xe7, 0x58, 0xc0, 0xb9, 0xda, 0x8c, 0x25, 0xff,
+                0x10, 0x6a, 0xff, 0x8e, 0x24, 0x29, 0x16,
+            ]
+        );
     }
 
     #[test]
-    fn key_info_returns_36_bytes() {
-        let k = create_key_info("FFFFFFFFFFFFFFFFFFFFFFFFFF", 123, 456, true);
+    fn pvpgn_password_hash_is_case_sensitive() {
+        assert_ne!(
+            hash_password_pvpgn("PassWord"),
+            hash_password_pvpgn("password")
+        );
+    }
+
+    #[test]
+    fn key_info_returns_36_bytes_on_valid_key() {
+        let k = create_key_info("TAKLIBFWQWJRVGPSO68MUTV5D0", 0x1122_3344, 0x5566_7788, true)
+            .expect("valid key info");
         assert_eq!(k.len(), 36);
         assert_eq!(u32::from_le_bytes([k[0], k[1], k[2], k[3]]), 26);
+        assert_eq!(u32::from_le_bytes([k[4], k[5], k[6], k[7]]), 7);
+    }
+
+    #[test]
+    fn key_info_returns_error_on_invalid_key() {
+        let err = create_key_info("INVALID!KEY", 123, 456, true);
+        assert!(err.is_err());
     }
 }
