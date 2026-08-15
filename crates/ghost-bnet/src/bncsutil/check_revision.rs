@@ -341,6 +341,16 @@ mod tests {
             );
         }
 
+        // The comparison above is conditional, and once bncsutil is deleted it
+        // will never run again — a test that silently stops testing is worse
+        // than no test. This pins the value the native library produced for
+        // exactly these three files and this formula, captured 2026-08-15 with
+        // the library present and verified equal to the Rust result.
+        assert_eq!(
+            checksum, 2_297_190_262,
+            "checksum drifted from the value the native bncsutil produced"
+        );
+
         let _ = std::fs::remove_file(&f1);
         let _ = std::fs::remove_file(&f2);
         let _ = std::fs::remove_file(&f3);
