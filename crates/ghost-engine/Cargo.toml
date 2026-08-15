@@ -16,3 +16,8 @@ rand.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+criterion.workspace = true
+
+[[bench]]
+name = "tick"
+harness = false
