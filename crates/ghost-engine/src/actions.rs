@@ -74,6 +74,7 @@ impl GameState {
             GamePhase::Loading => {}
             GamePhase::Playing => {
                 if self.check_lag() {
+                    self.drop_lagging_players(std::time::Duration::from_secs(60));
                     return; // lag screen is up; no actions go out this tick
                 }
                 self.send_all_actions(skipped);
@@ -123,10 +124,6 @@ impl GameState {
         }
     }
 
-    /// Replaced by the real implementation in Task 12.
-    pub(crate) fn check_lag(&mut self) -> bool {
-        false
-    }
 }
 
 #[cfg(test)]

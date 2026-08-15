@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod actor;
 pub mod handle;
+pub mod lagcheck;
 pub mod lobby;
 pub mod players;
 pub mod slots;
