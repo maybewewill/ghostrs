@@ -590,6 +590,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghost-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ghostrs"
 version = "0.1.0"
 dependencies = [
