@@ -13,7 +13,26 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("ghostrs starting");
 
     let args: Vec<String> = std::env::args().collect();
-    let cfg_path = if let Some(arg) = args.get(1) {
+
+    // `--host <game name>` creates a lobby at startup instead of waiting for a
+    // root admin's `!pub`. The advert is queued and goes out on the next refresh
+    // tick once battle.net login completes.
+    let mut host_on_start = None;
+    let mut start_after = None;
+    let mut positional = Vec::new();
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--host" => host_on_start = it.next().cloned(),
+            // Fires the same GameCmd::Start that the `!start` command sends, so the
+            // start path can be exercised without an admin whispering the bot.
+            "--start-after" => start_after = it.next().and_then(|s| s.parse::<u64>().ok()),
+            _ => positional.push(a.clone()),
+        }
+    }
+
+    let args = positional;
+    let cfg_path = if let Some(arg) = args.first() {
         std::path::PathBuf::from(arg)
     } else if Path::new("ghost.toml").exists() {
         std::path::PathBuf::from("ghost.toml")
@@ -29,5 +48,5 @@ async fn main() -> anyhow::Result<()> {
         Config::from_toml("")?
     };
 
-    Supervisor::run(cfg).await
+    Supervisor::run(cfg, host_on_start, start_after).await
 }

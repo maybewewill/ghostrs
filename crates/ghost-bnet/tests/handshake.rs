@@ -61,9 +61,15 @@ async fn bnet_client_completes_handshake_to_login() {
         let resp = Frame::new(ids::SID_LOGONRESPONSE2, p.freeze()).encode_with(0xFF).unwrap();
         framed_write.send(resp).await.unwrap();
 
-        // 5. Expect SID_ENTERCHAT -> respond with SID_ENTERCHAT
+        // 5. Expect SID_NETGAMEPORT
+        let f = framed_read.next().await.unwrap().unwrap();
+        assert_eq!(f.id, ids::SID_NETGAMEPORT);
+
+        // 6. Expect SID_ENTERCHAT -> respond with SID_ENTERCHAT
         let f = framed_read.next().await.unwrap().unwrap();
         assert_eq!(f.id, ids::SID_ENTERCHAT);
+        let resp = Frame::new(ids::SID_ENTERCHAT, bytes::Bytes::from_static(b"Unique\0Stat\0Account\0")).encode_with(0xFF).unwrap();
+        framed_write.send(resp).await.unwrap();
     });
 
     let (events_tx, mut events_rx) = mpsc::channel(32);
@@ -81,6 +87,7 @@ async fn bnet_client_completes_handshake_to_login() {
         war3_version: 26,
         exe_version: [1, 0, 26, 1],
         exe_version_hash: [0, 0, 0, 0],
+        password_hash_type: "pvpgn".into(),
         reconnect_delay: Duration::from_secs(1),
     };
 

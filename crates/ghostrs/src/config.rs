@@ -59,6 +59,7 @@ fn default_first_channel() -> String { "The Abyss".into() }
 fn default_command_trigger() -> char { '!' }
 fn default_war3_version() -> u8 { 26 }
 fn default_reconnect_delay_sec() -> u64 { 5 }
+fn default_password_hash_type() -> String { "pvpgn".into() }
 fn default_latency_ms() -> u64 { 100 }
 fn default_sync_limit() -> u32 { 50 }
 fn default_virtual_host_name() -> String { "|cFF4080C0Ghost".into() }
@@ -123,6 +124,8 @@ pub struct TomlBnet {
     pub war3_version: u8,
     #[serde(default = "default_reconnect_delay_sec")]
     pub reconnect_delay_sec: u64,
+    #[serde(default = "default_password_hash_type")]
+    pub password_hash_type: String,
 }
 
 impl Default for TomlBnet {
@@ -139,6 +142,7 @@ impl Default for TomlBnet {
             command_trigger: default_command_trigger(),
             war3_version: default_war3_version(),
             reconnect_delay_sec: default_reconnect_delay_sec(),
+            password_hash_type: default_password_hash_type(),
         }
     }
 }
@@ -262,6 +266,7 @@ impl Config {
                 war3_version: bnet.war3_version,
                 exe_version: [1, 0, 26, 1],
                 exe_version_hash: [0, 0, 0, 0],
+                password_hash_type: bnet.password_hash_type,
                 reconnect_delay: Duration::from_secs(bnet.reconnect_delay_sec),
             },
             game: GameDefaults {
@@ -351,6 +356,7 @@ impl Config {
                 war3_version: bnet_war3_version,
                 exe_version: [1, 0, 26, 1],
                 exe_version_hash: [0, 0, 0, 0],
+                password_hash_type: map.get("bnet_custom_passwordhashtype").cloned().unwrap_or_else(|| "pvpgn".into()),
                 reconnect_delay: Duration::from_secs(5),
             },
             game: GameDefaults {

@@ -52,7 +52,11 @@ struct ActiveLobbyAdvert {
 }
 
 impl Supervisor {
-    pub async fn run(cfg: Config) -> anyhow::Result<()> {
+    pub async fn run(
+        cfg: Config,
+        host_on_start: Option<String>,
+        start_after: Option<u64>,
+    ) -> anyhow::Result<()> {
         let (store, _store_task) = Store::open(&cfg.db_path)
             .context("failed to open SQLite database")?;
 
@@ -107,16 +111,40 @@ impl Supervisor {
             autohost_counter: 1,
         };
 
-        sup.event_loop().await
+        if let Some(name) = host_on_start {
+            let owner = sup.cfg.bnet.username.clone();
+            sup.create_game(&name, &owner);
+        }
+
+        sup.event_loop(start_after).await
     }
 
-    async fn event_loop(&mut self) -> anyhow::Result<()> {
+    async fn event_loop(&mut self, start_after: Option<u64>) -> anyhow::Result<()> {
         tracing::info!("supervisor ready, awaiting battle.net and player events");
 
         let mut lan_timer = tokio::time::interval(Duration::from_secs(3));
+        let auto_start = start_after.map(|s| {
+            Box::pin(tokio::time::sleep(Duration::from_secs(s))) as std::pin::Pin<Box<tokio::time::Sleep>>
+        });
+        let mut auto_start = auto_start;
 
         loop {
             tokio::select! {
+                () = async {
+                    match auto_start.as_mut() {
+                        Some(s) => s.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    auto_start = None;
+                    if let Some(g) = &self.current_game {
+                        tracing::info!("--start-after elapsed, starting the game");
+                        g.send(GameCmd::Start { by: self.cfg.bnet.username.clone() });
+                    } else {
+                        tracing::warn!("--start-after elapsed but there is no lobby to start");
+                    }
+                }
+
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down gracefully");
                     self.shutdown().await;
@@ -205,9 +233,9 @@ impl Supervisor {
         match ev {
             BnetEvent::Connected => tracing::info!("connected to Battle.net"),
             BnetEvent::LoggedIn => {
-                tracing::info!("logged in to Battle.net");
-                let default_game_name = "iCCup DotA 5v5 -ap PRO";
-                self.create_game(default_game_name, "slash");
+                tracing::info!("logged in to Battle.net, standing by in channel");
+                self.bnet.send(BnetCmd::SendChat("/motd".into()));
+                self.bnet.send(BnetCmd::SendChat("/who".into()));
             }
             BnetEvent::ChatMessage { user, text } => self.handle_chat_command(&user, &text),
             BnetEvent::Whisper { user, text } => self.handle_chat_command(&user, &text),
