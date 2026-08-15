@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use ghost_protocol::frame::Frame;
-use ghost_protocol::w3gs::{ids, W3gsCodec};
+use ghost_protocol::w3gs::{W3gsCodec, ids};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
@@ -50,8 +50,8 @@ fn map_size_from_mapcheck(payload: &[u8]) -> Option<u32> {
 fn mapsize_bytes(size: u32) -> Bytes {
     let mut b = BytesMut::new();
     b.put_slice(&[0, 0, 0, 0]); // unknown 4 bytes
-    b.put_u8(1);                // size_flag = 1 (have map)
-    b.put_u32_le(size);         // full map size
+    b.put_u8(1); // size_flag = 1 (have map)
+    b.put_u32_le(size); // full map size
     Frame::new(ids::MAP_SIZE, b.freeze())
         .encode_with(0xF7)
         .unwrap()
@@ -66,7 +66,7 @@ fn gameloaded_bytes() -> Bytes {
 fn action_bytes() -> Bytes {
     let mut b = BytesMut::new();
     b.put_u32_le(0x1234_5678); // CRC
-    b.put_slice(&[0x10; 20]);   // 20 bytes action payload
+    b.put_slice(&[0x10; 20]); // 20 bytes action payload
     Frame::new(ids::OUTGOING_ACTION, b.freeze())
         .encode_with(0xF7)
         .unwrap()
@@ -243,8 +243,14 @@ async fn main() -> anyhow::Result<()> {
     println!("============================================================");
     println!("                   LOAD TEST REPORT                         ");
     println!("============================================================");
-    println!("Total ticks received across all clients : {}", m.total_actions);
-    println!("Dropped clients                        : {}", m.dropped_clients);
+    println!(
+        "Total ticks received across all clients : {}",
+        m.total_actions
+    );
+    println!(
+        "Dropped clients                        : {}",
+        m.dropped_clients
+    );
 
     if !m.intervals_ms.is_empty() {
         let n = m.intervals_ms.len();

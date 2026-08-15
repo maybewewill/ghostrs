@@ -46,8 +46,14 @@ mod tests {
 
     #[test]
     fn parses_mode_from_game_name() {
-        assert_eq!(Hcl::parse_from_gamename("DotA -apem 5v5"), Some("apem".into()));
-        assert_eq!(Hcl::parse_from_gamename("Legion TD -arso pro"), Some("arso".into()));
+        assert_eq!(
+            Hcl::parse_from_gamename("DotA -apem 5v5"),
+            Some("apem".into())
+        );
+        assert_eq!(
+            Hcl::parse_from_gamename("Legion TD -arso pro"),
+            Some("arso".into())
+        );
         assert_eq!(Hcl::parse_from_gamename("Castle Fight 3v3"), None);
     }
 

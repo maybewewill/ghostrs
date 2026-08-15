@@ -175,14 +175,7 @@ impl Store {
         });
     }
 
-    pub fn log_game(
-        &self,
-        name: &str,
-        map: &str,
-        started: i64,
-        ended: i64,
-        players: Vec<String>,
-    ) {
+    pub fn log_game(&self, name: &str, map: &str, started: i64, ended: i64, players: Vec<String>) {
         let _ = self.tx.try_send(StoreCmd::LogGame {
             name: name.to_string(),
             map: map.to_string(),
@@ -211,6 +204,7 @@ impl Store {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_download(
         &self,
         map: &str,
@@ -284,7 +278,12 @@ impl Store {
 fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
     while let Some(cmd) = rx.blocking_recv() {
         match cmd {
-            StoreCmd::AddBan { name, ip, admin, reason } => {
+            StoreCmd::AddBan {
+                name,
+                ip,
+                admin,
+                reason,
+            } => {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -312,7 +311,13 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                     rusqlite::params![name],
                 );
             }
-            StoreCmd::LogGame { name, map, started, ended, players } => {
+            StoreCmd::LogGame {
+                name,
+                map,
+                started,
+                ended,
+                players,
+            } => {
                 let duration = ended.saturating_sub(started);
                 if let Ok(tx) = conn.transaction()
                     && tx.execute(
@@ -330,13 +335,22 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                     let _ = tx.commit();
                 }
             }
-            StoreCmd::LogDotAGame { game_name, winner, duration, tree_hp, throne_hp, players } => {
+            StoreCmd::LogDotAGame {
+                game_name,
+                winner,
+                duration,
+                tree_hp,
+                throne_hp,
+                players,
+            } => {
                 if let Ok(tx) = conn.transaction() {
-                    let game_id: i64 = tx.query_row(
-                        "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
-                        rusqlite::params![game_name],
-                        |r| r.get(0),
-                    ).unwrap_or(0);
+                    let game_id: i64 = tx
+                        .query_row(
+                            "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
+                            rusqlite::params![game_name],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
 
                     let _ = tx.execute(
                         "INSERT INTO dotagames (game_id, winner, duration, tree_hp, throne_hp) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -353,13 +367,19 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                     let _ = tx.commit();
                 }
             }
-            StoreCmd::LogW3MMD { game_name, players, vars } => {
+            StoreCmd::LogW3MMD {
+                game_name,
+                players,
+                vars,
+            } => {
                 if let Ok(tx) = conn.transaction() {
-                    let game_id: i64 = tx.query_row(
-                        "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
-                        rusqlite::params![game_name],
-                        |r| r.get(0),
-                    ).unwrap_or(0);
+                    let game_id: i64 = tx
+                        .query_row(
+                            "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
+                            rusqlite::params![game_name],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
 
                     for (pid, name, flag) in players {
                         let _ = tx.execute(
@@ -386,14 +406,7 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                 duration,
             } => {
                 let _ = crate::queries::insert_download(
-                    &conn,
-                    &map,
-                    map_size,
-                    &name,
-                    &ip,
-                    spoofed,
-                    downloaded,
-                    duration,
+                    &conn, &map, map_size, &name, &ip, spoofed, downloaded, duration,
                 );
             }
             StoreCmd::Query(q) => match q {
@@ -419,7 +432,9 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                 }
                 StoreQuery::IsAdmin { name, reply } => {
                     let res: rusqlite::Result<bool> = (|| {
-                        let mut stmt = conn.prepare("SELECT 1 FROM admins WHERE name = ?1 COLLATE NOCASE LIMIT 1")?;
+                        let mut stmt = conn.prepare(
+                            "SELECT 1 FROM admins WHERE name = ?1 COLLATE NOCASE LIMIT 1",
+                        )?;
                         let mut rows = stmt.query(rusqlite::params![name])?;
                         Ok(rows.next()?.is_some())
                     })();

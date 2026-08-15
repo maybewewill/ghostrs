@@ -151,7 +151,10 @@ impl GameState {
             last_jitter_report: Instant::now(),
             dota: Some(crate::stats_dota::StatsDotA::new(cfg.name.clone())),
             game_over_time: None,
-            w3mmd: Some(crate::stats_w3mmd::StatsW3MMD::new(cfg.name.clone(), "default".into())),
+            w3mmd: Some(crate::stats_w3mmd::StatsW3MMD::new(
+                cfg.name.clone(),
+                "default".into(),
+            )),
             hcl: crate::hcl::Hcl::parse_from_gamename(&cfg.name),
             muted_all: false,
             draw_votes: Vec::new(),
@@ -213,8 +216,17 @@ impl GameState {
             0x20
         };
         let extra: &[u8] = if flag == 0x20 { &[0, 0, 0, 0] } else { &[] };
-        let from = if self.virtual_host_pid != 255 { self.virtual_host_pid } else { 255 };
-        let pids: Vec<u8> = self.players.iter().filter(|p| !p.virtual_host).map(|p| p.pid).collect();
+        let from = if self.virtual_host_pid != 255 {
+            self.virtual_host_pid
+        } else {
+            255
+        };
+        let pids: Vec<u8> = self
+            .players
+            .iter()
+            .filter(|p| !p.virtual_host)
+            .map(|p| p.pid)
+            .collect();
         if pids.is_empty() {
             return;
         }
@@ -262,7 +274,11 @@ impl GameState {
 
         if matches!(self.phase, GamePhase::Loading)
             && !self.players.is_empty()
-            && self.players.iter().filter(|p| !p.virtual_host).all(|p| p.loaded)
+            && self
+                .players
+                .iter()
+                .filter(|p| !p.virtual_host)
+                .all(|p| p.loaded)
         {
             tracing::info!(game = %self.cfg.name, "all remaining players loaded after leaver, starting game");
             self.begin_playing();
@@ -321,7 +337,12 @@ impl GameState {
         // to satisfy the Player type. Dropping the receiver is fine and must not
         // be worked around with a leak.
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
-        let mut p = crate::players::Player::new(pid, self.cfg.virtual_host_name.clone(), u64::MAX, PlayerLink::for_test(tx));
+        let mut p = crate::players::Player::new(
+            pid,
+            self.cfg.virtual_host_name.clone(),
+            u64::MAX,
+            PlayerLink::for_test(tx),
+        );
         p.virtual_host = true;
         p.loaded = true;
         self.virtual_host_pid = pid;
@@ -345,4 +366,3 @@ impl GameState {
         self.broadcast(outgoing::player_leave_others(pid, 13));
     }
 }
-

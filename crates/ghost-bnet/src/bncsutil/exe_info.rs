@@ -34,7 +34,11 @@ pub fn get_exe_info(file_path: &Path, _platform: u32) -> Result<ExeInfo, std::io
     let version = if let Ok(mut f) = File::open(file_path) {
         let mut buffer = Vec::new();
         // Read file contents (capped at 64 MB for safety)
-        if f.by_ref().take(64 * 1024 * 1024).read_to_end(&mut buffer).is_ok() {
+        if f.by_ref()
+            .take(64 * 1024 * 1024)
+            .read_to_end(&mut buffer)
+            .is_ok()
+        {
             extract_pe_version(&buffer).unwrap_or(0x011a0001)
         } else {
             0x011a0001
@@ -80,8 +84,10 @@ fn extract_pe_version(data: &[u8]) -> Option<u32> {
         return None;
     }
 
-    let num_sections = u16::from_le_bytes(data.get(pe_offset + 6..pe_offset + 8)?.try_into().ok()?) as usize;
-    let opt_hdr_size = u16::from_le_bytes(data.get(pe_offset + 20..pe_offset + 22)?.try_into().ok()?) as usize;
+    let num_sections =
+        u16::from_le_bytes(data.get(pe_offset + 6..pe_offset + 8)?.try_into().ok()?) as usize;
+    let opt_hdr_size =
+        u16::from_le_bytes(data.get(pe_offset + 20..pe_offset + 22)?.try_into().ok()?) as usize;
 
     let opt_hdr_offset = pe_offset + 24;
     let sections_offset = opt_hdr_offset + opt_hdr_size;
@@ -98,9 +104,21 @@ fn extract_pe_version(data: &[u8]) -> Option<u32> {
         }
         let name = &data[sec_offset..sec_offset + 8];
         if name.starts_with(b".rsrc") {
-            let virt_addr = u32::from_le_bytes(data.get(sec_offset + 12..sec_offset + 16)?.try_into().ok()?);
-            let raw_size = u32::from_le_bytes(data.get(sec_offset + 16..sec_offset + 20)?.try_into().ok()?);
-            let raw_offset = u32::from_le_bytes(data.get(sec_offset + 20..sec_offset + 24)?.try_into().ok()?);
+            let virt_addr = u32::from_le_bytes(
+                data.get(sec_offset + 12..sec_offset + 16)?
+                    .try_into()
+                    .ok()?,
+            );
+            let raw_size = u32::from_le_bytes(
+                data.get(sec_offset + 16..sec_offset + 20)?
+                    .try_into()
+                    .ok()?,
+            );
+            let raw_offset = u32::from_le_bytes(
+                data.get(sec_offset + 20..sec_offset + 24)?
+                    .try_into()
+                    .ok()?,
+            );
             rsrc_virt_addr = Some(virt_addr);
             rsrc_raw_offset = Some(raw_offset);
             rsrc_raw_size = Some(raw_size);
@@ -116,17 +134,22 @@ fn extract_pe_version(data: &[u8]) -> Option<u32> {
         if data.len() >= rsrc_offset + rsrc_size && rsrc_size >= 16 {
             let rsrc = &data[rsrc_offset..rsrc_offset + rsrc_size];
             if let (Some(named_bytes), Some(id_bytes)) = (rsrc.get(12..14), rsrc.get(14..16)) {
-                let named_entries = u16::from_le_bytes(named_bytes.try_into().unwrap_or_default()) as usize;
-                let id_entries = u16::from_le_bytes(id_bytes.try_into().unwrap_or_default()) as usize;
+                let named_entries =
+                    u16::from_le_bytes(named_bytes.try_into().unwrap_or_default()) as usize;
+                let id_entries =
+                    u16::from_le_bytes(id_bytes.try_into().unwrap_or_default()) as usize;
                 let total_entries = named_entries + id_entries;
 
                 for i in 0..total_entries {
                     let entry_off = 16 + i * 8;
-                    if let (Some(id_slice), Some(data_slice)) =
-                        (rsrc.get(entry_off..entry_off + 4), rsrc.get(entry_off + 4..entry_off + 8))
-                    {
-                        let id_or_name = u32::from_le_bytes(id_slice.try_into().unwrap_or_default());
-                        let data_or_dir = u32::from_le_bytes(data_slice.try_into().unwrap_or_default());
+                    if let (Some(id_slice), Some(data_slice)) = (
+                        rsrc.get(entry_off..entry_off + 4),
+                        rsrc.get(entry_off + 4..entry_off + 8),
+                    ) {
+                        let id_or_name =
+                            u32::from_le_bytes(id_slice.try_into().unwrap_or_default());
+                        let data_or_dir =
+                            u32::from_le_bytes(data_slice.try_into().unwrap_or_default());
 
                         if id_or_name == 16 && (data_or_dir & 0x8000_0000) != 0 {
                             let l2_off = (data_or_dir & 0x7FFF_FFFF) as usize;
@@ -175,14 +198,19 @@ fn extract_pe_version(data: &[u8]) -> Option<u32> {
                                         if let Some(rva_diff) = data_rva.checked_sub(rsrc_va) {
                                             let file_off = rsrc_offset + rva_diff as usize;
                                             if file_off + 52 <= data.len() {
-                                                let slice = &data[file_off..data.len().min(file_off + 1024)];
+                                                let slice = &data
+                                                    [file_off..data.len().min(file_off + 1024)];
                                                 for w in slice.windows(52) {
-                                                    if &w[0..4] == &[0xBD, 0x04, 0xEF, 0xFE] {
+                                                    if w[0..4] == [0xBD, 0x04, 0xEF, 0xFE] {
                                                         let ms = u32::from_le_bytes(
-                                                            w[16..20].try_into().unwrap_or_default(),
+                                                            w[16..20]
+                                                                .try_into()
+                                                                .unwrap_or_default(),
                                                         );
                                                         let ls = u32::from_le_bytes(
-                                                            w[20..24].try_into().unwrap_or_default(),
+                                                            w[20..24]
+                                                                .try_into()
+                                                                .unwrap_or_default(),
                                                         );
                                                         let v = (((ms >> 16) & 0xFF) << 24)
                                                             | ((ms & 0xFF) << 16)
@@ -205,7 +233,7 @@ fn extract_pe_version(data: &[u8]) -> Option<u32> {
 
     // Direct scan for VS_FIXEDFILEINFO signature 0xFEEF04BD (0xBD, 0x04, 0xEF, 0xFE in little endian)
     for w in data.windows(52) {
-        if &w[0..4] == &[0xBD, 0x04, 0xEF, 0xFE] {
+        if w[0..4] == [0xBD, 0x04, 0xEF, 0xFE] {
             let ms = u32::from_le_bytes(w[16..20].try_into().unwrap_or_default());
             let ls = u32::from_le_bytes(w[20..24].try_into().unwrap_or_default());
             let v = (((ms >> 16) & 0xFF) << 24)

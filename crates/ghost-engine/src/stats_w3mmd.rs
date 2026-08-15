@@ -43,7 +43,8 @@ impl StatsW3MMD {
                     match parts[0] {
                         "DefVarP" => {
                             if parts.len() >= 3 {
-                                self.def_vars.insert(parts[1].to_string(), parts[2].to_string());
+                                self.def_vars
+                                    .insert(parts[1].to_string(), parts[2].to_string());
                             }
                         }
                         "VarP" => {
@@ -65,7 +66,8 @@ impl StatsW3MMD {
                                             }
                                         }
                                         _ => {
-                                            self.var_strings.insert((pid, var), val_str.to_string());
+                                            self.var_strings
+                                                .insert((pid, var), val_str.to_string());
                                         }
                                     }
                                 }

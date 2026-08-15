@@ -48,7 +48,10 @@ pub enum BnetCmd {
         host_counter: u32,
         visibility: ghost_protocol::GameVisibility,
     },
-    RefreshGame { players: u32, slots: u32 },
+    RefreshGame {
+        players: u32,
+        slots: u32,
+    },
     UnhostGame,
     SendChat(String),
     Shutdown,
@@ -110,11 +113,7 @@ fn advert_game_type(map: &MapAdvert, visibility: ghost_protocol::GameVisibility)
     t.to_le_bytes()
 }
 
-async fn run(
-    cfg: BnetConfig,
-    events: mpsc::Sender<BnetEvent>,
-    mut rx: mpsc::Receiver<BnetCmd>,
-) {
+async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Receiver<BnetCmd>) {
     'reconnect_loop: loop {
         let addr = format!("{}:{}", cfg.server, cfg.port);
         tracing::info!(%addr, "connecting to battle.net server");
@@ -150,14 +149,18 @@ async fn run(
         let _ = events.send(BnetEvent::Connected).await;
 
         // 2. Send SID_AUTH_INFO
-        let auth_info_pkt = match outgoing::auth_info(cfg.war3_version, true, 1033, "USA", "United States") {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to build auth_info");
-                break 'reconnect_loop;
-            }
-        };
-        tracing::info!("--> [SEND] SID_AUTH_INFO (0x50) [war3_ver={}, platform=IX86, locale=1033]", cfg.war3_version);
+        let auth_info_pkt =
+            match outgoing::auth_info(cfg.war3_version, true, 1033, "USA", "United States") {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to build auth_info");
+                    break 'reconnect_loop;
+                }
+            };
+        tracing::info!(
+            "--> [SEND] SID_AUTH_INFO (0x50) [war3_ver={}, platform=IX86, locale=1033]",
+            cfg.war3_version
+        );
         if let Err(e) = framed_write.send(auth_info_pkt).await {
             tracing::warn!(error = %e, "failed to send auth_info");
             continue 'reconnect_loop;
@@ -171,6 +174,7 @@ async fn run(
 
         let mut null_timer = tokio::time::interval(Duration::from_secs(30));
         let mut adv_timer = tokio::time::interval(Duration::from_secs(3));
+        let mut probe_timer = tokio::time::interval(Duration::from_secs(10));
 
         'session: loop {
             tokio::select! {
@@ -245,6 +249,14 @@ async fn run(
                             &adv.stat_string,
                             adv.host_counter,
                         )
+                    {
+                        let _ = framed_write.send(p).await;
+                    }
+                }
+
+                _ = probe_timer.tick() => {
+                    if let (Stage::InChat, Some(adv)) = (stage, &active_advert)
+                        && let Ok(p) = outgoing::getadvlistex(&adv.name)
                     {
                         let _ = framed_write.send(p).await;
                     }
@@ -578,6 +590,39 @@ async fn run(
                             } else {
                                 advert_listed = false;
                                 tracing::warn!(status, "startadvex3 failed — the game is NOT listed (duplicate game name?)");
+                            }
+                        }
+
+                        (Stage::InChat, ids::SID_GETADVLISTEX) => {
+                            match incoming::decode_getadvlistex(&frame.payload) {
+                                Ok(Some(entry)) => {
+                                    let ip_str = format!("{}.{}.{}.{}", entry.ip[0], entry.ip[1], entry.ip[2], entry.ip[3]);
+                                    let hc_str = match entry.host_counter {
+                                        Some(hc) => format!("{:#010x}", hc),
+                                        None => "unparseable".to_string(),
+                                    };
+                                    tracing::info!(
+                                        game = %entry.game_name,
+                                        ip = %ip_str,
+                                        port = entry.port,
+                                        host_counter = %hc_str,
+                                        "<-- [RECV] SID_GETADVLISTEX (0x09) — server WILL hand joiners this address"
+                                    );
+                                }
+                                Ok(None) => {
+                                    let name = active_advert.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                                    tracing::warn!(
+                                        game = %name,
+                                        "<-- [RECV] SID_GETADVLISTEX (0x09) [games_found=0] — the server does NOT have our game; joins will fail"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        len = frame.payload.len(),
+                                        "failed to decode SID_GETADVLISTEX payload"
+                                    );
+                                }
                             }
                         }
 

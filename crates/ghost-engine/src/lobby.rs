@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use ghost_protocol::w3gs::{incoming::ReqJoin, outgoing};
 
-use crate::state::{GamePhase, GameState};
 use crate::players::Player;
+use crate::state::{GamePhase, GameState};
 
 /// REJECTJOIN reason codes, from src/gameprotocol.rs:249.
 pub const REJECT_FULL: u32 = 0x09;
@@ -17,7 +17,10 @@ pub const MAX_SLOTS: usize = 24;
 impl GameState {
     pub fn handle_req_join(&mut self, conn_id: u64, payload: &Bytes) {
         let Some(idx) = self.pending.iter().position(|(id, _, _)| *id == conn_id) else {
-            tracing::debug!(conn_id, "REQ_JOIN from an already-seated connection, ignoring");
+            tracing::debug!(
+                conn_id,
+                "REQ_JOIN from an already-seated connection, ignoring"
+            );
             return;
         };
         let (_, link, external_ip) = self.pending.remove(idx);
@@ -35,7 +38,11 @@ impl GameState {
             let _ = link.try_send(outgoing::reject_join(REJECT_STARTED));
             return;
         }
-        if self.players.iter().any(|p| p.name.eq_ignore_ascii_case(&req.name)) {
+        if self
+            .players
+            .iter()
+            .any(|p| p.name.eq_ignore_ascii_case(&req.name))
+        {
             let _ = link.try_send(outgoing::reject_join(REJECT_FULL));
             return;
         }
@@ -97,7 +104,9 @@ impl GameState {
             let _ = player.link.try_send(b);
         }
 
-        let _ = player.link.try_send(ghost_protocol::gps::init(1, pid, player.reconnect_key, 0));
+        let _ = player
+            .link
+            .try_send(ghost_protocol::gps::init(1, pid, player.reconnect_key, 0));
 
         self.players.insert(player);
 
@@ -163,7 +172,10 @@ mod tests {
     async fn the_virtual_host_is_announced_to_a_joining_player() {
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
         st.create_virtual_host();
-        assert_ne!(st.virtual_host_pid, 255, "a virtual host PID must be allocated");
+        assert_ne!(
+            st.virtual_host_pid, 255,
+            "a virtual host PID must be allocated"
+        );
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(64);
         st.add_conn(7, ghost_net::PlayerLink::for_test(tx), [127, 0, 0, 1]);
@@ -175,7 +187,10 @@ mod tests {
             ids.contains(&ghost_protocol::w3gs::ids::PLAYER_INFO),
             "joiner must be told about the virtual host, got {ids:?}"
         );
-        assert_eq!(st.players.by_pid(vh).map(|p| p.name.as_str()), Some(st.cfg.virtual_host_name.as_str()));
+        assert_eq!(
+            st.players.by_pid(vh).map(|p| p.name.as_str()),
+            Some(st.cfg.virtual_host_name.as_str())
+        );
     }
 
     #[tokio::test]
@@ -191,7 +206,10 @@ mod tests {
         // (gameprotocol.cpp:526-542): a count byte and the recipient list
         // precede from_pid, so with one recipient it lands at offset 6.
         assert_eq!(pkt[1], ghost_protocol::w3gs::ids::CHAT_FROM_HOST);
-        assert_eq!(pkt[6], st.virtual_host_pid, "sender must be the virtual host, not 255");
+        assert_eq!(
+            pkt[6], st.virtual_host_pid,
+            "sender must be the virtual host, not 255"
+        );
     }
 
     #[tokio::test]
@@ -211,9 +229,15 @@ mod tests {
         for i in 0..(st.cfg.num_slots - 1) {
             let (tx, _rx) = tokio::sync::mpsc::channel(64);
             st.add_conn(100 + i as u64, ghost_net::PlayerLink::for_test(tx), [0; 4]);
-            st.handle_req_join(100 + i as u64, &crate::actor::tests_support::reqjoin_bytes(&format!("p{i}")));
+            st.handle_req_join(
+                100 + i as u64,
+                &crate::actor::tests_support::reqjoin_bytes(&format!("p{i}")),
+            );
         }
-        assert_eq!(st.virtual_host_pid, vh, "virtual host must survive a normal lobby filling up");
+        assert_eq!(
+            st.virtual_host_pid, vh,
+            "virtual host must survive a normal lobby filling up"
+        );
         assert!(st.players.by_pid(vh).is_some());
     }
 }

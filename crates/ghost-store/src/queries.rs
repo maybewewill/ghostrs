@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection, OptionalExtension, Result};
 use crate::writer::DotAStatsSummary;
+use rusqlite::{Connection, OptionalExtension, Result, params};
 
 pub fn query_dota_stats(conn: &Connection, name: &str) -> Option<DotAStatsSummary> {
     conn.query_row(
@@ -37,6 +37,7 @@ pub fn query_dota_stats(conn: &Connection, name: &str) -> Option<DotAStatsSummar
     .filter(|s| s.games > 0)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_download(
     conn: &Connection,
     map: &str,
@@ -96,8 +97,24 @@ mod tests {
     #[test]
     fn records_and_queries_downloads_table() {
         let conn = setup_test_db();
-        insert_download(&conn, "DotA_v6.83d.w3x", 8_000_000, "Bob", "192.168.1.50", 1, 8_000_000, 45).unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM downloads WHERE name = 'Bob'", [], |r| r.get(0)).unwrap();
+        insert_download(
+            &conn,
+            "DotA_v6.83d.w3x",
+            8_000_000,
+            "Bob",
+            "192.168.1.50",
+            1,
+            8_000_000,
+            45,
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM downloads WHERE name = 'Bob'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 }

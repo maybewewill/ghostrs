@@ -111,8 +111,7 @@ impl GameState {
                         (elapsed.as_millis() / crate::state::COUNTDOWN_STEP.as_millis()) as u8;
                     let step = crate::state::COUNTDOWN_STEPS.saturating_sub(steps_elapsed);
                     if step < *last_announced_step
-                        && step >= 1
-                        && step <= crate::state::COUNTDOWN_STEPS
+                        && (1..=crate::state::COUNTDOWN_STEPS).contains(&step)
                     {
                         *last_announced_step = step;
                         self.send_chat_all(&format!("{step}. . ."));
@@ -120,16 +119,16 @@ impl GameState {
                 }
             }
             GamePhase::Loading => {
-                if let Some(started) = self.started_loading_at {
-                    if started.elapsed() >= std::time::Duration::from_secs(60) {
-                        tracing::warn!(game = %self.cfg.name, "loading timed out, dropping unready players");
-                        for p in self.players.iter_mut() {
-                            if !p.loaded && p.left.is_none() && !p.virtual_host {
-                                p.left = Some("loading timed out (60s)".into());
-                            }
+                if let Some(started) = self.started_loading_at
+                    && started.elapsed() >= std::time::Duration::from_secs(60)
+                {
+                    tracing::warn!(game = %self.cfg.name, "loading timed out, dropping unready players");
+                    for p in self.players.iter_mut() {
+                        if !p.loaded && p.left.is_none() && !p.virtual_host {
+                            p.left = Some("loading timed out (60s)".into());
                         }
-                        self.reap_left_players();
                     }
+                    self.reap_left_players();
                 }
             }
             GamePhase::Playing => {
@@ -140,19 +139,23 @@ impl GameState {
                 self.send_all_actions(skipped);
 
                 // GHost++ game_base.cpp:1059: start gameover timer if only 1 real player remains in game
-                let real_players_count = self.players.iter().filter(|p| !p.virtual_host && p.left.is_none()).count();
+                let real_players_count = self
+                    .players
+                    .iter()
+                    .filter(|p| !p.virtual_host && p.left.is_none())
+                    .count();
                 if real_players_count <= 1 && self.game_over_time.is_none() {
                     tracing::info!("gameover timer started (one or zero players left)");
                     self.game_over_time = Some(tokio::time::Instant::now());
                 }
 
                 // GHost++ game_base.cpp:1067: finish gameover timer after 60 seconds
-                if let Some(over_at) = self.game_over_time {
-                    if over_at.elapsed() >= std::time::Duration::from_secs(60) {
-                        for p in self.players.iter_mut() {
-                            if p.left.is_none() && !p.virtual_host {
-                                p.left = Some("was disconnected (gameover timer finished)".into());
-                            }
+                if let Some(over_at) = self.game_over_time
+                    && over_at.elapsed() >= std::time::Duration::from_secs(60)
+                {
+                    for p in self.players.iter_mut() {
+                        if p.left.is_none() && !p.virtual_host {
+                            p.left = Some("was disconnected (gameover timer finished)".into());
                         }
                     }
                 }
@@ -161,8 +164,13 @@ impl GameState {
         }
 
         // GHost++ game_base.cpp:1089: end game when no players left
-        let real_players_count = self.players.iter().filter(|p| !p.virtual_host && p.left.is_none()).count();
-        if real_players_count == 0 && matches!(self.phase, GamePhase::Playing | GamePhase::Loading) {
+        let real_players_count = self
+            .players
+            .iter()
+            .filter(|p| !p.virtual_host && p.left.is_none())
+            .count();
+        if real_players_count == 0 && matches!(self.phase, GamePhase::Playing | GamePhase::Loading)
+        {
             tracing::info!(game = %self.cfg.name, "no players left, ending game");
             self.phase = GamePhase::Over;
             self.finished = true;
@@ -187,10 +195,12 @@ impl GameState {
         let mut game_over_winner = None;
 
         for action in queued {
-            if let Some(dota) = self.dota.as_mut() {
-                if dota.process_action(&action.data) && self.game_over_time.is_none() && game_over_winner.is_none() {
-                    game_over_winner = Some(dota.format_winner());
-                }
+            if let Some(dota) = self.dota.as_mut()
+                && dota.process_action(&action.data)
+                && self.game_over_time.is_none()
+                && game_over_winner.is_none()
+            {
+                game_over_winner = Some(dota.format_winner());
             }
             let len = action.wire_len();
             if batch_len + len > MAX_ACTION_PAYLOAD && !batch.is_empty() {
@@ -206,8 +216,13 @@ impl GameState {
         }
 
         if let Some(winner) = game_over_winner {
-            tracing::info!(winner, "gameover timer started (stats class reported game over)");
-            self.send_chat_all(&format!("Game over detected! Winner: {winner}. Game will close in 60s."));
+            tracing::info!(
+                winner,
+                "gameover timer started (stats class reported game over)"
+            );
+            self.send_chat_all(&format!(
+                "Game over detected! Winner: {winner}. Game will close in 60s."
+            ));
             self.game_over_time = Some(tokio::time::Instant::now());
         }
 
@@ -217,17 +232,16 @@ impl GameState {
                 if let Some(r) = &self.relay {
                     r.push(b.clone());
                 }
-                if let Some(rep) = self.replay.as_mut() {
-                    if b.len() >= 6 {
-                        rep.add_timeslot(send_interval, &b[6..]);
-                    }
+                if let Some(rep) = self.replay.as_mut()
+                    && b.len() >= 6
+                {
+                    rep.add_timeslot(send_interval, &b[6..]);
                 }
                 self.broadcast(b);
             }
             Err(e) => tracing::warn!(error = %e, "failed to build action packet"),
         }
     }
-
 }
 
 #[cfg(test)]
@@ -260,11 +274,17 @@ mod tests {
         for rx in rxs.iter_mut() {
             let _ = drain_ids(rx);
         }
-        st.actions.push(ActionBlock { pid: 1, data: Bytes::from_static(&[0x10, 0x20]) });
+        st.actions.push(ActionBlock {
+            pid: 1,
+            data: Bytes::from_static(&[0x10, 0x20]),
+        });
 
         st.on_tick(0);
 
-        assert!(st.actions.is_empty(), "actions must not be replayed next tick");
+        assert!(
+            st.actions.is_empty(),
+            "actions must not be replayed next tick"
+        );
         let first = rxs[0].try_recv().expect("action packet");
         assert_eq!(first[1], ids::INCOMING_ACTION);
         assert!(first.len() > 8, "packet must carry the action body and CRC");
@@ -278,13 +298,23 @@ mod tests {
 
         // 20 x 100-byte actions = 2060 wire bytes, past the 1400-byte limit.
         for _ in 0..20 {
-            st.actions.push(ActionBlock { pid: 1, data: Bytes::from(vec![7u8; 100]) });
+            st.actions.push(ActionBlock {
+                pid: 1,
+                data: Bytes::from(vec![7u8; 100]),
+            });
         }
         st.on_tick(0);
 
         let sent = drain_ids(&mut rxs[0]);
-        assert!(sent.contains(&ids::INCOMING_ACTION2), "overflow packet must be sent");
-        assert_eq!(sent.last(), Some(&ids::INCOMING_ACTION), "main packet goes last");
+        assert!(
+            sent.contains(&ids::INCOMING_ACTION2),
+            "overflow packet must be sent"
+        );
+        assert_eq!(
+            sent.last(),
+            Some(&ids::INCOMING_ACTION),
+            "main packet goes last"
+        );
     }
 
     #[test]
@@ -370,7 +400,10 @@ mod tests {
         assert!(sent.contains(&ids::CHAT_FROM_HOST));
 
         // Advance time by 500ms -> step 4
-        if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+        if let GamePhase::Countdown {
+            ref mut started_at, ..
+        } = st.phase
+        {
             *started_at = std::time::Instant::now() - std::time::Duration::from_millis(500);
         }
         st.on_tick(0);
@@ -382,7 +415,10 @@ mod tests {
     fn countdown_reaching_zero_starts_loading() {
         let (mut st, mut rxs) = seated_game(1);
         st.start_countdown("slash");
-        if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+        if let GamePhase::Countdown {
+            ref mut started_at, ..
+        } = st.phase
+        {
             *started_at = std::time::Instant::now() - crate::state::COUNTDOWN_TOTAL;
         }
         st.on_tick(0);
@@ -422,7 +458,8 @@ mod tests {
     fn loading_timeout_drops_unready_players_and_starts_game() {
         let (mut st, _rxs) = seated_game(2);
         st.begin_loading();
-        st.started_loading_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(65));
+        st.started_loading_at =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(65));
         st.handle_loaded(1);
 
         st.on_tick(0);
@@ -445,11 +482,17 @@ mod tests {
         act.extend_from_slice(&[0x6b, b'd', b'r', b'.', b'x', 0x00]);
         act.extend_from_slice(b"Global\0Winner\0");
         act.extend_from_slice(&1u32.to_le_bytes()); // Sentinel victory
-        st.actions.push(ghost_protocol::w3gs::ActionBlock { pid: 1, data: bytes::Bytes::from(act) });
+        st.actions.push(ghost_protocol::w3gs::ActionBlock {
+            pid: 1,
+            data: bytes::Bytes::from(act),
+        });
 
         st.on_tick(0);
 
-        assert!(st.game_over_time.is_some(), "game_over_time must be set when winner detected");
+        assert!(
+            st.game_over_time.is_some(),
+            "game_over_time must be set when winner detected"
+        );
         // Verify End Message was broadcast
         let chat = rxs[0].try_recv().expect("must receive end chat");
         assert_eq!(chat[1], ghost_protocol::w3gs::ids::CHAT_FROM_HOST);
@@ -463,7 +506,10 @@ mod tests {
         tokio::time::advance(std::time::Duration::from_secs(2)).await;
         st.on_tick(0);
         assert_eq!(st.players.iter().filter(|p| p.left.is_none()).count(), 0);
-        assert!(st.finished, "game must transition to finished when all players stopped");
+        assert!(
+            st.finished,
+            "game must transition to finished when all players stopped"
+        );
     }
 
     #[tokio::test]
@@ -489,6 +535,9 @@ mod tests {
         let (body_bytes, duration_ms) = rep.finish().expect("replay finish must succeed");
 
         assert!(body_bytes.len() > 64);
-        assert_eq!(duration_ms, 100, "replay duration must match total timeslots");
+        assert_eq!(
+            duration_ms, 100,
+            "replay duration must match total timeslots"
+        );
     }
 }

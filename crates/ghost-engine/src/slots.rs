@@ -128,21 +128,31 @@ impl SlotTable {
     }
 
     pub fn sid_of_pid(&self, pid: u8) -> Option<u8> {
-        self.slots.iter().position(|s| {
-            s.slot_status == SlotStatus::Occupied as u8 && s.pid == pid
-        }).map(|i| i as u8)
+        self.slots
+            .iter()
+            .position(|s| s.slot_status == SlotStatus::Occupied as u8 && s.pid == pid)
+            .map(|i| i as u8)
     }
 
     pub fn first_open(&self) -> Option<u8> {
-        self.slots.iter().position(|s| s.slot_status == SlotStatus::Open as u8).map(|i| i as u8)
+        self.slots
+            .iter()
+            .position(|s| s.slot_status == SlotStatus::Open as u8)
+            .map(|i| i as u8)
     }
 
     pub fn count_open(&self) -> u32 {
-        self.slots.iter().filter(|s| s.slot_status == SlotStatus::Open as u8).count() as u32
+        self.slots
+            .iter()
+            .filter(|s| s.slot_status == SlotStatus::Open as u8)
+            .count() as u32
     }
 
     pub fn count_occupied(&self) -> u32 {
-        self.slots.iter().filter(|s| s.slot_status == SlotStatus::Occupied as u8).count() as u32
+        self.slots
+            .iter()
+            .filter(|s| s.slot_status == SlotStatus::Occupied as u8)
+            .count() as u32
     }
 
     pub fn len(&self) -> usize {

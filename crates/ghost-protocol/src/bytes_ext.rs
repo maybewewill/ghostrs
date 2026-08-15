@@ -1,31 +1,43 @@
-use bytes::{BufMut, Bytes, BytesMut};
 use crate::error::ProtoError;
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub trait BufExt: bytes::Buf {
     fn try_get_u8(&mut self) -> Result<u8, ProtoError> {
         if self.remaining() < 1 {
-            return Err(ProtoError::Truncated { need: 1, have: self.remaining() });
+            return Err(ProtoError::Truncated {
+                need: 1,
+                have: self.remaining(),
+            });
         }
         Ok(self.get_u8())
     }
 
     fn try_get_u16_le(&mut self) -> Result<u16, ProtoError> {
         if self.remaining() < 2 {
-            return Err(ProtoError::Truncated { need: 2, have: self.remaining() });
+            return Err(ProtoError::Truncated {
+                need: 2,
+                have: self.remaining(),
+            });
         }
         Ok(self.get_u16_le())
     }
 
     fn try_get_u32_le(&mut self) -> Result<u32, ProtoError> {
         if self.remaining() < 4 {
-            return Err(ProtoError::Truncated { need: 4, have: self.remaining() });
+            return Err(ProtoError::Truncated {
+                need: 4,
+                have: self.remaining(),
+            });
         }
         Ok(self.get_u32_le())
     }
 
     fn try_get_bytes(&mut self, n: usize) -> Result<Bytes, ProtoError> {
         if self.remaining() < n {
-            return Err(ProtoError::Truncated { need: n, have: self.remaining() });
+            return Err(ProtoError::Truncated {
+                need: n,
+                have: self.remaining(),
+            });
         }
         Ok(self.copy_to_bytes(n))
     }
@@ -115,7 +127,10 @@ mod tests {
     #[test]
     fn cstring_without_terminator_errors_and_does_not_panic() {
         let mut b = Bytes::from_static(b"nope");
-        assert!(matches!(b.try_get_cstring(), Err(ProtoError::UnterminatedString)));
+        assert!(matches!(
+            b.try_get_cstring(),
+            Err(ProtoError::UnterminatedString)
+        ));
     }
 
     #[test]
@@ -131,7 +146,10 @@ mod tests {
     fn statstring_roundtrip() {
         let raw: Vec<u8> = vec![0x00, 0x01, 0x7F, 0x80, 0xFF, 0x10, 0x00, 0x2A, 0x03];
         let enc = encode_statstring(&raw);
-        assert!(!enc.contains(&0u8), "encoded statstring must not contain NUL");
+        assert!(
+            !enc.contains(&0u8),
+            "encoded statstring must not contain NUL"
+        );
         assert_eq!(decode_statstring(&enc), raw);
     }
 }

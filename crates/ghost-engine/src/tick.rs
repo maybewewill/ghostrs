@@ -10,7 +10,10 @@ pub struct TickScheduler {
 
 impl TickScheduler {
     pub fn new(period: Duration) -> Self {
-        Self { period, next: Instant::now() + period }
+        Self {
+            period,
+            next: Instant::now() + period,
+        }
     }
 
     pub fn deadline(&self) -> Instant {

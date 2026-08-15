@@ -94,10 +94,12 @@ impl LogonProof {
             let p = b.try_get_bytes(20)?;
             server_password_proof.copy_from_slice(&p);
         }
-        let message = if b.len() > 0 {
+        let message = if !b.is_empty() {
             b.try_get_cstring().unwrap_or_else(|_| {
                 let rest = b.try_get_bytes(b.len()).unwrap_or_default();
-                String::from_utf8_lossy(&rest).trim_end_matches('\0').to_string()
+                String::from_utf8_lossy(&rest)
+                    .trim_end_matches('\0')
+                    .to_string()
             })
         } else {
             String::new()
@@ -128,10 +130,12 @@ impl ChatEvent {
         let _account_num = b.try_get_bytes(4)?;
         let _reg_auth = b.try_get_bytes(4)?;
         let user = b.try_get_cstring().unwrap_or_default();
-        let message = if b.len() > 0 {
+        let message = if !b.is_empty() {
             b.try_get_cstring().unwrap_or_else(|_| {
                 let rest = b.try_get_bytes(b.len()).unwrap_or_default();
-                String::from_utf8_lossy(&rest).trim_end_matches('\0').to_string()
+                String::from_utf8_lossy(&rest)
+                    .trim_end_matches('\0')
+                    .to_string()
             })
         } else {
             String::new()
@@ -149,4 +153,143 @@ pub fn decode_ping(payload: &Bytes) -> Result<[u8; 4], ProtoError> {
     let mut b = payload.clone();
     let bytes = b.try_get_bytes(4)?;
     Ok([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+/// One game entry from a `SID_GETADVLISTEX` reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvListEntry {
+    /// Host address the server hands to a joining client, network order.
+    pub ip: [u8; 4],
+    /// Host port the server hands to a joining client. Big-endian on the wire.
+    pub port: u16,
+    pub game_name: String,
+    /// Decoded from the 8 reversed ASCII hex chars, `None` if unparseable.
+    pub host_counter: Option<u32>,
+}
+
+/// Decodes a `SID_GETADVLISTEX` reply payload (BNCS header already stripped).
+///
+/// Wire format transcribed from `bnetprotocol.cpp:52-93` (`RECEIVE_SID_GETADVLISTEX`).
+///
+/// Returns `Ok(None)` when the server reports zero games found — that is a valid
+/// reply meaning "no such game", not a protocol error.
+pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, ProtoError> {
+    let games_found_bytes = payload.get(0..4).ok_or(ProtoError::Truncated {
+        need: 4,
+        have: payload.len(),
+    })?;
+    let games_found =
+        u32::from_le_bytes(
+            games_found_bytes
+                .try_into()
+                .map_err(|_| ProtoError::Truncated {
+                    need: 4,
+                    have: payload.len(),
+                })?,
+        );
+    if games_found == 0 {
+        return Ok(None);
+    }
+
+    if payload.len() < 20 {
+        return Err(ProtoError::Truncated {
+            need: 20,
+            have: payload.len(),
+        });
+    }
+
+    // bnetprotocol.cpp:74: Port is 2 bytes big-endian (network byte order).
+    let port_bytes = payload.get(14..16).ok_or(ProtoError::Truncated {
+        need: 16,
+        have: payload.len(),
+    })?;
+    let port = u16::from_be_bytes(port_bytes.try_into().map_err(|_| ProtoError::Truncated {
+        need: 16,
+        have: payload.len(),
+    })?);
+
+    // bnetprotocol.cpp:75: IP is 4 bytes in network order.
+    let ip_bytes = payload.get(16..20).ok_or(ProtoError::Truncated {
+        need: 20,
+        have: payload.len(),
+    })?;
+    let ip: [u8; 4] = ip_bytes.try_into().map_err(|_| ProtoError::Truncated {
+        need: 20,
+        have: payload.len(),
+    })?;
+
+    // bnetprotocol.cpp:76: GameName is a NUL-terminated string starting at offset 20 (C++ offset 24).
+    let name_slice = payload.get(20..).ok_or(ProtoError::Truncated {
+        need: 21,
+        have: payload.len(),
+    })?;
+    let nul_pos = name_slice
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or(ProtoError::UnterminatedString)?;
+    let name_bytes = name_slice
+        .get(..nul_pos)
+        .ok_or(ProtoError::UnterminatedString)?;
+    let game_name = String::from_utf8_lossy(name_bytes).into_owned();
+
+    // bnetprotocol.cpp:78-84: HostCounter is 8 ASCII hex characters starting after
+    // GameName (len + NUL + 2 reserved bytes = name_len + 23 relative to payload).
+    let hc_start = nul_pos + 23;
+    let hc_end = hc_start + 8;
+    let hc_bytes = payload.get(hc_start..hc_end).ok_or(ProtoError::Truncated {
+        need: hc_end,
+        have: payload.len(),
+    })?;
+
+    let host_counter = std::str::from_utf8(hc_bytes).ok().and_then(|s| {
+        let rev: String = s.chars().rev().collect();
+        u32::from_str_radix(&rev, 16).ok()
+    });
+
+    Ok(Some(AdvListEntry {
+        ip,
+        port,
+        game_name,
+        host_counter,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn getadvlistex_decodes_address_port_and_host_counter() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[1, 0, 0, 0]); // games_found = 1
+        payload.extend_from_slice(&[0u8; 10]); // 10 unknown/reserved bytes
+        payload.extend_from_slice(&[0x17, 0xE1]); // port 6113 BE
+        payload.extend_from_slice(&[93, 184, 216, 34]); // IP
+        payload.extend_from_slice(b"ghostrs probe4\0"); // GameName + NUL
+        payload.extend_from_slice(&[0, 0]); // 2 unknown/reserved bytes
+        payload.extend_from_slice(b"1fedcba0"); // HostCounter (0x0ABCDEF1 in reversed hex)
+
+        let entry = decode_getadvlistex(&payload)
+            .expect("decoding valid SID_GETADVLISTEX must succeed")
+            .expect("must return Some(AdvListEntry)");
+
+        assert_eq!(entry.port, 6113);
+        assert_eq!(entry.ip, [93, 184, 216, 34]);
+        assert_eq!(entry.game_name, "ghostrs probe4");
+        assert_eq!(entry.host_counter, Some(0x0ABCDEF1));
+    }
+
+    #[test]
+    fn getadvlistex_zero_games_found_is_not_an_error() {
+        let payload = [0u8, 0, 0, 0];
+        let result = decode_getadvlistex(&payload);
+        assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn getadvlistex_rejects_truncated_entry() {
+        let payload = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // 12 bytes
+        let result = decode_getadvlistex(&payload);
+        assert!(result.is_err());
+    }
 }

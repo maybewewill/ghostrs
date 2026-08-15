@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use bytes::Bytes;
-use ghost_protocol::w3gs::{incoming::MapSizeReport, incoming, outgoing};
+use ghost_protocol::w3gs::{incoming, incoming::MapSizeReport, outgoing};
 
 use crate::state::GameState;
 
@@ -21,13 +21,20 @@ pub struct Download {
 
 impl Download {
     pub fn new(pid: u8) -> Self {
-        Self { pid, sent_upto: 0, acked_upto: 0, started: Instant::now() }
+        Self {
+            pid,
+            sent_upto: 0,
+            acked_upto: 0,
+            started: Instant::now(),
+        }
     }
 }
 
 impl GameState {
     pub fn handle_map_size(&mut self, conn_id: u64, payload: &Bytes) {
-        let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else { return };
+        let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
+            return;
+        };
         let report = match MapSizeReport::decode(payload) {
             Ok(r) => r,
             Err(e) => {
@@ -43,7 +50,10 @@ impl GameState {
             return;
         }
         if self.cfg.map.data.is_none() {
-            tracing::info!(pid, "player lacks the map and downloads are disabled, dropping");
+            tracing::info!(
+                pid,
+                "player lacks the map and downloads are disabled, dropping"
+            );
             if let Some(p) = self.players.by_pid_mut(pid) {
                 p.left = Some("lacks map and downloads are disabled".into());
             }
@@ -63,8 +73,12 @@ impl GameState {
     }
 
     pub fn handle_map_part_ok(&mut self, conn_id: u64, payload: &Bytes) {
-        let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else { return };
-        let Ok(acked) = incoming::decode_map_part_ok(payload) else { return };
+        let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
+            return;
+        };
+        let Ok(acked) = incoming::decode_map_part_ok(payload) else {
+            return;
+        };
         let total = self.cfg.map.size.max(1);
         if let Some(d) = self.downloads.iter_mut().find(|d| d.pid == pid) {
             d.acked_upto = acked;
@@ -75,7 +89,9 @@ impl GameState {
     }
 
     pub fn handle_pong(&mut self, conn_id: u64, payload: &Bytes) {
-        let Ok(pong) = incoming::decode_pong_to_host(payload) else { return };
+        let Ok(pong) = incoming::decode_pong_to_host(payload) else {
+            return;
+        };
         let now = self.created_at.elapsed().as_millis() as u32;
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.record_ping(now.saturating_sub(pong) / 2);
@@ -105,7 +121,11 @@ impl GameState {
         let mut packets: Vec<(u8, Bytes)> = Vec::new();
         self.downloads.retain_mut(|d| {
             if d.acked_upto >= total {
-                tracing::info!(pid = d.pid, secs = d.started.elapsed().as_secs(), "map download finished");
+                tracing::info!(
+                    pid = d.pid,
+                    secs = d.started.elapsed().as_secs(),
+                    "map download finished"
+                );
                 return false;
             }
             for _ in 0..MAX_PARTS_PER_TICK {

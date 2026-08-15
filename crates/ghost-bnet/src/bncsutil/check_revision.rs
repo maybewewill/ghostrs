@@ -68,23 +68,23 @@ fn parse_formula(formula: &str) -> Result<(u32, u32, u32, Vec<Operation>), Error
     let mut ops = Vec::with_capacity(4);
 
     for token in formula.split_whitespace() {
-        if let Some(rest) = token.strip_prefix("A=") {
-            if let Ok(v) = rest.parse::<u32>() {
-                a = v;
-                continue;
-            }
+        if let Some(rest) = token.strip_prefix("A=")
+            && let Ok(v) = rest.parse::<u32>()
+        {
+            a = v;
+            continue;
         }
-        if let Some(rest) = token.strip_prefix("B=") {
-            if let Ok(v) = rest.parse::<u32>() {
-                b = v;
-                continue;
-            }
+        if let Some(rest) = token.strip_prefix("B=")
+            && let Ok(v) = rest.parse::<u32>()
+        {
+            b = v;
+            continue;
         }
-        if let Some(rest) = token.strip_prefix("C=") {
-            if let Ok(v) = rest.parse::<u32>() {
-                c = v;
-                continue;
-            }
+        if let Some(rest) = token.strip_prefix("C=")
+            && let Ok(v) = rest.parse::<u32>()
+        {
+            c = v;
+            continue;
         }
 
         // Operation token: 5 chars, e.g. "A=A-S"
@@ -176,13 +176,7 @@ fn hash_file(
 }
 
 #[inline(always)]
-fn pad_and_execute(
-    ops: &[Operation],
-    a: &mut u32,
-    b: &mut u32,
-    c: &mut u32,
-    tail: &[u8],
-) {
+fn pad_and_execute(ops: &[Operation], a: &mut u32, b: &mut u32, c: &mut u32, tail: &[u8]) {
     let mut padded = [0u8; 1024];
     let len = tail.len();
     padded[..len].copy_from_slice(tail);
@@ -209,13 +203,7 @@ fn execute_ops(ops: &[Operation], a: &mut u32, b: &mut u32, c: &mut u32, s: u32)
             OpType::Sub => left_val.wrapping_sub(right_val),
             OpType::Xor => left_val ^ right_val,
             OpType::Mul => left_val.wrapping_mul(right_val),
-            OpType::Div => {
-                if right_val != 0 {
-                    left_val / right_val
-                } else {
-                    0
-                }
-            }
+            OpType::Div => left_val.checked_div(right_val).unwrap_or(0),
         };
         match op.target {
             'A' => *a = res,

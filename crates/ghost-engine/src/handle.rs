@@ -3,9 +3,15 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum GameCmd {
-    NewConn { conn_id: u64, link: PlayerLink, external_ip: [u8; 4] },
+    NewConn {
+        conn_id: u64,
+        link: PlayerLink,
+        external_ip: [u8; 4],
+    },
     Conn(ConnEvent),
-    Start { by: String },
+    Start {
+        by: String,
+    },
     Chat(String),
     Unhost,
     Shutdown,

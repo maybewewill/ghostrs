@@ -54,7 +54,11 @@ fn action_payload(actions: &[ActionBlock], send_interval: u16) -> Result<Bytes, 
 
 /// W3GS_INCOMING_ACTION (0x0C): the per-tick action broadcast.
 pub fn incoming_action(actions: &[ActionBlock], send_interval: u16) -> Result<Bytes, ProtoError> {
-    Frame::new(ids::INCOMING_ACTION, action_payload(actions, send_interval)?).encode()
+    Frame::new(
+        ids::INCOMING_ACTION,
+        action_payload(actions, send_interval)?,
+    )
+    .encode()
 }
 
 /// W3GS_INCOMING_ACTION2 (0x48): overflow packet, always send_interval 0.
@@ -70,7 +74,12 @@ pub fn ping_from_host(ticks: u32) -> Bytes {
         .expect("4-byte ping always fits")
 }
 
-fn slot_block(slots: &[SlotInfo], random_seed: u32, layout_style: u8, player_slots: u8) -> BytesMut {
+fn slot_block(
+    slots: &[SlotInfo],
+    random_seed: u32,
+    layout_style: u8,
+    player_slots: u8,
+) -> BytesMut {
     let mut p = BytesMut::with_capacity(3 + slots.len() * SlotInfo::WIRE_LEN + 6);
     let block_len = 1 + slots.len() * SlotInfo::WIRE_LEN + 4 + 1 + 1;
     p.put_u16_le(block_len as u16);
@@ -186,7 +195,9 @@ pub fn chat_from_host(
     message: &str,
 ) -> Result<Bytes, ProtoError> {
     if to_pids.is_empty() {
-        return Err(ProtoError::BadValue("chat_from_host needs at least one recipient"));
+        return Err(ProtoError::BadValue(
+            "chat_from_host needs at least one recipient",
+        ));
     }
     let mut p = BytesMut::with_capacity(4 + to_pids.len() + extra.len() + message.len());
     p.put_u8(to_pids.len() as u8);
@@ -301,15 +312,24 @@ mod tests {
     #[test]
     fn incoming_action_layout_and_crc() {
         let actions = vec![
-            ActionBlock { pid: 1, data: Bytes::from_static(&[0x10, 0x20]) },
-            ActionBlock { pid: 2, data: Bytes::from_static(&[0x30]) },
+            ActionBlock {
+                pid: 1,
+                data: Bytes::from_static(&[0x10, 0x20]),
+            },
+            ActionBlock {
+                pid: 2,
+                data: Bytes::from_static(&[0x30]),
+            },
         ];
         let framed = incoming_action(&actions, 100).unwrap();
 
         // Frame header
         assert_eq!(framed[0], 0xF7);
         assert_eq!(framed[1], ids::INCOMING_ACTION);
-        assert_eq!(u16::from_le_bytes([framed[2], framed[3]]) as usize, framed.len());
+        assert_eq!(
+            u16::from_le_bytes([framed[2], framed[3]]) as usize,
+            framed.len()
+        );
 
         // send interval, then 2-byte CRC, then the action blocks
         assert_eq!(u16::from_le_bytes([framed[4], framed[5]]), 100);
@@ -337,7 +357,10 @@ mod tests {
 
     #[test]
     fn incoming_action2_uses_zero_send_interval() {
-        let actions = vec![ActionBlock { pid: 1, data: Bytes::from_static(&[9]) }];
+        let actions = vec![ActionBlock {
+            pid: 1,
+            data: Bytes::from_static(&[9]),
+        }];
         let framed = incoming_action2(&actions).unwrap();
         assert_eq!(framed[1], ids::INCOMING_ACTION2);
         assert_eq!(u16::from_le_bytes([framed[4], framed[5]]), 0);
@@ -345,7 +368,10 @@ mod tests {
 
     #[test]
     fn action_block_wire_len_matches_encoded_size() {
-        let a = ActionBlock { pid: 1, data: Bytes::from_static(&[0; 17]) };
+        let a = ActionBlock {
+            pid: 1,
+            data: Bytes::from_static(&[0; 17]),
+        };
         assert_eq!(a.wire_len(), 20);
         let framed = incoming_action(std::slice::from_ref(&a), 100).unwrap();
         assert_eq!(framed.len(), 4 + 2 + 2 + a.wire_len());
