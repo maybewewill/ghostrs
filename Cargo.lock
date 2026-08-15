@@ -520,6 +520,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghost-engine"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "ghost-net",
+ "ghost-protocol",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ghost-net"
 version = "0.1.0"
 dependencies = [
