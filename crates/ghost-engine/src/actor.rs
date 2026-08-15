@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use ghost_net::ConnEventKind;
+use ghost_net::{AnyFrame, ConnEventKind};
 use ghost_protocol::frame::Frame;
 use ghost_protocol::w3gs::{ids, incoming};
 use tokio::sync::mpsc;
@@ -80,7 +80,14 @@ impl GameState {
         }
     }
 
-    pub fn on_frame(&mut self, conn_id: u64, frame: Frame) {
+    pub fn on_frame(&mut self, conn_id: u64, frame: AnyFrame) {
+        match frame {
+            AnyFrame::W3gs(f) => self.on_w3gs_frame(conn_id, f),
+            AnyFrame::Gps(f) => self.on_gps_frame(conn_id, f),
+        }
+    }
+
+    pub fn on_w3gs_frame(&mut self, conn_id: u64, frame: Frame) {
         match frame.id {
             ids::REQ_JOIN => self.handle_req_join(conn_id, &frame.payload),
             ids::LEAVE_GAME => {
@@ -96,6 +103,28 @@ impl GameState {
             ids::MAP_PART_OK => self.handle_map_part_ok(conn_id, &frame.payload),
             ids::DROP_REQ => self.handle_drop_request(conn_id),
             other => tracing::trace!(conn_id, id = format!("0x{other:02X}"), "ignoring packet"),
+        }
+    }
+
+    pub fn on_gps_frame(&mut self, conn_id: u64, frame: Frame) {
+        match frame.id {
+            ghost_protocol::gps::ids::ACK => {
+                if let Some(p) = self.players.by_conn_mut(conn_id) {
+                    p.gproxy = true;
+                    if p.gproxy_buffer.is_none() {
+                        p.gproxy_buffer = Some(crate::gproxy::GProxyBuffer::new(500));
+                    }
+                }
+            }
+            ghost_protocol::gps::ids::RECONNECT => {
+                if let Ok(req) = ghost_protocol::gps::decode_reconnect(&frame.payload)
+                    && let Some(idx) = self.pending.iter().position(|(id, _, _)| *id == conn_id)
+                {
+                    let (_, link, _) = self.pending.remove(idx);
+                    self.handle_gps_reconnect(conn_id, req, link);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -125,6 +154,7 @@ pub mod tests_support {
             sync_limit: 50,
             map: MapInfo::test_default(),
             virtual_host_name: "|cFF4080C0Ghost".into(),
+            reconnect_wait: Duration::from_secs(180),
         }
     }
 
@@ -158,7 +188,7 @@ pub mod tests_support {
             let conn_id = i as u64;
             let (tx, rx) = mpsc::channel(64);
             st.add_conn(conn_id, PlayerLink::for_test(tx), [1, 2, 3, 4]);
-            st.on_frame(conn_id, Frame::new(ids::REQ_JOIN, reqjoin_bytes(&format!("P{i}"))));
+            st.on_frame(conn_id, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes(&format!("P{i}")))));
             rxs.push(rx);
         }
         (st, rxs)
@@ -181,7 +211,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(64);
         st.add_conn(1, PlayerLink::for_test(tx), [1, 2, 3, 4]);
 
-        st.on_frame(1, Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash")));
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))));
 
         assert_eq!(st.players.len(), 1);
         let p = st.players.by_conn(1).expect("seated");
@@ -198,8 +228,8 @@ mod tests {
         st.add_conn(1, PlayerLink::for_test(tx1), [1, 1, 1, 1]);
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
 
-        st.on_frame(1, Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash")));
-        st.on_frame(2, Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash")));
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))));
+        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))));
 
         assert_eq!(st.players.len(), 1);
         assert!(drain_ids(&mut rx2).contains(&ids::REJECT_JOIN));
@@ -215,13 +245,12 @@ mod tests {
         st.add_conn(1, PlayerLink::for_test(tx1), [1, 1, 1, 1]);
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
 
-        st.on_frame(1, Frame::new(ids::REQ_JOIN, reqjoin_bytes("A")));
-        st.on_frame(2, Frame::new(ids::REQ_JOIN, reqjoin_bytes("B")));
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))));
+        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("B"))));
 
         assert_eq!(st.players.len(), 1);
         assert!(drain_ids(&mut rx2).contains(&ids::REJECT_JOIN));
     }
-
     #[tokio::test]
     async fn leaving_frees_the_slot_and_notifies_everyone_else() {
         let mut st = GameState::new(test_cfg());
@@ -229,11 +258,11 @@ mod tests {
         let (tx2, mut rx2) = mpsc::channel(64);
         st.add_conn(1, PlayerLink::for_test(tx1), [1, 1, 1, 1]);
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
-        st.on_frame(1, Frame::new(ids::REQ_JOIN, reqjoin_bytes("A")));
-        st.on_frame(2, Frame::new(ids::REQ_JOIN, reqjoin_bytes("B")));
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))));
+        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("B"))));
         let _ = drain_ids(&mut rx2);
 
-        st.on_frame(1, Frame::new(ids::LEAVE_GAME, Bytes::from_static(&[7, 0, 0, 0])));
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::LEAVE_GAME, Bytes::from_static(&[7, 0, 0, 0]))));
         st.reap_left_players();
 
         assert_eq!(st.players.len(), 1);
@@ -246,7 +275,7 @@ mod tests {
         let mut st = GameState::new(test_cfg());
         let (tx, rx) = mpsc::channel(64);
         st.add_conn(1, PlayerLink::for_test(tx), [1, 1, 1, 1]);
-        st.on_frame(1, Frame::new(ids::REQ_JOIN, reqjoin_bytes("A")));
+        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))));
         drop(rx); // the writer task is gone
 
         st.broadcast(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]));

@@ -1,13 +1,63 @@
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use ghost_protocol::ProtoError;
 use ghost_protocol::frame::Frame;
-use ghost_protocol::w3gs::W3gsCodec;
+use ghost_protocol::gps::{GPS_HEADER, GpsCodec};
+use ghost_protocol::w3gs::{W3GS_HEADER, W3gsCodec};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnyFrame {
+    W3gs(Frame),
+    Gps(Frame),
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DualCodec {
+    w3gs: W3gsCodec,
+    gps: GpsCodec,
+}
+
+impl Decoder for DualCodec {
+    type Item = AnyFrame;
+    type Error = ProtoError;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
+        // Resync past any byte that is neither W3GS (0xF7) nor GPS (0xF8).
+        while !src.is_empty() && src[0] != W3GS_HEADER && src[0] != GPS_HEADER {
+            match src.iter().position(|&b| b == W3GS_HEADER || b == GPS_HEADER) {
+                Some(pos) => src.advance(pos),
+                None => {
+                    src.clear();
+                    return Ok(None);
+                }
+            }
+        }
+        if src.is_empty() {
+            return Ok(None);
+        }
+
+        if src[0] == W3GS_HEADER {
+            self.w3gs.decode(src).map(|opt| opt.map(AnyFrame::W3gs))
+        } else {
+            self.gps.decode(src).map(|opt| opt.map(AnyFrame::Gps))
+        }
+    }
+}
+
+impl Encoder<Bytes> for DualCodec {
+    type Error = ProtoError;
+
+    fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), ProtoError> {
+        dst.reserve(item.len());
+        dst.put_slice(&item);
+        Ok(())
+    }
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum LinkError {
@@ -27,7 +77,7 @@ pub enum CloseReason {
 
 #[derive(Debug)]
 pub enum ConnEventKind {
-    Frame(Frame),
+    Frame(AnyFrame),
     Closed(CloseReason),
 }
 
@@ -65,17 +115,12 @@ impl PlayerLink {
 }
 
 /// Spawns the reader and writer tasks for one connection.
-///
-/// `write_capacity` bounds how far a client may fall behind. At the default
-/// 100 ms tick, 1024 queued packets is roughly 100 seconds of game time: a peer
-/// that far behind is dead, not slow.
 pub fn spawn_conn(
     conn_id: u64,
     stream: TcpStream,
     events: mpsc::Sender<ConnEvent>,
     write_capacity: usize,
 ) -> PlayerLink {
-    // Nagle would batch our latency-critical action packets. Never enable it.
     if let Err(e) = stream.set_nodelay(true) {
         tracing::warn!(conn_id, error = %e, "failed to set TCP_NODELAY");
     }
@@ -89,7 +134,7 @@ pub fn spawn_conn(
     // Reader: socket -> engine
     let reader_events = events.clone();
     tokio::spawn(async move {
-        let mut framed = FramedRead::new(read_half, W3gsCodec::default());
+        let mut framed = FramedRead::new(read_half, DualCodec::default());
         let reason = loop {
             match framed.next().await {
                 Some(Ok(frame)) => {
@@ -99,10 +144,10 @@ pub fn spawn_conn(
                         .is_err()
                     {
                         cancel.cancel();
-                        return; // engine is gone; nothing to report to
+                        return;
                     }
                 }
-                Some(Err(ProtoError::BadValue(_))) => continue, // resync and keep reading
+                Some(Err(ProtoError::BadValue(_))) => continue,
                 Some(Err(e)) => break CloseReason::Protocol(e),
                 None => break CloseReason::PeerClosed,
             }
@@ -115,7 +160,7 @@ pub fn spawn_conn(
 
     // Writer: engine -> socket
     tokio::spawn(async move {
-        let mut framed = FramedWrite::new(write_half, W3gsCodec::default());
+        let mut framed = FramedWrite::new(write_half, DualCodec::default());
         loop {
             tokio::select! {
                 _ = cancel_writer.cancelled() => break,
@@ -166,7 +211,7 @@ mod tests {
         let ev = rx.recv().await.expect("event");
         assert_eq!(ev.conn_id, 1);
         match ev.kind {
-            ConnEventKind::Frame(f) => {
+            ConnEventKind::Frame(AnyFrame::W3gs(f)) => {
                 assert_eq!(f.id, ids::OUTGOING_KEEPALIVE);
                 assert_eq!(f.payload.len(), 5);
             }
@@ -202,8 +247,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_full_write_queue_reports_backpressure_instead_of_blocking() {
-        // The game loop must never await a slow client. Once the queue is full,
-        // try_send fails immediately and the engine drops the player.
         let (_client, server) = connected_pair().await;
         let (tx, _rx) = mpsc::channel(16);
         let link = spawn_conn(1, server, tx, 1);
@@ -227,7 +270,6 @@ mod tests {
         drop(client);
         let _ = rx.recv().await;
 
-        // Give the writer task a moment to observe the closed socket.
         for _ in 0..100 {
             if link.is_closed() {
                 return;

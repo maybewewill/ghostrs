@@ -56,6 +56,7 @@ pub struct GameConfig {
     pub sync_limit: u32,
     pub map: MapInfo,
     pub virtual_host_name: String,
+    pub reconnect_wait: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +122,12 @@ impl GameState {
             if p.left.is_some() {
                 continue;
             }
+            if let Some(buf) = p.gproxy_buffer.as_mut() {
+                buf.push(bytes.clone());
+            }
+            if p.disconnected_since.is_some() {
+                continue;
+            }
             match p.link.try_send(bytes.clone()) {
                 Ok(()) => {}
                 Err(LinkError::Backpressure) => {
@@ -128,7 +135,11 @@ impl GameState {
                     p.left = Some("lagged out (write queue full)".into());
                 }
                 Err(LinkError::Closed) => {
-                    p.left = Some("connection closed".into());
+                    if p.gproxy {
+                        p.disconnected_since = Some(Instant::now());
+                    } else {
+                        p.left = Some("connection closed".into());
+                    }
                 }
             }
         }

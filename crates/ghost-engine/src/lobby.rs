@@ -94,6 +94,8 @@ impl GameState {
             let _ = player.link.try_send(b);
         }
 
+        let _ = player.link.try_send(ghost_protocol::gps::init(1, pid, player.reconnect_key, 0));
+
         self.players.insert(player);
 
         // 4. Tell everyone else about the joiner.
@@ -119,7 +121,12 @@ impl GameState {
 
     pub(crate) fn handle_conn_closed(&mut self, conn_id: u64, reason: String) {
         if let Some(p) = self.players.by_conn_mut(conn_id) {
-            if p.left.is_none() {
+            if p.gproxy {
+                if p.disconnected_since.is_none() {
+                    p.disconnected_since = Some(std::time::Instant::now());
+                    tracing::info!(game = %self.cfg.name, pid = p.pid, "gproxy player disconnected, awaiting reconnect");
+                }
+            } else if p.left.is_none() {
                 p.left = Some(reason);
             }
         } else {
