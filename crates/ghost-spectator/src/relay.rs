@@ -153,6 +153,10 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
                 match cmd {
                     Some(RelayCmd::Shutdown) | None => break,
                     Some(RelayCmd::ViewerJoined { conn_id, link }) => {
+                        let welcome = format!("[DotaTV] Connected to live stream: {}!", relay.cfg.game_name);
+                        if let Ok(pkt) = ghost_protocol::w3gs::outgoing::chat_from_host(255, &[255], 0x20, &[0, 0, 0, 0], &welcome) {
+                            let _ = link.try_send(pkt);
+                        }
                         let _ = relay.add_viewer(conn_id, link);
                     }
                     Some(RelayCmd::ViewerChat { sender, text }) => {

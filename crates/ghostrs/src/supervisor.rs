@@ -204,7 +204,11 @@ impl Supervisor {
     fn handle_bnet_event(&mut self, ev: BnetEvent) {
         match ev {
             BnetEvent::Connected => tracing::info!("connected to Battle.net"),
-            BnetEvent::LoggedIn => tracing::info!("logged in to Battle.net"),
+            BnetEvent::LoggedIn => {
+                tracing::info!("logged in to Battle.net");
+                let default_game_name = "iCCup DotA 5v5 -ap PRO";
+                self.create_game(default_game_name, "slash");
+            }
             BnetEvent::ChatMessage { user, text } => self.handle_chat_command(&user, &text),
             BnetEvent::Whisper { user, text } => self.handle_chat_command(&user, &text),
             BnetEvent::Disconnected(reason) => tracing::warn!(%reason, "disconnected from Battle.net"),

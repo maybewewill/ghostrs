@@ -118,6 +118,20 @@ pub fn logon_response(
     Frame::new(ids::SID_LOGONRESPONSE, p.freeze()).encode_with(BNCS_HEADER)
 }
 
+pub fn logon_response2(
+    client_token: [u8; 4],
+    server_token: [u8; 4],
+    password_hash: &[u8],
+    account_name: &str,
+) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(8 + password_hash.len() + account_name.len() + 1);
+    p.put_slice(&client_token);
+    p.put_slice(&server_token);
+    p.put_slice(password_hash);
+    put_cstring(&mut p, account_name);
+    Frame::new(ids::SID_LOGONRESPONSE2, p.freeze()).encode_with(BNCS_HEADER)
+}
+
 pub fn netgameport(server_port: u16) -> Bytes {
     let mut p = BytesMut::with_capacity(2);
     p.put_u16_le(server_port);

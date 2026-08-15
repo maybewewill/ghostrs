@@ -52,27 +52,16 @@ async fn bnet_client_completes_handshake_to_login() {
         let resp = Frame::new(ids::SID_AUTH_CHECK, p.freeze()).encode_with(0xFF).unwrap();
         framed_write.send(resp).await.unwrap();
 
-        // 4. Expect SID_AUTH_ACCOUNTLOGON -> respond with SID_AUTH_ACCOUNTLOGON (salt + server key)
+        // 4. Expect SID_LOGONRESPONSE -> respond with SID_LOGONRESPONSE2 status 0
         let f = framed_read.next().await.unwrap().unwrap();
-        assert_eq!(f.id, ids::SID_AUTH_ACCOUNTLOGON);
+        assert_eq!(f.id, ids::SID_LOGONRESPONSE);
 
         let mut p = BytesMut::new();
-        p.put_u32_le(0); // status = 0
-        p.put_slice(&[0xAA; 32]); // salt
-        p.put_slice(&[0xBB; 32]); // server public key
-        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze()).encode_with(0xFF).unwrap();
+        p.put_u32_le(0); // status = 0 (Success)
+        let resp = Frame::new(ids::SID_LOGONRESPONSE2, p.freeze()).encode_with(0xFF).unwrap();
         framed_write.send(resp).await.unwrap();
 
-        // 5. Expect SID_AUTH_ACCOUNTLOGONPROOF -> respond with SID_AUTH_ACCOUNTLOGONPROOF (success)
-        let f = framed_read.next().await.unwrap().unwrap();
-        assert_eq!(f.id, ids::SID_AUTH_ACCOUNTLOGONPROOF);
-
-        let mut p = BytesMut::new();
-        p.put_u32_le(0); // status = 0
-        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze()).encode_with(0xFF).unwrap();
-        framed_write.send(resp).await.unwrap();
-
-        // 6. Expect SID_ENTERCHAT -> respond with SID_ENTERCHAT
+        // 5. Expect SID_ENTERCHAT -> respond with SID_ENTERCHAT
         let f = framed_read.next().await.unwrap().unwrap();
         assert_eq!(f.id, ids::SID_ENTERCHAT);
     });
@@ -81,6 +70,7 @@ async fn bnet_client_completes_handshake_to_login() {
     let cfg = BnetConfig {
         server: addr.ip().to_string(),
         port: addr.port(),
+        host_port: 6112,
         username: "testbot".into(),
         password: "secretpassword".into(),
         cdkey_roc: "FFFFFFFFFFFFFFFFFFFFFFFFFF".into(),
