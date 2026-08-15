@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 pub mod mpq_num;
+pub mod xsha1;
 
 use libloading::{Library, Symbol};
 
