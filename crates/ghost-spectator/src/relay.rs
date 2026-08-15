@@ -195,7 +195,6 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay::ReplayWriter;
 
     fn test_link() -> PlayerLink {
         let (tx, _rx) = mpsc::channel(64);
@@ -234,17 +233,4 @@ mod tests {
         assert!(relay.add_viewer(3, test_link()).is_err());
     }
 
-    #[test]
-    fn replay_header_is_written_and_the_block_count_updated() {
-        let dir = std::env::temp_dir().join("ghostrs-replay-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("t.w3g");
-        let mut w = ReplayWriter::create(&path, "test").unwrap();
-        w.push_block(&[0xF7, 0x0C, 0x04, 0x00]).unwrap();
-        w.finish().unwrap();
-
-        let data = std::fs::read(&path).unwrap();
-        assert!(data.starts_with(b"Warcraft III recorded game\x1A\0"));
-        assert!(data.len() > 68);
-    }
 }

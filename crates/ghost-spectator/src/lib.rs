@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod relay;
-pub mod replay;
+pub mod w3g;
 
 pub use relay::{Relay, RelayCmd, RelayConfig, RelayHandle, spawn_relay};
-pub use replay::ReplayWriter;
+pub use w3g::W3gWriter;
