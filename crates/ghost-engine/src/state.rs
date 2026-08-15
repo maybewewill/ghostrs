@@ -189,23 +189,10 @@ impl GameState {
         }
     }
 
-    // Stubs filled in Tasks 11-13
-    pub(crate) fn handle_action(&mut self, _conn_id: u64, _payload: &Bytes) {
-        tracing::trace!("handle_action stub");
-    }
-
-    pub(crate) fn handle_keepalive(&mut self, _conn_id: u64, _payload: &Bytes) {
-        tracing::trace!("handle_keepalive stub");
-    }
-
+    // Stubs filled in Tasks 12-13
     pub(crate) fn handle_chat_to_host(&mut self, _conn_id: u64, _payload: &Bytes) {
         tracing::trace!("handle_chat_to_host stub");
     }
-
-    pub(crate) fn handle_loaded(&mut self, _conn_id: u64) {
-        tracing::trace!("handle_loaded stub");
-    }
-
     pub(crate) fn handle_pong(&mut self, _conn_id: u64, _payload: &Bytes) {
         tracing::trace!("handle_pong stub");
     }
@@ -220,9 +207,5 @@ impl GameState {
 
     pub(crate) fn handle_drop_request(&mut self, _conn_id: u64) {
         tracing::trace!("handle_drop_request stub");
-    }
-
-    pub(crate) fn on_tick(&mut self, _skipped: u32) {
-        tracing::trace!("on_tick stub");
     }
 }

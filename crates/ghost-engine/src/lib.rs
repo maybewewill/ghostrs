@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod actions;
 pub mod actor;
 pub mod handle;
 pub mod lobby;
@@ -8,6 +9,7 @@ pub mod slots;
 pub mod state;
 pub mod tick;
 
+pub use actions::MAX_ACTION_PAYLOAD;
 pub use actor::spawn_game;
 pub use handle::{GameCmd, GameHandle};
 pub use players::{NameMatch, Player, PlayerTable};

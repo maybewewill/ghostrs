@@ -106,16 +106,16 @@ impl GameState {
         }
     }
 }
+
 #[cfg(test)]
-mod tests {
+pub mod tests_support {
     use super::*;
     use std::time::Duration;
     use bytes::{BufMut, Bytes, BytesMut};
     use ghost_net::PlayerLink;
-    use ghost_protocol::w3gs::ids;
-    use tokio::sync::mpsc;
     use crate::state::MapInfo;
-    fn test_cfg() -> GameConfig {
+
+    pub fn test_cfg() -> GameConfig {
         GameConfig {
             name: "test".into(),
             owner: "slash".into(),
@@ -128,7 +128,7 @@ mod tests {
         }
     }
 
-    fn reqjoin_bytes(name: &str) -> Bytes {
+    pub fn reqjoin_bytes(name: &str) -> Bytes {
         let mut b = BytesMut::new();
         b.put_u32_le(1);
         b.put_u32_le(0);
@@ -143,13 +143,37 @@ mod tests {
     }
 
     /// Drains one player's outbound queue into a list of (id, payload) pairs.
-    fn drain(rx: &mut mpsc::Receiver<Bytes>) -> Vec<u8> {
+    pub fn drain_ids(rx: &mut mpsc::Receiver<Bytes>) -> Vec<u8> {
         let mut ids = Vec::new();
         while let Ok(b) = rx.try_recv() {
             ids.push(b[1]);
         }
         ids
     }
+
+    pub fn seated_game(n: usize) -> (GameState, Vec<mpsc::Receiver<Bytes>>) {
+        let mut st = GameState::new(test_cfg());
+        let mut rxs = Vec::new();
+        for i in 1..=n {
+            let conn_id = i as u64;
+            let (tx, rx) = mpsc::channel(64);
+            st.add_conn(conn_id, PlayerLink::for_test(tx), [1, 2, 3, 4]);
+            st.on_frame(conn_id, Frame::new(ids::REQ_JOIN, reqjoin_bytes(&format!("P{i}"))));
+            rxs.push(rx);
+        }
+        (st, rxs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::tests_support::*;
+    use std::time::Duration;
+    use bytes::Bytes;
+    use ghost_net::PlayerLink;
+    use ghost_protocol::w3gs::ids;
+    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn a_joining_player_gets_slotinfojoin_and_is_seated() {
@@ -163,7 +187,7 @@ mod tests {
         let p = st.players.by_conn(1).expect("seated");
         assert_eq!(p.name, "Slash");
         assert_eq!(st.slots.count_occupied(), 1);
-        assert!(drain(&mut rx).contains(&ids::SLOT_INFO_JOIN));
+        assert!(drain_ids(&mut rx).contains(&ids::SLOT_INFO_JOIN));
     }
 
     #[tokio::test]
@@ -178,7 +202,7 @@ mod tests {
         st.on_frame(2, Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash")));
 
         assert_eq!(st.players.len(), 1);
-        assert!(drain(&mut rx2).contains(&ids::REJECT_JOIN));
+        assert!(drain_ids(&mut rx2).contains(&ids::REJECT_JOIN));
     }
 
     #[tokio::test]
@@ -195,7 +219,7 @@ mod tests {
         st.on_frame(2, Frame::new(ids::REQ_JOIN, reqjoin_bytes("B")));
 
         assert_eq!(st.players.len(), 1);
-        assert!(drain(&mut rx2).contains(&ids::REJECT_JOIN));
+        assert!(drain_ids(&mut rx2).contains(&ids::REJECT_JOIN));
     }
 
     #[tokio::test]
@@ -207,14 +231,14 @@ mod tests {
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
         st.on_frame(1, Frame::new(ids::REQ_JOIN, reqjoin_bytes("A")));
         st.on_frame(2, Frame::new(ids::REQ_JOIN, reqjoin_bytes("B")));
-        let _ = drain(&mut rx2);
+        let _ = drain_ids(&mut rx2);
 
         st.on_frame(1, Frame::new(ids::LEAVE_GAME, Bytes::from_static(&[7, 0, 0, 0])));
         st.reap_left_players();
 
         assert_eq!(st.players.len(), 1);
         assert_eq!(st.slots.count_occupied(), 1);
-        assert!(drain(&mut rx2).contains(&ids::PLAYER_LEAVE_OTHERS));
+        assert!(drain_ids(&mut rx2).contains(&ids::PLAYER_LEAVE_OTHERS));
     }
 
     #[tokio::test]
