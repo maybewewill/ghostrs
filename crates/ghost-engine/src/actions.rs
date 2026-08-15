@@ -15,7 +15,15 @@ impl GameState {
         match OutgoingAction::decode(payload) {
             // The body is a slice of the read buffer: queuing it costs a
             // refcount bump, and it is relayed without ever being parsed.
-            Ok(a) => self.actions.push(ActionBlock { pid, data: a.data }),
+            Ok(a) => {
+                if let Some(dota) = &mut self.dota {
+                    dota.process_action(&a.data);
+                }
+                if let Some(w3mmd) = &mut self.w3mmd {
+                    w3mmd.process_action(&a.data);
+                }
+                self.actions.push(ActionBlock { pid, data: a.data });
+            }
             Err(e) => tracing::debug!(conn_id, error = %e, "malformed action"),
         }
     }
@@ -43,12 +51,12 @@ impl GameState {
             self.begin_playing();
         }
     }
-
     pub fn begin_loading(&mut self) {
         self.phase = GamePhase::Loading;
         self.broadcast(outgoing::countdown_start());
         self.broadcast(outgoing::countdown_end());
     }
+
 
     pub fn begin_playing(&mut self) {
         self.phase = GamePhase::Playing;
@@ -58,6 +66,13 @@ impl GameState {
         }
         self.sync_counter = 0;
         self.game_ticks = 0;
+
+        if let Some(hcl) = &self.hcl {
+            let host_pid = self.players.iter().next().map(|p| p.pid).unwrap_or(1);
+            let hcl_actions = crate::hcl::Hcl::encode_hcl_actions(hcl, host_pid);
+            self.actions.extend(hcl_actions);
+            tracing::info!(hcl = %hcl, "injected HCL game mode actions on match start");
+        }
     }
 
     /// One scheduled tick. `skipped` counts periods lost to a stall.

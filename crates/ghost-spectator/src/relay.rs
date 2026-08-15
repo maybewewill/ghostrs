@@ -25,6 +25,8 @@ pub enum RelayError {
 pub enum RelayCmd {
     GameBlock(Bytes),
     PlayerInfo { pid: u8, name: String },
+    ViewerJoined { conn_id: u64, link: PlayerLink },
+    ViewerChat { sender: String, text: String },
     GameOver,
     Shutdown,
     DebugGetReleasedCount(oneshot::Sender<usize>),
@@ -42,6 +44,13 @@ impl RelayHandle {
 
     pub fn push(&self, block: Bytes) {
         let _ = self.tx.try_send(RelayCmd::GameBlock(block));
+    }
+
+    pub fn send_chat(&self, sender: &str, text: &str) {
+        let _ = self.tx.try_send(RelayCmd::ViewerChat {
+            sender: sender.to_string(),
+            text: text.to_string(),
+        });
     }
 
     pub async fn debug_released_count(&self) -> usize {
@@ -98,10 +107,40 @@ impl Relay {
 
 pub fn spawn_relay(cfg: RelayConfig) -> (RelayHandle, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(1024);
+    let handle = RelayHandle::new(tx.clone());
+
+    let port = cfg.port;
+    if port > 0 {
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            let addr = format!("0.0.0.0:{port}");
+            if let Ok(listener) = tokio::net::TcpListener::bind(&addr).await {
+                tracing::info!(%addr, "spectator relay listening for DotaTV viewers");
+                let mut conn_counter = 100_000u64;
+                let (conn_tx, mut conn_rx) = mpsc::channel(256);
+                tokio::spawn(async move {
+                    while let Some(_ev) = conn_rx.recv().await {}
+                });
+
+                while let Ok((stream, peer)) = listener.accept().await {
+                    conn_counter += 1;
+                    tracing::info!(%peer, conn_id = conn_counter, "spectator viewer connected");
+                    let link = ghost_net::spawn_conn(conn_counter, stream, conn_tx.clone(), 1024);
+                    let _ = tx_clone.send(RelayCmd::ViewerJoined {
+                        conn_id: conn_counter,
+                        link,
+                    }).await;
+                }
+            } else {
+                tracing::warn!(%addr, "failed to bind spectator relay TCP port");
+            }
+        });
+    }
+
     let join = tokio::spawn(async move {
         run_relay(cfg, rx).await;
     });
-    (RelayHandle::new(tx), join)
+    (handle, join)
 }
 
 async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
@@ -113,6 +152,15 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
             cmd = rx.recv() => {
                 match cmd {
                     Some(RelayCmd::Shutdown) | None => break,
+                    Some(RelayCmd::ViewerJoined { conn_id, link }) => {
+                        let _ = relay.add_viewer(conn_id, link);
+                    }
+                    Some(RelayCmd::ViewerChat { sender, text }) => {
+                        let msg = format!("[DotaTV] {sender}: {text}");
+                        if let Ok(pkt) = ghost_protocol::w3gs::outgoing::chat_from_host(255, &[255], 0x20, &[0, 0, 0, 0], &msg) {
+                            relay.broadcast(&pkt);
+                        }
+                    }
                     Some(RelayCmd::GameBlock(block)) => {
                         let release_at = Instant::now() + relay.cfg.delay;
                         relay.delayed_blocks.push_back((release_at, block));

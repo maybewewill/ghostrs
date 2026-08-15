@@ -159,6 +159,8 @@ pub mod tests_support {
             map: MapInfo::test_default(),
             virtual_host_name: "|cFF4080C0Ghost".into(),
             reconnect_wait: Duration::from_secs(180),
+            custom_slots: None,
+            relay: None,
         }
     }
 

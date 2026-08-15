@@ -24,6 +24,7 @@ pub struct MapInfo {
     pub flags: u32,
     /// Present only when map downloads are enabled.
     pub data: Option<Arc<Vec<u8>>>,
+    pub layout_style: u8,
 }
 
 impl MapInfo {
@@ -42,6 +43,7 @@ impl MapInfo {
             game_type: 1,
             flags: 0,
             data: None,
+            layout_style: 0,
         }
     }
 }
@@ -57,6 +59,8 @@ pub struct GameConfig {
     pub map: MapInfo,
     pub virtual_host_name: String,
     pub reconnect_wait: Duration,
+    pub custom_slots: Option<Vec<ghost_protocol::w3gs::SlotInfo>>,
+    pub relay: Option<ghost_spectator::RelayHandle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,12 +93,25 @@ pub struct GameState {
     pub relay: Option<ghost_spectator::RelayHandle>,
     pub jitter_histogram: [u64; 5],
     pub last_jitter_report: Instant,
+    pub dota: Option<crate::stats_dota::StatsDotA>,
+    pub w3mmd: Option<crate::stats_w3mmd::StatsW3MMD>,
+    pub hcl: Option<String>,
+    pub muted_all: bool,
+    pub draw_votes: Vec<u8>,
+    pub start_votes: Vec<u8>,
+    pub last_player_left: Option<(String, String)>,
+    pub holds: std::collections::HashMap<u8, String>,
 }
 
 impl GameState {
     pub fn new(cfg: GameConfig) -> Self {
-        let slots = SlotTable::new(cfg.num_slots);
+        let slots = if let Some(cs) = cfg.custom_slots.clone() {
+            SlotTable::from_slots(cs)
+        } else {
+            SlotTable::new(cfg.num_slots)
+        };
         let tick = TickScheduler::new(cfg.latency);
+        let relay = cfg.relay.clone();
         Self {
             phase: GamePhase::Lobby,
             slots,
@@ -110,9 +127,21 @@ impl GameState {
             lagging: false,
             finished: false,
             downloads: Vec::new(),
-            relay: None,
+            relay,
             jitter_histogram: [0; 5],
             last_jitter_report: Instant::now(),
+            dota: if cfg.map.path.to_lowercase().contains("dota") {
+                Some(crate::stats_dota::StatsDotA::new(cfg.name.clone()))
+            } else {
+                None
+            },
+            w3mmd: Some(crate::stats_w3mmd::StatsW3MMD::new(cfg.name.clone(), "default".into())),
+            hcl: crate::hcl::Hcl::parse_from_gamename(&cfg.name),
+            muted_all: false,
+            draw_votes: Vec::new(),
+            start_votes: Vec::new(),
+            last_player_left: None,
+            holds: std::collections::HashMap::new(),
             cfg,
         }
     }
@@ -200,7 +229,7 @@ impl GameState {
         match outgoing::slot_info(
             self.slots.as_wire(),
             self.random_seed,
-            self.cfg.map.num_teams,
+            self.cfg.map.layout_style,
             self.cfg.map.num_players,
         ) {
             Ok(b) => self.broadcast(b),

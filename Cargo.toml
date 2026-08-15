@@ -32,3 +32,5 @@ mpq = "0.8"
 flate2 = "1.1.1"
 proptest = "1.5"
 criterion = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"

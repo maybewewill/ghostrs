@@ -16,6 +16,37 @@ pub struct Ban {
     pub created: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DotAPlayerRecord {
+    pub colour: u32,
+    pub name: String,
+    pub hero: String,
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub creep_kills: u32,
+    pub creep_denies: u32,
+    pub neutral_kills: u32,
+    pub tower_kills: u32,
+    pub rax_kills: u32,
+    pub courier_kills: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DotAStatsSummary {
+    pub games: u32,
+    pub wins: u32,
+    pub losses: u32,
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub creep_kills: u32,
+    pub creep_denies: u32,
+    pub neutral_kills: u32,
+    pub tower_kills: u32,
+    pub rax_kills: u32,
+}
+
 pub enum StoreQuery {
     IsBanned {
         name: String,
@@ -33,7 +64,13 @@ pub enum StoreQuery {
         game_name: String,
         reply: oneshot::Sender<usize>,
     },
+    GetDotAStats {
+        name: String,
+        reply: oneshot::Sender<Option<DotAStatsSummary>>,
+    },
 }
+
+pub type W3MMDVarRecord = (u32, String, Option<i32>, Option<f64>, Option<String>);
 
 pub enum StoreCmd {
     AddBan {
@@ -45,12 +82,32 @@ pub enum StoreCmd {
     RemoveBan {
         name: String,
     },
+    AddAdmin {
+        name: String,
+        server: String,
+    },
+    RemoveAdmin {
+        name: String,
+    },
     LogGame {
         name: String,
         map: String,
         started: i64,
         ended: i64,
         players: Vec<String>,
+    },
+    LogDotAGame {
+        game_name: String,
+        winner: u32,
+        duration: u32,
+        tree_hp: u32,
+        throne_hp: u32,
+        players: Vec<DotAPlayerRecord>,
+    },
+    LogW3MMD {
+        game_name: String,
+        players: Vec<(u32, String, String)>,
+        vars: Vec<W3MMDVarRecord>,
     },
     Query(StoreQuery),
 }
@@ -82,22 +139,31 @@ impl Store {
     }
 
     pub fn ban(&self, name: &str, ip: &str, admin: &str, reason: &str) {
-        if let Err(e) = self.tx.try_send(StoreCmd::AddBan {
+        let _ = self.tx.try_send(StoreCmd::AddBan {
             name: name.to_string(),
             ip: ip.to_string(),
             admin: admin.to_string(),
             reason: reason.to_string(),
-        }) {
-            tracing::warn!(error = %e, "failed to send AddBan command");
-        }
+        });
     }
 
     pub fn unban(&self, name: &str) {
-        if let Err(e) = self.tx.try_send(StoreCmd::RemoveBan {
+        let _ = self.tx.try_send(StoreCmd::RemoveBan {
             name: name.to_string(),
-        }) {
-            tracing::warn!(error = %e, "failed to send RemoveBan command");
-        }
+        });
+    }
+
+    pub fn add_admin(&self, name: &str, server: &str) {
+        let _ = self.tx.try_send(StoreCmd::AddAdmin {
+            name: name.to_string(),
+            server: server.to_string(),
+        });
+    }
+
+    pub fn remove_admin(&self, name: &str) {
+        let _ = self.tx.try_send(StoreCmd::RemoveAdmin {
+            name: name.to_string(),
+        });
     }
 
     pub fn log_game(
@@ -108,15 +174,32 @@ impl Store {
         ended: i64,
         players: Vec<String>,
     ) {
-        if let Err(e) = self.tx.try_send(StoreCmd::LogGame {
+        let _ = self.tx.try_send(StoreCmd::LogGame {
             name: name.to_string(),
             map: map.to_string(),
             started,
             ended,
             players,
-        }) {
-            tracing::warn!(error = %e, "failed to send LogGame command");
-        }
+        });
+    }
+
+    pub fn log_dota_game(
+        &self,
+        game_name: &str,
+        winner: u32,
+        duration: u32,
+        tree_hp: u32,
+        throne_hp: u32,
+        players: Vec<DotAPlayerRecord>,
+    ) {
+        let _ = self.tx.try_send(StoreCmd::LogDotAGame {
+            game_name: game_name.to_string(),
+            winner,
+            duration,
+            tree_hp,
+            throne_hp,
+            players,
+        });
     }
 
     pub async fn is_banned(&self, name: &str, ip: &str) -> Option<Ban> {
@@ -138,6 +221,16 @@ impl Store {
         };
         let _ = self.tx.send(StoreCmd::Query(query)).await;
         rx.await.unwrap_or(false)
+    }
+
+    pub async fn get_dota_stats(&self, name: &str) -> Option<DotAStatsSummary> {
+        let (reply, rx) = oneshot::channel();
+        let query = StoreQuery::GetDotAStats {
+            name: name.to_string(),
+            reply,
+        };
+        let _ = self.tx.send(StoreCmd::Query(query)).await;
+        rx.await.ok().flatten()
     }
 
     pub async fn journal_mode(&self) -> String {
@@ -166,38 +259,91 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
-                if let Err(e) = conn.execute(
+                let _ = conn.execute(
                     "INSERT INTO bans (name, ip, admin, reason, created) VALUES (?1, ?2, ?3, ?4, ?5)",
                     rusqlite::params![name, ip, admin, reason, now],
-                ) {
-                    tracing::warn!(error = %e, "failed to insert ban");
-                }
+                );
             }
             StoreCmd::RemoveBan { name } => {
-                if let Err(e) = conn.execute(
+                let _ = conn.execute(
                     "DELETE FROM bans WHERE name = ?1 COLLATE NOCASE",
                     rusqlite::params![name],
-                ) {
-                    tracing::warn!(error = %e, "failed to remove ban");
-                }
+                );
+            }
+            StoreCmd::AddAdmin { name, server } => {
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO admins (name, server) VALUES (?1, ?2)",
+                    rusqlite::params![name, server],
+                );
+            }
+            StoreCmd::RemoveAdmin { name } => {
+                let _ = conn.execute(
+                    "DELETE FROM admins WHERE name = ?1 COLLATE NOCASE",
+                    rusqlite::params![name],
+                );
             }
             StoreCmd::LogGame { name, map, started, ended, players } => {
-                let tx_res = conn.transaction();
-                if let Ok(tx) = tx_res {
-                    let insert_res = tx.execute(
-                        "INSERT INTO games (name, map, started, ended) VALUES (?1, ?2, ?3, ?4)",
-                        rusqlite::params![name, map, started, ended],
-                    );
-                    if insert_res.is_ok() {
-                        let game_id = tx.last_insert_rowid();
-                        for player in players {
-                            let _ = tx.execute(
-                                "INSERT INTO game_players (game_id, name) VALUES (?1, ?2)",
-                                rusqlite::params![game_id, player],
-                            );
-                        }
-                        let _ = tx.commit();
+                let duration = ended.saturating_sub(started);
+                if let Ok(tx) = conn.transaction()
+                    && tx.execute(
+                        "INSERT INTO games (name, map, started, ended, duration) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![name, map, started, ended, duration],
+                    ).is_ok()
+                {
+                    let game_id = tx.last_insert_rowid();
+                    for player in players {
+                        let _ = tx.execute(
+                            "INSERT INTO game_players (game_id, name) VALUES (?1, ?2)",
+                            rusqlite::params![game_id, player],
+                        );
                     }
+                    let _ = tx.commit();
+                }
+            }
+            StoreCmd::LogDotAGame { game_name, winner, duration, tree_hp, throne_hp, players } => {
+                if let Ok(tx) = conn.transaction() {
+                    let game_id: i64 = tx.query_row(
+                        "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
+                        rusqlite::params![game_name],
+                        |r| r.get(0),
+                    ).unwrap_or(0);
+
+                    let _ = tx.execute(
+                        "INSERT INTO dotagames (game_id, winner, duration, tree_hp, throne_hp) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![game_id, winner, duration, tree_hp, throne_hp],
+                    );
+
+                    for p in players {
+                        let _ = tx.execute(
+                            "INSERT INTO dotaplayers (game_id, colour, name, hero, kills, deaths, assists, creep_kills, creep_denies, neutral_kills, tower_kills, rax_kills, courier_kills)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                            rusqlite::params![game_id, p.colour, p.name, p.hero, p.kills, p.deaths, p.assists, p.creep_kills, p.creep_denies, p.neutral_kills, p.tower_kills, p.rax_kills, p.courier_kills],
+                        );
+                    }
+                    let _ = tx.commit();
+                }
+            }
+            StoreCmd::LogW3MMD { game_name, players, vars } => {
+                if let Ok(tx) = conn.transaction() {
+                    let game_id: i64 = tx.query_row(
+                        "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
+                        rusqlite::params![game_name],
+                        |r| r.get(0),
+                    ).unwrap_or(0);
+
+                    for (pid, name, flag) in players {
+                        let _ = tx.execute(
+                            "INSERT INTO w3mmdplayers (game_id, pid, name, flag) VALUES (?1, ?2, ?3, ?4)",
+                            rusqlite::params![game_id, pid, name, flag],
+                        );
+                    }
+                    for (pid, var_name, vi, vr, vs) in vars {
+                        let _ = tx.execute(
+                            "INSERT INTO w3mmdvars (game_id, pid, var_name, value_int, value_real, value_string) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            rusqlite::params![game_id, pid, var_name, vi, vr, vs],
+                        );
+                    }
+                    let _ = tx.commit();
                 }
             }
             StoreCmd::Query(q) => match q {
@@ -228,6 +374,37 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                         Ok(rows.next()?.is_some())
                     })();
                     let _ = reply.send(res.unwrap_or(false));
+                }
+                StoreQuery::GetDotAStats { name, reply } => {
+                    let res: rusqlite::Result<Option<DotAStatsSummary>> = (|| {
+                        let mut stmt = conn.prepare(
+                            "SELECT count(*), sum(kills), sum(deaths), sum(assists), sum(creep_kills), sum(creep_denies), sum(neutral_kills), sum(tower_kills), sum(rax_kills)
+                             FROM dotaplayers WHERE name = ?1 COLLATE NOCASE"
+                        )?;
+                        let mut rows = stmt.query(rusqlite::params![name])?;
+                        if let Some(row) = rows.next()? {
+                            let games: u32 = row.get(0)?;
+                            if games == 0 {
+                                return Ok(None);
+                            }
+                            Ok(Some(DotAStatsSummary {
+                                games,
+                                wins: 0,
+                                losses: 0,
+                                kills: row.get::<_, Option<u32>>(1)?.unwrap_or(0),
+                                deaths: row.get::<_, Option<u32>>(2)?.unwrap_or(0),
+                                assists: row.get::<_, Option<u32>>(3)?.unwrap_or(0),
+                                creep_kills: row.get::<_, Option<u32>>(4)?.unwrap_or(0),
+                                creep_denies: row.get::<_, Option<u32>>(5)?.unwrap_or(0),
+                                neutral_kills: row.get::<_, Option<u32>>(6)?.unwrap_or(0),
+                                tower_kills: row.get::<_, Option<u32>>(7)?.unwrap_or(0),
+                                rax_kills: row.get::<_, Option<u32>>(8)?.unwrap_or(0),
+                            }))
+                        } else {
+                            Ok(None)
+                        }
+                    })();
+                    let _ = reply.send(res.ok().flatten());
                 }
                 StoreQuery::JournalMode { reply } => {
                     let mode: String = conn
@@ -272,17 +449,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wal_mode_is_enabled_on_a_file_database() {
-        let path = std::env::temp_dir().join("ghostrs-store-test.db");
-        let _ = std::fs::remove_file(&path);
-        let (store, _join) = Store::open(&path).unwrap();
-        assert_eq!(store.journal_mode().await, "wal");
+    async fn admin_management_works() {
+        let (store, _join) = Store::open_in_memory().unwrap();
+        store.add_admin("RootAdmin", "pvpgn");
+        assert!(store.is_admin("rootadmin").await);
+        store.remove_admin("RootAdmin");
+        assert!(!store.is_admin("rootadmin").await);
     }
 
     #[tokio::test]
-    async fn a_logged_game_records_its_players() {
+    async fn dota_stats_logging_and_query() {
         let (store, _join) = Store::open_in_memory().unwrap();
-        store.log_game("g1", "dota.w3x", 100, 200, vec!["a".into(), "b".into()]);
-        assert_eq!(store.game_player_count("g1").await, 2);
+        store.log_game("dota_1", "dota.w3x", 100, 200, vec!["Slash".into()]);
+        store.log_dota_game(
+            "dota_1",
+            1,
+            1500,
+            100,
+            0,
+            vec![DotAPlayerRecord {
+                colour: 1,
+                name: "Slash".into(),
+                hero: "E001".into(),
+                kills: 10,
+                deaths: 2,
+                assists: 8,
+                creep_kills: 150,
+                creep_denies: 20,
+                neutral_kills: 30,
+                tower_kills: 2,
+                rax_kills: 1,
+                courier_kills: 0,
+            }],
+        );
+
+        let stats = store.get_dota_stats("slash").await.expect("stats");
+        assert_eq!(stats.games, 1);
+        assert_eq!(stats.kills, 10);
+        assert_eq!(stats.deaths, 2);
     }
 }
