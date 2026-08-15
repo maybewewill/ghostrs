@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Context;
-use ghost_bnet::{BnetCmd, BnetEvent, BnetHandle, MapAdvert, spawn_bnet};
-use ghost_engine::{GameCmd, GameConfig, GameHandle, MapInfo, spawn_game};
-use ghost_net::{ConnEvent, spawn_conn, spawn_listener};
+use ghost_bnet::{BnetCmd, BnetEvent, BnetHandle, MapAdvert, encode_game_statstring, spawn_bnet};
+use ghost_engine::{GameCmd, GameConfig, GameHandle, MapInfo, ParsedMap, spawn_game};
+use ghost_net::{ConnEvent, UdpBroadcaster, spawn_conn, spawn_listener};
+use ghost_protocol::w3gs::outgoing::game_info;
+use ghost_spectator::{RelayConfig, RelayHandle, spawn_relay};
 use ghost_store::Store;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -14,16 +18,28 @@ use crate::config::Config;
 
 pub struct Supervisor {
     cfg: Config,
-    _store: Store,
+    store: Store,
     bnet: BnetHandle,
     bnet_events: mpsc::Receiver<BnetEvent>,
     current_game: Option<GameHandle>,
-    _current_game_name: Option<String>,
+    current_game_name: Option<String>,
+    current_game_advert: Option<ActiveLobbyAdvert>,
     running_games: Vec<(String, GameHandle, JoinHandle<()>)>,
     conn_to_game: HashMap<u64, GameHandle>,
     listener_rx: mpsc::Receiver<(u64, TcpStream, SocketAddr)>,
     conn_event_tx: mpsc::Sender<ConnEvent>,
     conn_event_rx: mpsc::Receiver<ConnEvent>,
+    udp_broadcaster: Option<UdpBroadcaster>,
+    #[allow(dead_code)]
+    spectator_relay: Option<RelayHandle>,
+    selected_map_file: Option<String>,
+}
+
+struct ActiveLobbyAdvert {
+    game_name: String,
+    stat_string: Vec<u8>,
+    host_counter: u32,
+    map_game_type: [u8; 4],
 }
 
 impl Supervisor {
@@ -42,18 +58,42 @@ impl Supervisor {
 
         let (conn_event_tx, conn_event_rx) = mpsc::channel(1024);
 
+        let udp_broadcaster = match UdpBroadcaster::bind(cfg.bot.host_port).await {
+            Ok(u) => Some(u),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to bind UDP broadcaster for LAN games");
+                None
+            }
+        };
+
+        let spectator_relay = if cfg.spectator.enabled {
+            let (handle, _join) = spawn_relay(RelayConfig {
+                port: cfg.spectator.port,
+                delay: cfg.spectator.delay,
+                max_viewers: cfg.spectator.max_viewers,
+                game_name: "DotaTV".into(),
+            });
+            Some(handle)
+        } else {
+            None
+        };
+
         let mut sup = Self {
             cfg,
-            _store: store,
+            store,
             bnet,
             bnet_events: bnet_events_rx,
             current_game: None,
-            _current_game_name: None,
+            current_game_name: None,
+            current_game_advert: None,
             running_games: Vec::new(),
             conn_to_game: HashMap::new(),
             listener_rx,
             conn_event_tx,
             conn_event_rx,
+            udp_broadcaster,
+            spectator_relay,
+            selected_map_file: None,
         };
 
         sup.event_loop().await
@@ -62,12 +102,18 @@ impl Supervisor {
     async fn event_loop(&mut self) -> anyhow::Result<()> {
         tracing::info!("supervisor ready, awaiting battle.net and player events");
 
+        let mut lan_timer = tokio::time::interval(Duration::from_secs(3));
+
         loop {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down gracefully");
                     self.shutdown().await;
                     break;
+                }
+
+                _ = lan_timer.tick() => {
+                    self.broadcast_lan_game().await;
                 }
 
                 Some((conn_id, stream, peer)) = self.listener_rx.recv() => {
@@ -89,14 +135,47 @@ impl Supervisor {
         Ok(())
     }
 
+    async fn broadcast_lan_game(&self) {
+        if let (Some(u), Some(adv)) = (&self.udp_broadcaster, &self.current_game_advert)
+            && let Ok(pkt) = game_info(
+                self.cfg.bot.tft,
+                self.cfg.bnet.war3_version,
+                adv.host_counter,
+                0,
+                &adv.game_name,
+                &adv.stat_string,
+                12,
+                adv.map_game_type,
+                12,
+                0,
+                self.cfg.bot.host_port,
+            )
+        {
+            let _ = u.send(&pkt).await;
+        }
+    }
+
     fn handle_new_connection(&mut self, conn_id: u64, stream: TcpStream, peer: SocketAddr) {
         if let Some(game) = &self.current_game {
-            let link = spawn_conn(conn_id, stream, self.conn_event_tx.clone(), 1024);
             let external_ip = match peer.ip() {
                 std::net::IpAddr::V4(v4) => v4.octets(),
                 _ => [127, 0, 0, 1],
             };
-            game.send(GameCmd::NewConn { conn_id, link, external_ip });
+
+            let ip_str = format!("{}.{}.{}.{}", external_ip[0], external_ip[1], external_ip[2], external_ip[3]);
+            let store = self.store.clone();
+            let game_handle = game.clone();
+            let conn_tx = self.conn_event_tx.clone();
+
+            tokio::spawn(async move {
+                if let Some(ban) = store.is_banned("", &ip_str).await {
+                    tracing::info!(%ip_str, reason = %ban.reason, "rejected banned IP");
+                    return;
+                }
+                let link = spawn_conn(conn_id, stream, conn_tx, 1024);
+                game_handle.send(GameCmd::NewConn { conn_id, link, external_ip });
+            });
+
             self.conn_to_game.insert(conn_id, game.clone());
         } else {
             tracing::debug!(conn_id, %peer, "connection dropped: no active lobby");
@@ -144,10 +223,20 @@ impl Supervisor {
                 }
                 self.create_game(&name, user);
             }
+            "map" | "load" => {
+                let map_name = parts.collect::<Vec<_>>().join(" ");
+                if map_name.is_empty() {
+                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Usage: !map <filename>")));
+                } else {
+                    self.selected_map_file = Some(map_name.clone());
+                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Map set to [{map_name}]")));
+                }
+            }
             "unhost" => {
                 if let Some(g) = self.current_game.take() {
                     g.send(GameCmd::Unhost);
-                    self._current_game_name = None;
+                    self.current_game_name = None;
+                    self.current_game_advert = None;
                     self.bnet.send(BnetCmd::UnhostGame);
                     self.bnet.send(BnetCmd::SendChat(format!("/w {user} Game unhosted")));
                 }
@@ -161,13 +250,73 @@ impl Supervisor {
                 let msg = parts.collect::<Vec<_>>().join(" ");
                 self.bnet.send(BnetCmd::SendChat(msg));
             }
+            "ban" => {
+                let args: Vec<&str> = parts.collect();
+                if let Some(target) = args.first() {
+                    let reason = args.get(1..).map(|r| r.join(" ")).unwrap_or_else(|| "banned by admin".into());
+                    self.store.ban(target, "", user, &reason);
+                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Banned [{target}]: {reason}")));
+                }
+            }
+            "unban" => {
+                if let Some(target) = parts.next() {
+                    self.store.unban(target);
+                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Unbanned [{target}]")));
+                }
+            }
+            "status" => {
+                let running = self.running_games.len();
+                let active = if self.current_game.is_some() { "1 lobby" } else { "none" };
+                self.bnet.send(BnetCmd::SendChat(format!(
+                    "/w {user} Status: {running} active games, current lobby: {active}"
+                )));
+            }
             _ => {}
         }
     }
 
-    fn create_game(&mut self, name: &str, owner: &str) {
-        let map_info = MapInfo {
-            path: format!("Maps\\Download\\{name}.w3x"),
+    fn resolve_map_info(&self, game_name: &str) -> (MapInfo, [u8; 4]) {
+        let candidate_filename = self
+            .selected_map_file
+            .clone()
+            .unwrap_or_else(|| format!("{game_name}.w3x"));
+
+        let candidate_paths = [
+            PathBuf::from(&self.cfg.bot.map_path).join(&candidate_filename),
+            PathBuf::from("maps").join(&candidate_filename),
+            PathBuf::from(&candidate_filename),
+        ];
+
+        let common_j = std::fs::read("war3/common.j")
+            .or_else(|_| std::fs::read("maps/common.j"))
+            .ok();
+        let blizzard_j = std::fs::read("war3/blizzard.j")
+            .or_else(|_| std::fs::read("maps/blizzard.j"))
+            .ok();
+
+        for path in &candidate_paths {
+            if path.exists()
+                && let Ok(parsed) = ParsedMap::load_mpq(path, common_j.as_deref(), blizzard_j.as_deref())
+            {
+                tracing::info!(
+                    path = %path.display(),
+                    crc = format!("0x{:08X}", parsed.info.crc),
+                    size = parsed.info.size,
+                    players = parsed.info.num_players,
+                    "loaded map MPQ successfully"
+                );
+                let game_type = parsed.info.game_type.to_le_bytes();
+                return (parsed.info, game_type);
+            }
+        }
+
+        tracing::warn!(
+            game = %game_name,
+            "no valid MPQ map file found, using fallback map info"
+        );
+
+        let fallback_info = MapInfo {
+            path: format!("Maps\\Download\\{candidate_filename}"),
             size: 1000,
             info: 1,
             crc: 0x1234_5678,
@@ -177,15 +326,37 @@ impl Supervisor {
             width: 128,
             height: 128,
             game_type: 1,
-            flags: 0,
+            flags: 0x0000_0002 | 0x0000_0800 | 0x0000_4000 | 0x0006_0000,
             data: None,
         };
+        (fallback_info, [1, 0, 0, 0])
+    }
+
+    fn create_game(&mut self, name: &str, owner: &str) {
+        let (map_info, map_game_type) = self.resolve_map_info(name);
+        let host_counter: u32 = rand::random();
+
+        let advert_map = MapAdvert {
+            path: map_info.path.clone(),
+            size: map_info.size,
+            info: map_info.info,
+            crc: map_info.crc,
+            sha1: map_info.sha1,
+            num_players: map_info.num_players,
+            num_teams: map_info.num_teams,
+            width: map_info.width,
+            height: map_info.height,
+            game_type: map_info.game_type,
+            flags: map_info.flags,
+        };
+
+        let stat_string = encode_game_statstring(&advert_map, name, &self.cfg.bnet.username);
 
         let game_cfg = GameConfig {
             name: name.to_string(),
             owner: owner.to_string(),
-            host_counter: rand::random(),
-            num_slots: 12,
+            host_counter,
+            num_slots: map_info.num_players as usize,
             latency: self.cfg.game.latency,
             sync_limit: self.cfg.game.sync_limit,
             map: map_info,
@@ -193,34 +364,26 @@ impl Supervisor {
             reconnect_wait: self.cfg.game.reconnect_wait,
         };
 
-        let host_counter = game_cfg.host_counter;
         let (handle, join) = spawn_game(game_cfg);
 
         self.current_game = Some(handle.clone());
-        self._current_game_name = Some(name.to_string());
-        self.running_games.push((name.to_string(), handle, join));
+        self.current_game_name = Some(name.to_string());
+        self.current_game_advert = Some(ActiveLobbyAdvert {
+            game_name: name.to_string(),
+            stat_string,
+            host_counter,
+            map_game_type,
+        });
 
-        let advert = MapAdvert {
-            path: format!("Maps\\Download\\{name}.w3x"),
-            size: 1000,
-            info: 1,
-            crc: 0x1234_5678,
-            sha1: [0; 20],
-            num_players: 12,
-            num_teams: 2,
-            width: 128,
-            height: 128,
-            game_type: 1,
-            flags: 0,
-        };
+        self.running_games.push((name.to_string(), handle, join));
 
         self.bnet.send(BnetCmd::CreateGame {
             name: name.to_string(),
-            map: advert,
+            map: advert_map,
             host_counter,
         });
 
-        tracing::info!(game = %name, %owner, "game created and advertised on Battle.net");
+        tracing::info!(game = %name, %owner, "game created and advertised on Battle.net and LAN");
     }
 
     fn clean_finished_games(&mut self) {
@@ -230,7 +393,8 @@ impl Supervisor {
             && h.is_closed()
         {
             self.current_game = None;
-            self._current_game_name = None;
+            self.current_game_name = None;
+            self.current_game_advert = None;
             self.bnet.send(BnetCmd::UnhostGame);
         }
     }
