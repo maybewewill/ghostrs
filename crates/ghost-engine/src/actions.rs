@@ -53,6 +53,7 @@ impl GameState {
     }
     pub fn begin_loading(&mut self) {
         self.phase = GamePhase::Loading;
+        self.delete_virtual_host();
         self.broadcast(outgoing::countdown_start());
         self.broadcast(outgoing::countdown_end());
     }

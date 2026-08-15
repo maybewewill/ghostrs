@@ -38,6 +38,8 @@ pub struct Player {
     pub reserved: bool,
     /// Set once the player is scheduled for removal; carries the reason.
     pub left: Option<String>,
+    /// True for the socket-less bot player seated to fill the lobby headcount.
+    pub virtual_host: bool,
 }
 
 impl Player {
@@ -62,6 +64,7 @@ impl Player {
             muted: false,
             reserved: false,
             left: None,
+            virtual_host: false,
         }
     }
     pub fn record_ping(&mut self, ping_ms: u32) {

@@ -457,6 +457,7 @@ impl Supervisor {
         };
 
         let (handle, join) = spawn_game(game_cfg);
+        handle.send(GameCmd::CreateVirtualHost);
 
         self.current_game = Some(handle.clone());
         self.current_game_name = Some(name.to_string());

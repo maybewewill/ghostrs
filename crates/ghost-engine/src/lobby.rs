@@ -106,6 +106,13 @@ impl GameState {
         }
         self.send_all_slot_info();
 
+        // GHost++ deletes the virtual host once only one seat is left, so the
+        // lobby can still fill completely (game_base.cpp:2052).
+        let real_players = self.players.iter().filter(|p| !p.virtual_host).count();
+        if real_players >= self.cfg.num_slots - 1 {
+            self.delete_virtual_host();
+        }
+
         tracing::info!(game = %self.cfg.name, %pid, name = %req.name, "player joined");
     }
 
@@ -130,5 +137,58 @@ impl GameState {
         } else {
             self.pending.retain(|(id, _, _)| *id != conn_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn the_virtual_host_is_announced_to_a_joining_player() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
+        st.create_virtual_host();
+        assert_ne!(st.virtual_host_pid, 255, "a virtual host PID must be allocated");
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        st.add_conn(7, ghost_net::PlayerLink::for_test(tx), [127, 0, 0, 1]);
+        st.handle_req_join(7, &crate::actor::tests_support::reqjoin_bytes("alice"));
+
+        let ids = crate::actor::tests_support::drain_ids(&mut rx);
+        let vh = st.virtual_host_pid;
+        assert!(
+            ids.contains(&ghost_protocol::w3gs::ids::PLAYER_INFO),
+            "joiner must be told about the virtual host, got {ids:?}"
+        );
+        assert_eq!(st.players.by_pid(vh).map(|p| p.name.as_str()), Some(st.cfg.virtual_host_name.as_str()));
+    }
+
+    #[tokio::test]
+    async fn bot_chat_is_sent_from_the_virtual_host_pid() {
+        let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
+        st.create_virtual_host();
+        // Drain P1's own join packets and the virtual host's PLAYER_INFO
+        // announcement so only the chat packet is left to inspect.
+        crate::actor::tests_support::drain_ids(&mut rxs[0]);
+        st.send_chat_all("hello");
+        let pkt = rxs[0].try_recv().expect("chat packet");
+        // [0xF7, 0x0F, len_lo, len_hi, recipient_count, to_pids..., from_pid, ...]
+        // (gameprotocol.cpp:526-542): a count byte and the recipient list
+        // precede from_pid, so with one recipient it lands at offset 6.
+        assert_eq!(pkt[1], ghost_protocol::w3gs::ids::CHAT_FROM_HOST);
+        assert_eq!(pkt[6], st.virtual_host_pid, "sender must be the virtual host, not 255");
+    }
+
+    #[tokio::test]
+    async fn the_virtual_host_makes_way_for_the_last_real_player() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
+        st.create_virtual_host();
+        let vh = st.virtual_host_pid;
+        // Fill every slot but one; the virtual host must step aside for the last seat.
+        for i in 0..(st.cfg.num_slots - 1) {
+            let (tx, _rx) = tokio::sync::mpsc::channel(64);
+            st.add_conn(100 + i as u64, ghost_net::PlayerLink::for_test(tx), [0; 4]);
+            st.handle_req_join(100 + i as u64, &crate::actor::tests_support::reqjoin_bytes(&format!("p{i}")));
+        }
+        assert_eq!(st.virtual_host_pid, 255, "virtual host must be deleted");
+        assert!(st.players.by_pid(vh).is_none());
     }
 }
