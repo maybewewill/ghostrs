@@ -9,6 +9,11 @@ pub const REJECT_FULL: u32 = 0x09;
 pub const REJECT_STARTED: u32 = 0x0A;
 pub const REJECT_WRONG_PASSWORD: u32 = 0x1B;
 
+/// GHost++'s global slot ceiling, not this game's configured `num_slots`.
+/// `gameslot.h:39`: `const int MAX_SLOTS = 24;`. `game_base.cpp:2052` gates
+/// virtual-host eviction on this constant, not on the current map's slot count.
+pub const MAX_SLOTS: usize = 24;
+
 impl GameState {
     pub(crate) fn handle_req_join(&mut self, conn_id: u64, payload: &Bytes) {
         let Some(idx) = self.pending.iter().position(|(id, _, _)| *id == conn_id) else {
@@ -106,10 +111,22 @@ impl GameState {
         }
         self.send_all_slot_info();
 
-        // GHost++ deletes the virtual host once only one seat is left, so the
-        // lobby can still fill completely (game_base.cpp:2052).
-        let real_players = self.players.iter().filter(|p| !p.virtual_host).count();
-        if real_players >= self.cfg.num_slots - 1 {
+        // game_base.cpp:2052: `if (GetNumPlayers() >= MAX_SLOTS-1 || EnforcePID ==
+        // m_VirtualHostPID) DeleteVirtualHost();`. MAX_SLOTS is the engine-wide
+        // constant (24), not this game's `num_slots` — for a normal, say,
+        // 12-slot DotA lobby this branch never fires at join time; GHost++
+        // removes the virtual host unconditionally when loading starts instead
+        // (game_base.cpp:3389, mirrored in `begin_loading`). The virtual host
+        // never occupies a slot (`create_virtual_host` does not call
+        // `occupy_slot`), so it was never competing with real players for a
+        // seat, only for a PID.
+        //
+        // The C++'s second condition, `EnforcePID == m_VirtualHostPID`, only
+        // ever fires when replaying a saved game (`EnforcePID` defaults to 255
+        // and is set only inside `if (m_SaveGame)`, game_base.cpp:1908-1922);
+        // ghostrs has no save-game/replay-enforced-layout feature, so there is
+        // no `EnforcePID` to compare here. It is intentionally not ported.
+        if self.players.human_count() >= MAX_SLOTS - 1 {
             self.delete_virtual_host();
         }
 
@@ -178,17 +195,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_virtual_host_makes_way_for_the_last_real_player() {
+    async fn a_normal_lobby_filling_up_keeps_the_virtual_host_until_loading_starts() {
+        // game_base.cpp:2052 gates eviction on the engine-wide MAX_SLOTS (24),
+        // not on this game's `num_slots`. A 12-slot lobby filling every seat
+        // but one (11 real players) never reaches MAX_SLOTS-1 = 23, so the
+        // virtual host must still be present — only `begin_loading` removes
+        // it (game_base.cpp:3389, already covered by a separate test).
+        //
+        // The superseded `num_slots - 1` expression would have deleted the
+        // virtual host as soon as `real_players >= 11`, which this exact
+        // scenario reaches: this test fails against that old expression.
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
         st.create_virtual_host();
         let vh = st.virtual_host_pid;
-        // Fill every slot but one; the virtual host must step aside for the last seat.
         for i in 0..(st.cfg.num_slots - 1) {
             let (tx, _rx) = tokio::sync::mpsc::channel(64);
             st.add_conn(100 + i as u64, ghost_net::PlayerLink::for_test(tx), [0; 4]);
             st.handle_req_join(100 + i as u64, &crate::actor::tests_support::reqjoin_bytes(&format!("p{i}")));
         }
-        assert_eq!(st.virtual_host_pid, 255, "virtual host must be deleted");
-        assert!(st.players.by_pid(vh).is_none());
+        assert_eq!(st.virtual_host_pid, vh, "virtual host must survive a normal lobby filling up");
+        assert!(st.players.by_pid(vh).is_some());
     }
 }

@@ -182,8 +182,8 @@ impl GameState {
     pub fn run_command(&mut self, pid: u8, caller_name: &str, cmd: ChatCommand) {
         match cmd {
             ChatCommand::Start { force } => {
-                if self.players.len() < 2 && !force {
-                    let msg = lang::unable_to_start_not_enough(self.players.len());
+                if self.players.human_count() < 2 && !force {
+                    let msg = lang::unable_to_start_not_enough(self.players.human_count());
                     self.send_chat_to(pid, &msg);
                 } else {
                     let by = caller_name.to_string();
@@ -297,7 +297,7 @@ impl GameState {
                 if !self.start_votes.contains(&pid) {
                     self.start_votes.push(pid);
                     let votes = self.start_votes.len();
-                    let total = self.players.len();
+                    let total = self.players.human_count();
                     let needed = (total / 2) + 1;
                     self.send_chat_all(&format!("Vote start: {votes}/{needed} votes."));
                     if votes >= needed {
@@ -331,7 +331,7 @@ impl GameState {
             ChatCommand::Ping => {
                 let pairs: Vec<(String, Option<u32>)> = self
                     .players
-                    .iter()
+                    .iter_humans()
                     .map(|p| (p.name.clone(), p.average_ping()))
                     .collect();
                 let msg = lang::player_pings(&pairs);
@@ -450,5 +450,23 @@ mod tests {
     fn slot_numbers_are_one_based_on_the_wire_and_rejected_when_zero() {
         assert_eq!(parse_command('!', "!close 0"), None);
         assert_eq!(parse_command('!', "!close abc"), None);
+    }
+
+    #[tokio::test]
+    async fn the_virtual_host_does_not_count_toward_the_minimum_to_start() {
+        // One human plus the virtual host must not satisfy the "2 players"
+        // rule: the virtual host can never confirm ready, so counting it
+        // would let `!start` fire with only one real player present.
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
+        st.create_virtual_host();
+        assert_eq!(st.players.len(), 2, "virtual host is seated alongside the one human");
+
+        st.run_command(1, "P1", ChatCommand::Start { force: false });
+
+        assert!(
+            matches!(st.phase, GamePhase::Lobby),
+            "one human plus the virtual host must not be enough to start, got {:?}",
+            st.phase
+        );
     }
 }
