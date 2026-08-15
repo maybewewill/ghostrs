@@ -84,6 +84,7 @@ pub struct GameState {
     pub created_at: Instant,
     pub lagging: bool,
     pub finished: bool,
+    pub downloads: Vec<crate::mapxfer::Download>,
 }
 
 impl GameState {
@@ -104,6 +105,7 @@ impl GameState {
             created_at: Instant::now(),
             lagging: false,
             finished: false,
+            downloads: Vec::new(),
             cfg,
         }
     }
@@ -188,24 +190,5 @@ impl GameState {
             Err(e) => tracing::warn!(error = %e, "failed to build slot info"),
         }
     }
-
-    // Stubs filled in Tasks 12-13
-    pub(crate) fn handle_chat_to_host(&mut self, _conn_id: u64, _payload: &Bytes) {
-        tracing::trace!("handle_chat_to_host stub");
-    }
-    pub(crate) fn handle_pong(&mut self, _conn_id: u64, _payload: &Bytes) {
-        tracing::trace!("handle_pong stub");
-    }
-
-    pub(crate) fn handle_map_size(&mut self, _conn_id: u64, _payload: &Bytes) {
-        tracing::trace!("handle_map_size stub");
-    }
-
-    pub(crate) fn handle_map_part_ok(&mut self, _conn_id: u64, _payload: &Bytes) {
-        tracing::trace!("handle_map_part_ok stub");
-    }
-
-    pub(crate) fn handle_drop_request(&mut self, _conn_id: u64) {
-        tracing::trace!("handle_drop_request stub");
-    }
 }
+

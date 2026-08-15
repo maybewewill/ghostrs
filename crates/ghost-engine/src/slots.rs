@@ -86,6 +86,16 @@ impl SlotTable {
         }
     }
 
+    pub fn replace(&mut self, sid: u8, info: SlotInfo) -> bool {
+        match self.get_mut(sid) {
+            Some(s) => {
+                *s = info;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Frees whichever slot holds `pid`, returning its SID.
     pub fn release(&mut self, pid: u8) -> Option<u8> {
         let sid = self.sid_of_pid(pid)?;
