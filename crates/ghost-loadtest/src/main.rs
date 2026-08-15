@@ -37,6 +37,22 @@ fn keepalive_bytes(checksum: u32) -> Bytes {
         .unwrap()
 }
 
+fn mapsize_bytes(size: u32) -> Bytes {
+    let mut b = BytesMut::new();
+    b.put_slice(&[0, 0, 0, 0]); // unknown 4 bytes
+    b.put_u8(1);                // size_flag = 1 (have map)
+    b.put_u32_le(size);         // full map size
+    Frame::new(ids::MAP_SIZE, b.freeze())
+        .encode_with(0xF7)
+        .unwrap()
+}
+
+fn gameloaded_bytes() -> Bytes {
+    Frame::new(ids::GAME_LOADED_SELF, Bytes::new())
+        .encode_with(0xF7)
+        .unwrap()
+}
+
 fn action_bytes() -> Bytes {
     let mut b = BytesMut::new();
     b.put_u32_le(0x1234_5678); // CRC
@@ -98,6 +114,20 @@ async fn run_client(
                 match frame.id {
                     ids::SLOT_INFO_JOIN => {
                         // Confirmed seated
+                        tracing::debug!(player = %player_name, "seated in slot");
+                    }
+                    ids::MAP_CHECK => {
+                        // Reply with map size confirmation (100% downloaded)
+                        let _ = framed_write.send(mapsize_bytes(1000)).await;
+                    }
+                    ids::COUNTDOWN_START => {
+                        tracing::debug!(player = %player_name, "countdown started");
+                    }
+                    ids::COUNTDOWN_END => {
+                        tracing::debug!(player = %player_name, "loading started");
+                        // Simulate loading time then signal loaded
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        let _ = framed_write.send(gameloaded_bytes()).await;
                     }
                     ids::INCOMING_ACTION => {
                         let now = Instant::now();
@@ -214,4 +244,37 @@ async fn main() -> anyhow::Result<()> {
     println!("============================================================");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mapsize_packet_structure() {
+        let b = mapsize_bytes(54321);
+        assert_eq!(b[0], 0xF7);
+        assert_eq!(b[1], ids::MAP_SIZE);
+        assert_eq!(b.len(), 4 + 9); // header(4) + unknown(4) + flag(1) + size(4)
+        assert_eq!(b[8], 1); // size_flag
+        assert_eq!(u32::from_le_bytes([b[9], b[10], b[11], b[12]]), 54321);
+    }
+
+    #[test]
+    fn gameloaded_packet_structure() {
+        let b = gameloaded_bytes();
+        assert_eq!(b[0], 0xF7);
+        assert_eq!(b[1], ids::GAME_LOADED_SELF);
+        assert_eq!(b.len(), 4); // header(4) with empty payload
+    }
+
+    #[test]
+    fn keepalive_packet_structure() {
+        let b = keepalive_bytes(42);
+        assert_eq!(b[0], 0xF7);
+        assert_eq!(b[1], ids::OUTGOING_KEEPALIVE);
+        assert_eq!(b.len(), 4 + 5);
+        assert_eq!(b[4], 0);
+        assert_eq!(u32::from_le_bytes([b[5], b[6], b[7], b[8]]), 42);
+    }
 }
