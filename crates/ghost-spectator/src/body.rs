@@ -10,6 +10,35 @@ const REPLAY_LEAVEGAME: u8 = 0x17;
 /// GHost++ hardcodes this language id (replay.cpp:143).
 const LANGUAGE_ID: u32 = 0x0012_F8B0;
 
+/// Errors from building a [`ReplayBody`]. Both variants exist to make an
+/// invalid `.w3g` body impossible to produce silently: a body finished
+/// without slot data, or slot data that doesn't decode to a whole number of
+/// 9-byte slot records, would otherwise corrupt every field that follows the
+/// `GameStartRecord` in the byte stream without any error at build time.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReplayBodyError {
+    /// `finish()` was called without a prior successful `set_start()`.
+    StartNeverSet,
+    /// `set_start()` was given a `slots` buffer whose length is not a
+    /// multiple of 9 (the wire size of one W3GS_SLOTINFO slot record).
+    InvalidSlotsLength(usize),
+}
+
+impl std::fmt::Display for ReplayBodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReplayBodyError::StartNeverSet => {
+                write!(f, "ReplayBody::finish called before set_start")
+            }
+            ReplayBodyError::InvalidSlotsLength(len) => {
+                write!(f, "slots buffer length {len} is not a multiple of 9")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReplayBodyError {}
+
 pub struct ReplayBody {
     host_pid: u8,
     host_name: String,
@@ -19,6 +48,7 @@ pub struct ReplayBody {
     select_mode: u8,
     start_spots: u8,
     num_slots: usize,
+    start_set: bool,
     game_name: String,
     stat_string: Vec<u8>,
     map_game_type: u32,
@@ -42,6 +72,7 @@ impl ReplayBody {
             select_mode: 0,
             start_spots: 0,
             num_slots: 0,
+            start_set: false,
             game_name: String::new(),
             stat_string: Vec::new(),
             map_game_type: 0,
@@ -63,12 +94,28 @@ impl ReplayBody {
     }
 
     /// `slots` is the raw 9-bytes-per-slot wire form used by W3GS_SLOTINFO.
-    pub fn set_start(&mut self, slots: Vec<u8>, random_seed: u32, select_mode: u8, start_spots: u8) {
+    /// Rejects a `slots` buffer that isn't a whole number of 9-byte records:
+    /// `finish()` writes the GameStartRecord `Size` field as `7 + num_slots *
+    /// 9` but writes the *entire* `slots` buffer, so a stray remainder would
+    /// silently undercount `Size` relative to what's actually on the wire and
+    /// desync every field after it.
+    pub fn set_start(
+        &mut self,
+        slots: Vec<u8>,
+        random_seed: u32,
+        select_mode: u8,
+        start_spots: u8,
+    ) -> Result<(), ReplayBodyError> {
+        if slots.len() % 9 != 0 {
+            return Err(ReplayBodyError::InvalidSlotsLength(slots.len()));
+        }
         self.num_slots = slots.len() / 9;
         self.slots = slots;
         self.random_seed = random_seed;
         self.select_mode = select_mode;
         self.start_spots = start_spots;
+        self.start_set = true;
+        Ok(())
     }
 
     /// One 100 ms action packet. `actions` is the payload of W3GS_INCOMING_ACTION
@@ -112,7 +159,14 @@ impl ReplayBody {
     }
 
     /// Returns the decompressed body and the total replay length in ms.
-    pub fn finish(self) -> (Vec<u8>, u32) {
+    ///
+    /// Errors rather than emitting a syntactically well-formed but corrupt
+    /// `GameStartRecord` if `set_start()` was never called successfully —
+    /// see [`ReplayBodyError::StartNeverSet`].
+    pub fn finish(self) -> Result<(Vec<u8>, u32), ReplayBodyError> {
+        if !self.start_set {
+            return Err(ReplayBodyError::StartNeverSet);
+        }
         let mut r = Vec::with_capacity(512 + self.blocks.len());
         r.extend_from_slice(&[16, 1, 0, 0]); // unknown (4.0)
         r.push(0); // host RecordID
@@ -159,7 +213,7 @@ impl ReplayBody {
 
         r.extend_from_slice(&self.blocks);
         let len = self.replay_length_ms;
-        (r, len)
+        Ok((r, len))
     }
 }
 
@@ -171,8 +225,8 @@ mod tests {
     fn the_body_opens_with_the_host_record_and_the_three_start_blocks() {
         let mut b = ReplayBody::new(1, "iCCup");
         b.add_player(2, "alice");
-        b.set_start(vec![0u8; 9 * 2], 0xDEADBEEF, 0, 2);
-        let (body, len_ms) = b.finish();
+        b.set_start(vec![0u8; 9 * 2], 0xDEADBEEF, 0, 2).unwrap();
+        let (body, len_ms) = b.finish().unwrap();
 
         assert_eq!(&body[0..4], &[16, 1, 0, 0], "unknown 4.0");
         assert_eq!(body[4], 0, "host RecordID");
@@ -190,19 +244,19 @@ mod tests {
     #[test]
     fn timeslots_accumulate_the_replay_length() {
         let mut b = ReplayBody::new(1, "h");
-        b.set_start(vec![0u8; 9], 1, 0, 1);
+        b.set_start(vec![0u8; 9], 1, 0, 1).unwrap();
         b.add_timeslot(100, &[0xAA]);
         b.add_timeslot(150, &[0xBB]);
-        let (_body, len_ms) = b.finish();
+        let (_body, len_ms) = b.finish().unwrap();
         assert_eq!(len_ms, 250, "replay length is the sum of time increments");
     }
 
     #[test]
     fn a_timeslot_block_is_length_prefixed_after_its_first_four_bytes() {
         let mut b = ReplayBody::new(1, "h");
-        b.set_start(vec![0u8; 9], 1, 0, 1);
+        b.set_start(vec![0u8; 9], 1, 0, 1).unwrap();
         b.add_timeslot(100, &[0xAA, 0xBB]);
-        let (body, _) = b.finish();
+        let (body, _) = b.finish().unwrap();
 
         // Locate the 0x1E block: [0x1E][u16 len][u16 time][actions...]
         let at = body.windows(5)
@@ -210,5 +264,19 @@ mod tests {
             .expect("timeslot block");
         let len = u16::from_le_bytes([body[at + 1], body[at + 2]]) as usize;
         assert_eq!(len, 2 + 2, "length counts time increment plus actions");
+    }
+
+    #[test]
+    fn finishing_without_set_start_is_an_error_not_silent_corruption() {
+        let b = ReplayBody::new(1, "h");
+        let err = b.finish().unwrap_err();
+        assert_eq!(err, ReplayBodyError::StartNeverSet);
+    }
+
+    #[test]
+    fn set_start_rejects_a_slots_buffer_that_is_not_a_multiple_of_nine_bytes() {
+        let mut b = ReplayBody::new(1, "h");
+        let err = b.set_start(vec![0u8; 10], 1, 0, 1).unwrap_err();
+        assert_eq!(err, ReplayBodyError::InvalidSlotsLength(10));
     }
 }
