@@ -57,8 +57,8 @@ impl Supervisor {
         host_on_start: Option<String>,
         start_after: Option<u64>,
     ) -> anyhow::Result<()> {
-        let (store, _store_task) = Store::open(&cfg.db_path)
-            .context("failed to open SQLite database")?;
+        let (store, _store_task) =
+            Store::open(&cfg.db_path).context("failed to open SQLite database")?;
 
         let (bnet_events_tx, bnet_events_rx) = mpsc::channel(256);
         let (bnet, _bnet_task) = spawn_bnet(cfg.bnet.clone(), bnet_events_tx);
@@ -124,7 +124,8 @@ impl Supervisor {
 
         let mut lan_timer = tokio::time::interval(Duration::from_secs(3));
         let auto_start = start_after.map(|s| {
-            Box::pin(tokio::time::sleep(Duration::from_secs(s))) as std::pin::Pin<Box<tokio::time::Sleep>>
+            Box::pin(tokio::time::sleep(Duration::from_secs(s)))
+                as std::pin::Pin<Box<tokio::time::Sleep>>
         });
         let mut auto_start = auto_start;
 
@@ -202,7 +203,10 @@ impl Supervisor {
                 _ => [127, 0, 0, 1],
             };
 
-            let ip_str = format!("{}.{}.{}.{}", external_ip[0], external_ip[1], external_ip[2], external_ip[3]);
+            let ip_str = format!(
+                "{}.{}.{}.{}",
+                external_ip[0], external_ip[1], external_ip[2], external_ip[3]
+            );
             let store = self.store.clone();
             let game_handle = game.clone();
             let conn_tx = self.conn_event_tx.clone();
@@ -213,7 +217,11 @@ impl Supervisor {
                     return;
                 }
                 let link = spawn_conn(conn_id, stream, conn_tx, 1024);
-                game_handle.send(GameCmd::NewConn { conn_id, link, external_ip });
+                game_handle.send(GameCmd::NewConn {
+                    conn_id,
+                    link,
+                    external_ip,
+                });
             });
 
             self.conn_to_game.insert(conn_id, game.clone());
@@ -239,18 +247,27 @@ impl Supervisor {
             }
             BnetEvent::ChatMessage { user, text } => self.handle_chat_command(&user, &text),
             BnetEvent::Whisper { user, text } => self.handle_chat_command(&user, &text),
-            BnetEvent::Disconnected(reason) => tracing::warn!(%reason, "disconnected from Battle.net"),
+            BnetEvent::Disconnected(reason) => {
+                tracing::warn!(%reason, "disconnected from Battle.net")
+            }
         }
     }
 
     fn handle_chat_command(&mut self, user: &str, text: &str) {
-        let is_root_admin = self.cfg.bnet.root_admins.iter().any(|a| a.eq_ignore_ascii_case(user));
+        let is_root_admin = self
+            .cfg
+            .bnet
+            .root_admins
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(user));
         if !is_root_admin {
             return;
         }
 
         let trigger = self.cfg.bnet.command_trigger;
-        let Some(cmd_text) = text.strip_prefix(trigger) else { return };
+        let Some(cmd_text) = text.strip_prefix(trigger) else {
+            return;
+        };
         let mut parts = cmd_text.split_whitespace();
         let Some(verb) = parts.next() else { return };
 
@@ -263,11 +280,15 @@ impl Supervisor {
                 };
                 let name = parts.collect::<Vec<_>>().join(" ");
                 if name.is_empty() {
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Usage: !pub <game name>")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Usage: !pub <game name>"
+                    )));
                     return;
                 }
                 if self.running_games.len() >= self.cfg.bot.max_games {
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Error: maximum games reached")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Error: maximum games reached"
+                    )));
                     return;
                 }
                 self.create_game(&name, user, visibility);
@@ -275,17 +296,22 @@ impl Supervisor {
             "map" | "load" => {
                 let map_name = parts.collect::<Vec<_>>().join(" ");
                 if map_name.is_empty() {
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Usage: !map <filename>")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Usage: !map <filename>"
+                    )));
                 } else {
                     self.selected_map_file = Some(map_name.clone());
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Map set to [{map_name}]")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Map set to [{map_name}]"
+                    )));
                 }
             }
             "autohost" => {
                 let args: Vec<&str> = parts.collect();
                 if args.first() == Some(&"off") {
                     self.autohost = None;
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Autohost disabled.")));
+                    self.bnet
+                        .send(BnetCmd::SendChat(format!("/w {user} Autohost disabled.")));
                 } else if args.len() >= 2 {
                     let map_file = args[0].to_string();
                     let game_prefix = args[1..].join(" ");
@@ -310,12 +336,15 @@ impl Supervisor {
                     self.current_game_name = None;
                     self.current_game_advert = None;
                     self.bnet.send(BnetCmd::UnhostGame);
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Game unhosted")));
+                    self.bnet
+                        .send(BnetCmd::SendChat(format!("/w {user} Game unhosted")));
                 }
             }
             "start" => {
                 if let Some(g) = &self.current_game {
-                    g.send(GameCmd::Start { by: user.to_string() });
+                    g.send(GameCmd::Start {
+                        by: user.to_string(),
+                    });
                 }
             }
             "say" => {
@@ -325,15 +354,21 @@ impl Supervisor {
             "ban" => {
                 let args: Vec<&str> = parts.collect();
                 if let Some(target) = args.first() {
-                    let reason = args.get(1..).map(|r| r.join(" ")).unwrap_or_else(|| "banned by admin".into());
+                    let reason = args
+                        .get(1..)
+                        .map(|r| r.join(" "))
+                        .unwrap_or_else(|| "banned by admin".into());
                     self.store.ban(target, "", user, &reason);
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Banned [{target}]: {reason}")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Banned [{target}]: {reason}"
+                    )));
                 }
             }
             "unban" => {
                 if let Some(target) = parts.next() {
                     self.store.unban(target);
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Unbanned [{target}]")));
+                    self.bnet
+                        .send(BnetCmd::SendChat(format!("/w {user} Unbanned [{target}]")));
                 }
             }
             "checkban" => {
@@ -349,7 +384,9 @@ impl Supervisor {
                                 b.admin, b.reason
                             )));
                         } else {
-                            bnet.send(BnetCmd::SendChat(format!("/w {user_str} [{target_str}] is not banned")));
+                            bnet.send(BnetCmd::SendChat(format!(
+                                "/w {user_str} [{target_str}] is not banned"
+                            )));
                         }
                     });
                 }
@@ -363,16 +400,27 @@ impl Supervisor {
                     if let Some(stats) = store.get_dota_stats(&target).await {
                         bnet.send(BnetCmd::SendChat(format!(
                             "/w {user_str} [{target}] Games: {}, K/D/A: {}/{}/{}, CS: {}/{}",
-                            stats.games, stats.kills, stats.deaths, stats.assists, stats.creep_kills, stats.creep_denies
+                            stats.games,
+                            stats.kills,
+                            stats.deaths,
+                            stats.assists,
+                            stats.creep_kills,
+                            stats.creep_denies
                         )));
                     } else {
-                        bnet.send(BnetCmd::SendChat(format!("/w {user_str} No stats recorded for [{target}].")));
+                        bnet.send(BnetCmd::SendChat(format!(
+                            "/w {user_str} No stats recorded for [{target}]."
+                        )));
                     }
                 });
             }
             "status" => {
                 let running = self.running_games.len();
-                let active = if self.current_game.is_some() { "1 lobby" } else { "none" };
+                let active = if self.current_game.is_some() {
+                    "1 lobby"
+                } else {
+                    "none"
+                };
                 self.bnet.send(BnetCmd::SendChat(format!(
                     "/w {user} Status: {running} active games, current lobby: {active}"
                 )));
@@ -381,7 +429,14 @@ impl Supervisor {
         }
     }
 
-    fn resolve_map_info(&self, game_name: &str) -> (MapInfo, [u8; 4], Option<Vec<ghost_protocol::w3gs::SlotInfo>>) {
+    fn resolve_map_info(
+        &self,
+        game_name: &str,
+    ) -> (
+        MapInfo,
+        [u8; 4],
+        Option<Vec<ghost_protocol::w3gs::SlotInfo>>,
+    ) {
         let mut candidate_filenames = Vec::new();
         if let Some(sel) = &self.selected_map_file {
             candidate_filenames.push(sel.clone());
@@ -417,7 +472,8 @@ impl Supervisor {
 
             for path in &candidate_paths {
                 if path.exists()
-                    && let Ok(parsed) = ParsedMap::load_mpq(path, common_j.as_deref(), blizzard_j.as_deref())
+                    && let Ok(parsed) =
+                        ParsedMap::load_mpq(path, common_j.as_deref(), blizzard_j.as_deref())
                 {
                     tracing::info!(
                         path = %path.display(),
@@ -457,7 +513,11 @@ impl Supervisor {
 
     fn create_game(&mut self, name: &str, owner: &str, visibility: ghost_protocol::GameVisibility) {
         let (map_info, map_game_type, custom_slots) = self.resolve_map_info(name);
-        let host_counter: u32 = rand::random();
+        // `bnet.cpp:2247` splits the host counter: the low 28 bits identify the game and
+        // the top nibble identifies which battle.net connection hosts it. We advertise on a
+        // single connection, so that nibble is 0.
+        const HOST_COUNTER_ID: u32 = 0;
+        let host_counter: u32 = (rand::random::<u32>() & 0x0FFF_FFFF) | (HOST_COUNTER_ID << 28);
 
         let advert_map = MapAdvert {
             path: map_info.path.clone(),
@@ -552,5 +612,26 @@ impl Supervisor {
         for (_, h, _) in &self.running_games {
             h.send(GameCmd::Shutdown);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    #[test]
+    fn host_counter_top_nibble_is_the_connection_id() {
+        const HOST_COUNTER_ID: u32 = 0;
+        let mut seen = HashSet::new();
+        for _ in 0..1000 {
+            let counter: u32 = (rand::random::<u32>() & 0x0FFF_FFFF) | (HOST_COUNTER_ID << 28);
+            assert_eq!(counter >> 28, 0, "top nibble must equal connection ID 0");
+            seen.insert(counter);
+        }
+        assert!(
+            seen.len() > 1,
+            "host_counter must produce distinct random values, got {}",
+            seen.len()
+        );
     }
 }
