@@ -103,6 +103,7 @@ pub struct GameState {
     pub jitter_histogram: [u64; 5],
     pub last_jitter_report: Instant,
     pub dota: Option<crate::stats_dota::StatsDotA>,
+    pub game_over_time: Option<tokio::time::Instant>,
     pub w3mmd: Option<crate::stats_w3mmd::StatsW3MMD>,
     pub hcl: Option<String>,
     pub muted_all: bool,
@@ -143,11 +144,8 @@ impl GameState {
             relay,
             jitter_histogram: [0; 5],
             last_jitter_report: Instant::now(),
-            dota: if cfg.map.path.to_lowercase().contains("dota") {
-                Some(crate::stats_dota::StatsDotA::new(cfg.name.clone()))
-            } else {
-                None
-            },
+            dota: Some(crate::stats_dota::StatsDotA::new(cfg.name.clone())),
+            game_over_time: None,
             w3mmd: Some(crate::stats_w3mmd::StatsW3MMD::new(cfg.name.clone(), "default".into())),
             hcl: crate::hcl::Hcl::parse_from_gamename(&cfg.name),
             muted_all: false,

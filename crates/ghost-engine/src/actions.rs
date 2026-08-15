@@ -16,9 +16,6 @@ impl GameState {
             // The body is a slice of the read buffer: queuing it costs a
             // refcount bump, and it is relayed without ever being parsed.
             Ok(a) => {
-                if let Some(dota) = &mut self.dota {
-                    dota.process_action(&a.data);
-                }
                 if let Some(w3mmd) = &mut self.w3mmd {
                     w3mmd.process_action(&a.data);
                 }
@@ -129,13 +126,34 @@ impl GameState {
                     return; // lag screen is up; no actions go out this tick
                 }
                 self.send_all_actions(skipped);
+
+                // GHost++ game_base.cpp:1059: start gameover timer if only 1 real player remains in game
+                let real_players_count = self.players.iter().filter(|p| !p.virtual_host && p.left.is_none()).count();
+                if real_players_count <= 1 && self.game_over_time.is_none() {
+                    tracing::info!("gameover timer started (one or zero players left)");
+                    self.game_over_time = Some(tokio::time::Instant::now());
+                }
+
+                // GHost++ game_base.cpp:1067: finish gameover timer after 60 seconds
+                if let Some(over_at) = self.game_over_time {
+                    if over_at.elapsed() >= std::time::Duration::from_secs(60) {
+                        for p in self.players.iter_mut() {
+                            if p.left.is_none() && !p.virtual_host {
+                                p.left = Some("was disconnected (gameover timer finished)".into());
+                            }
+                        }
+                    }
+                }
             }
             GamePhase::Over => self.finished = true,
         }
 
-        if self.players.is_empty() && matches!(self.phase, GamePhase::Playing | GamePhase::Loading) {
+        // GHost++ game_base.cpp:1089: end game when no players left
+        let real_players_count = self.players.iter().filter(|p| !p.virtual_host && p.left.is_none()).count();
+        if real_players_count == 0 && matches!(self.phase, GamePhase::Playing | GamePhase::Loading) {
             tracing::info!(game = %self.cfg.name, "no players left, ending game");
             self.phase = GamePhase::Over;
+            self.finished = true;
         }
     }
 
@@ -154,7 +172,14 @@ impl GameState {
         let mut batch: Vec<ActionBlock> = Vec::new();
         let mut batch_len = 0usize;
 
+        let mut game_over_winner = None;
+
         for action in queued {
+            if let Some(dota) = self.dota.as_mut() {
+                if dota.process_action(&action.data) && self.game_over_time.is_none() && game_over_winner.is_none() {
+                    game_over_winner = Some(dota.format_winner());
+                }
+            }
             let len = action.wire_len();
             if batch_len + len > MAX_ACTION_PAYLOAD && !batch.is_empty() {
                 match outgoing::incoming_action2(&batch) {
@@ -166,6 +191,12 @@ impl GameState {
             }
             batch_len += len;
             batch.push(action);
+        }
+
+        if let Some(winner) = game_over_winner {
+            tracing::info!(winner, "gameover timer started (stats class reported game over)");
+            self.send_chat_all(&format!("Game over detected! Winner: {winner}. Game will close in 60s."));
+            self.game_over_time = Some(tokio::time::Instant::now());
         }
 
         // The main packet always goes out, even empty: it is the clock tick.
@@ -382,5 +413,39 @@ mod tests {
         assert_eq!(st.phase, GamePhase::Playing);
         assert_eq!(st.players.len(), 1);
         assert_eq!(st.players.iter().next().unwrap().pid, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn game_over_triggers_grace_period_and_disconnects_after_60_seconds() {
+        let (mut st, mut rxs) = crate::actor::tests_support::seated_game(2);
+        st.begin_playing();
+        for rx in &mut rxs {
+            let _ = crate::actor::tests_support::drain_ids(rx);
+        }
+
+        // Inject DotA winner action into action queue
+        let mut act = Vec::new();
+        act.extend_from_slice(&[0x6b, b'd', b'r', b'.', b'x', 0x00]);
+        act.extend_from_slice(b"Global\0Winner\0");
+        act.extend_from_slice(&1u32.to_le_bytes()); // Sentinel victory
+        st.actions.push(ghost_protocol::w3gs::ActionBlock { pid: 1, data: bytes::Bytes::from(act) });
+
+        st.on_tick(0);
+
+        assert!(st.game_over_time.is_some(), "game_over_time must be set when winner detected");
+        // Verify End Message was broadcast
+        let chat = rxs[0].try_recv().expect("must receive end chat");
+        assert_eq!(chat[1], ghost_protocol::w3gs::ids::CHAT_FROM_HOST);
+
+        // Advance clock by 59 seconds: players must still be connected
+        tokio::time::advance(std::time::Duration::from_secs(59)).await;
+        st.on_tick(0);
+        assert_eq!(st.players.iter().filter(|p| p.left.is_none()).count(), 2);
+
+        // Advance clock past 60 seconds: remaining players must be stopped
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;
+        st.on_tick(0);
+        assert_eq!(st.players.iter().filter(|p| p.left.is_none()).count(), 0);
+        assert!(st.finished, "game must transition to finished when all players stopped");
     }
 }
