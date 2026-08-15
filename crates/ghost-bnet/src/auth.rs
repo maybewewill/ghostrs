@@ -68,6 +68,30 @@ pub fn hash_password_pvpgn(password: &str) -> [u8; 20] {
     out
 }
 
+pub fn hash_password_standard_sha1(password: &str) -> [u8; 20] {
+    let lower = password.to_ascii_lowercase();
+    let mut hasher = Sha1::new();
+    hasher.update(lower.as_bytes());
+    let res = hasher.finalize();
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&res);
+    out
+}
+
+/// Computes double-hashed password for BNCS SID_LOGONRESPONSE:
+/// SHA1(client_token + server_token + hash_password_pvpgn(password))
+pub fn hash_password_double(password: &str, client_token: u32, server_token: u32) -> [u8; 20] {
+    let h1 = hash_password_pvpgn(password);
+    let mut hasher = Sha1::new();
+    hasher.update(client_token.to_le_bytes());
+    hasher.update(server_token.to_le_bytes());
+    hasher.update(h1);
+    let result = hasher.finalize();
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&result);
+    out
+}
+
 /// Builds 36-byte CD-Key info for PvPGN SID_AUTH_CHECK:
 /// 4 bytes len (26), 4 bytes product (ROC=4, TFT=7), 4 bytes val1, 4 bytes val2, 20 bytes hash.
 pub fn create_key_info(cdkey: &str, client_token: u32, server_token: u32, is_tft: bool) -> [u8; 36] {
@@ -104,6 +128,9 @@ mod tests {
     #[test]
     fn pvpgn_password_hash_returns_20_bytes() {
         let h = hash_password_pvpgn("password123");
+        println!("hash hex: {:02x?}", h);
+        let s = h.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        println!("hash string: {}", s);
         assert_eq!(h.len(), 20);
         assert_ne!(h, [0u8; 20]);
     }

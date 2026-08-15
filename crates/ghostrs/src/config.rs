@@ -251,6 +251,7 @@ impl Config {
             bnet: BnetConfig {
                 server: bnet.server,
                 port: bnet.port,
+                host_port: bot.host_port,
                 username: bnet.username,
                 password: bnet.password,
                 cdkey_roc: bnet.cdkey_roc,
@@ -338,7 +339,8 @@ impl Config {
             },
             bnet: BnetConfig {
                 server: bnet_server,
-                port: bnet_port,
+                port: bnet_port as u16,
+                host_port: bot_hostport as u16,
                 username: bnet_username,
                 password: bnet_password,
                 cdkey_roc: bnet_cdkey_roc,
