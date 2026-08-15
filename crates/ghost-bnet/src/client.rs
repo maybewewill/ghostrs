@@ -150,6 +150,8 @@ async fn run(
         let mut cur_client_token = 0u32;
         let mut cur_server_token = 0u32;
         let mut cur_nls: Option<usize> = None;
+        // The advert is re-sent every 3 s, so only log the transition, not every ack.
+        let mut advert_listed = false;
 
         let mut null_timer = tokio::time::interval(Duration::from_secs(30));
         let mut adv_timer = tokio::time::interval(Duration::from_secs(3));
@@ -527,6 +529,32 @@ async fn run(
                                     let raw_text = String::from_utf8_lossy(&frame.payload);
                                     tracing::warn!(error = %e, raw = %raw_text, "failed to decode SID_CHATEVENT payload");
                                 }
+                            }
+                        }
+
+                        (Stage::InChat, ids::SID_STARTADVEX3) => {
+                            // `bnetprotocol.cpp:174-191`: a u32 status of 0 means the
+                            // game is listed. Anything else means it is not — most often
+                            // a duplicate game name already on the server.
+                            let status = if frame.payload.len() >= 4 {
+                                u32::from_le_bytes([
+                                    frame.payload[0],
+                                    frame.payload[1],
+                                    frame.payload[2],
+                                    frame.payload[3],
+                                ])
+                            } else {
+                                u32::MAX
+                            };
+                            if status == 0 {
+                                if !advert_listed {
+                                    advert_listed = true;
+                                    let name = active_advert.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                                    tracing::info!(game = %name, "<-- [RECV] SID_STARTADVEX3 (0x1C) [status=0] game is listed on battle.net");
+                                }
+                            } else {
+                                advert_listed = false;
+                                tracing::warn!(status, "startadvex3 failed — the game is NOT listed (duplicate game name?)");
                             }
                         }
 
