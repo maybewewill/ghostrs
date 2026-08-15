@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod actor;
 pub mod chat;
+pub mod gproxy;
 pub mod handle;
 pub mod lagcheck;
 pub mod lang;
@@ -16,6 +17,7 @@ pub mod tick;
 pub use actions::MAX_ACTION_PAYLOAD;
 pub use actor::spawn_game;
 pub use chat::{ChatCommand, parse_command};
+pub use gproxy::GProxyBuffer;
 pub use handle::{GameCmd, GameHandle};
 pub use mapxfer::{Download, MAP_CHUNK, MAX_PARTS_PER_TICK};
 pub use players::{NameMatch, Player, PlayerTable};

@@ -32,6 +32,8 @@ pub struct Player {
     pub ping_history: VecDeque<u32>,
     pub reconnect_key: u32,
     pub gproxy: bool,
+    pub gproxy_buffer: Option<crate::gproxy::GProxyBuffer>,
+    pub disconnected_since: Option<Instant>,
     /// Set once the player is scheduled for removal; carries the reason.
     pub left: Option<String>,
 }
@@ -53,10 +55,11 @@ impl Player {
             ping_history: VecDeque::with_capacity(PING_HISTORY),
             reconnect_key: 0,
             gproxy: false,
+            gproxy_buffer: None,
+            disconnected_since: None,
             left: None,
         }
     }
-
     pub fn record_ping(&mut self, ping_ms: u32) {
         if self.ping_history.len() == PING_HISTORY {
             self.ping_history.pop_front();
