@@ -52,13 +52,26 @@ async fn bnet_client_completes_handshake_to_login() {
         let resp = Frame::new(ids::SID_AUTH_CHECK, p.freeze()).encode_with(0xFF).unwrap();
         framed_write.send(resp).await.unwrap();
 
-        // 4. Expect SID_LOGONRESPONSE -> respond with SID_LOGONRESPONSE2 status 0
+        // 4. Expect SID_AUTH_ACCOUNTLOGON -> respond with SID_AUTH_ACCOUNTLOGON (status = 0)
         let f = framed_read.next().await.unwrap().unwrap();
-        assert_eq!(f.id, ids::SID_LOGONRESPONSE);
+        assert_eq!(f.id, ids::SID_AUTH_ACCOUNTLOGON);
 
         let mut p = BytesMut::new();
         p.put_u32_le(0); // status = 0 (Success)
-        let resp = Frame::new(ids::SID_LOGONRESPONSE2, p.freeze()).encode_with(0xFF).unwrap();
+        p.put_slice(&[0u8; 32]); // salt
+        p.put_slice(&[0u8; 32]); // server public key
+        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze()).encode_with(0xFF).unwrap();
+        framed_write.send(resp).await.unwrap();
+
+        // 4b. Expect SID_AUTH_ACCOUNTLOGONPROOF -> respond with SID_AUTH_ACCOUNTLOGONPROOF (status = 0)
+        let f = framed_read.next().await.unwrap().unwrap();
+        assert_eq!(f.id, ids::SID_AUTH_ACCOUNTLOGONPROOF);
+
+        let mut p = BytesMut::new();
+        p.put_u32_le(0); // status = 0 (Success)
+        p.put_slice(&[0u8; 20]); // server password proof
+        p.put_slice(b"\0"); // message
+        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze()).encode_with(0xFF).unwrap();
         framed_write.send(resp).await.unwrap();
 
         // 5. Expect SID_NETGAMEPORT
