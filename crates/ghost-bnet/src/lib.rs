@@ -1,7 +1,6 @@
-#![forbid(unsafe_code)]
-
 pub mod advert;
 pub mod auth;
+pub mod bncsutil;
 pub mod client;
 
 pub use advert::{MapAdvert, encode_game_statstring};

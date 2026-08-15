@@ -2,6 +2,12 @@ use sha1::{Digest, Sha1};
 
 #[allow(clippy::needless_range_loop)]
 pub fn hash_password_pvpgn(password: &str) -> [u8; 20] {
+    if let Some(bu) = crate::bncsutil::BncsUtil::global() {
+        if let Some(h) = bu.hash_password(password) {
+            return h;
+        }
+    }
+
     let lower = password.to_ascii_lowercase();
     let bytes = lower.as_bytes();
     let mut hash = [
@@ -93,20 +99,34 @@ pub fn hash_password_double(password: &str, client_token: u32, server_token: u32
 }
 
 /// Builds 36-byte CD-Key info for PvPGN SID_AUTH_CHECK:
-/// 4 bytes len (26), 4 bytes product (ROC=4, TFT=7), 4 bytes val1, 4 bytes val2, 20 bytes hash.
+/// 4 bytes len (26), 4 bytes product (ROC=4, TFT=7), 4 bytes public_val, 4 bytes val2, 20 bytes hash.
 pub fn create_key_info(cdkey: &str, client_token: u32, server_token: u32, is_tft: bool) -> [u8; 36] {
+    let sanitized: String = cdkey.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_uppercase();
     let mut out = [0u8; 36];
-    let key_len = if cdkey.len() == 26 { 26u32 } else { 16u32 };
-    let product = if is_tft { 7u32 } else { 4u32 };
+    let key_len = if sanitized.len() == 26 { 26u32 } else { 16u32 };
+    let fallback_product = if is_tft { 7u32 } else { 4u32 };
+
+    if let Some(bu) = crate::bncsutil::BncsUtil::global() {
+        if let Some((public_val, product, hash)) = bu.kd_quick(&sanitized, client_token, server_token) {
+            out[0..4].copy_from_slice(&key_len.to_le_bytes());
+            out[4..8].copy_from_slice(&product.to_le_bytes());
+            out[8..12].copy_from_slice(&public_val.to_le_bytes());
+            out[12..16].copy_from_slice(&0u32.to_le_bytes());
+            out[16..36].copy_from_slice(&hash);
+            return out;
+        }
+    }
+
+    // Fallback if bncsutil not available or fails
     out[0..4].copy_from_slice(&key_len.to_le_bytes());
-    out[4..8].copy_from_slice(&product.to_le_bytes());
-    out[8..12].copy_from_slice(&1u32.to_le_bytes()); // public value
+    out[4..8].copy_from_slice(&fallback_product.to_le_bytes());
+    out[8..12].copy_from_slice(&1u32.to_le_bytes());
     out[12..16].copy_from_slice(&0u32.to_le_bytes());
 
     let mut hasher = Sha1::new();
     hasher.update(client_token.to_le_bytes());
     hasher.update(server_token.to_le_bytes());
-    hasher.update(cdkey.as_bytes());
+    hasher.update(sanitized.as_bytes());
     let hash = hasher.finalize();
     out[16..36].copy_from_slice(&hash);
     out

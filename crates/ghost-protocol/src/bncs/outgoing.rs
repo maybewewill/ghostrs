@@ -39,11 +39,8 @@ pub fn enter_chat() -> Result<Bytes, ProtoError> {
 
 pub fn join_channel(channel: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(5 + channel.len());
-    if channel.is_empty() {
-        p.put_slice(&[1, 0, 0, 0]); // first join
-    } else {
-        p.put_slice(&[2, 0, 0, 0]); // no create join
-    }
+    let flags: u32 = if channel.is_empty() { 1 } else { 2 };
+    p.put_u32_le(flags);
     put_cstring(&mut p, channel);
     Frame::new(ids::SID_JOINCHANNEL, p.freeze()).encode_with(BNCS_HEADER)
 }
@@ -130,6 +127,33 @@ pub fn logon_response2(
     p.put_slice(password_hash);
     put_cstring(&mut p, account_name);
     Frame::new(ids::SID_LOGONRESPONSE2, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn auth_accountlogon(
+    client_public_key: &[u8; 32],
+    account_name: &str,
+) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(32 + account_name.len() + 1);
+    p.put_slice(client_public_key);
+    put_cstring(&mut p, account_name);
+    Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn auth_accountlogonproof(client_password_proof: &[u8]) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(client_password_proof.len());
+    p.put_slice(client_password_proof);
+    Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn friendslist() -> Result<Bytes, ProtoError> {
+    let p = BytesMut::new();
+    Frame::new(ids::SID_FRIENDSLIST, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn clanmemberlist() -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(4);
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    Frame::new(ids::SID_CLANMEMBERLIST, p.freeze()).encode_with(BNCS_HEADER)
 }
 
 pub fn netgameport(server_port: u16) -> Bytes {

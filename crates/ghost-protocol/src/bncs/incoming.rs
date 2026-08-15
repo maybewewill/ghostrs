@@ -78,16 +78,35 @@ impl AccountLogon {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogonProof {
     pub status: u32,
+    pub server_password_proof: [u8; 20],
+    pub message: String,
 }
 
 impl LogonProof {
     pub fn decode(payload: &Bytes) -> Result<Self, ProtoError> {
         let mut b = payload.clone();
         let status = b.try_get_u32_le()?;
-        Ok(Self { status })
+        let mut server_password_proof = [0u8; 20];
+        if b.len() >= 20 {
+            let p = b.try_get_bytes(20)?;
+            server_password_proof.copy_from_slice(&p);
+        }
+        let message = if b.len() > 0 {
+            b.try_get_cstring().unwrap_or_else(|_| {
+                let rest = b.try_get_bytes(b.len()).unwrap_or_default();
+                String::from_utf8_lossy(&rest).trim_end_matches('\0').to_string()
+            })
+        } else {
+            String::new()
+        };
+        Ok(Self {
+            status,
+            server_password_proof,
+            message,
+        })
     }
 }
 
@@ -108,8 +127,15 @@ impl ChatEvent {
         let _ip = b.try_get_bytes(4)?;
         let _account_num = b.try_get_bytes(4)?;
         let _reg_auth = b.try_get_bytes(4)?;
-        let user = b.try_get_cstring()?;
-        let message = b.try_get_cstring().unwrap_or_default();
+        let user = b.try_get_cstring().unwrap_or_default();
+        let message = if b.len() > 0 {
+            b.try_get_cstring().unwrap_or_else(|_| {
+                let rest = b.try_get_bytes(b.len()).unwrap_or_default();
+                String::from_utf8_lossy(&rest).trim_end_matches('\0').to_string()
+            })
+        } else {
+            String::new()
+        };
         Ok(Self {
             event_id,
             ping,
