@@ -605,7 +605,14 @@ name = "ghostrs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
+ "ghost-bnet",
+ "ghost-engine",
+ "ghost-net",
  "ghost-protocol",
+ "ghost-spectator",
+ "ghost-store",
+ "rand",
  "tokio",
  "tracing",
  "tracing-subscriber",
