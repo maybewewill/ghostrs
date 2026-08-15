@@ -8,6 +8,7 @@ pub mod handle;
 pub mod lagcheck;
 pub mod lang;
 pub mod lobby;
+pub mod map;
 pub mod mapxfer;
 pub mod players;
 pub mod slots;

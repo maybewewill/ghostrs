@@ -13,6 +13,8 @@ tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 rand.workspace = true
+sha1.workspace = true
+crc32fast.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
