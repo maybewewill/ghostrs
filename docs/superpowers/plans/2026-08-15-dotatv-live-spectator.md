@@ -486,6 +486,32 @@ To eliminate race conditions and avoid blocking the Warcraft III main render loo
     - Signature, mask, RVA, calling convention, and argument list for the LAN join routine.
     - Resolved pointer: `extern fnJoinLanGame_t g_fnJoinLanGame;`
 
+  > ## RESOLVED 2026-08-16: null result. Auto-join is deferred; the LAN-advert fallback ships instead.
+  >
+  > Investigation against the real `war3/game.dll` (12 MB, image base `0x6F000000` — note the
+  > `iccwc3_work/game.dll.i64` this plan originally cited is the IDB of a 28 KB stub, not this binary):
+  >
+  > - `game.dll` imports sockets from **WSOCK32**, not WS2_32. `connect` is at `0x6F86D8C4`.
+  > - `connect` has exactly **one** code call site, inside `sub_6F6E1A00` (`0x6F6E1A00`–`0x6F6E1B29`),
+  >   which is the low-level TCP primitive: `socket` → `htons` → `connect` → `ioctlsocket`
+  >   (non-blocking) → `SetEvent`, under a critical section.
+  > - `sub_6F6E1A00` has no vtable entry (searching for its absolute address `00 1A 6E 6F` returns
+  >   zero hits), so it is reached only by direct `rel32` calls. Enumerating those requires full
+  >   auto-analysis of the 12 MB image.
+  > - `w3lh.dll`, a candidate prior-art tool, is packed/stubbed: no imports, nothing to learn from.
+  >
+  > No cheaply-identifiable `JoinLanGame(ip, port)` entry point exists. Finding one is open-ended,
+  > and a wrong guess executes garbage inside the game process.
+  >
+  > **Operator decision:** ship the LAN-advert path now. `LocalHost` broadcasts `W3GS_GAMEINFO`
+  > (0x30) to `127.0.0.1:6112`; the stream appears in the stock Local Area Network tab and the user
+  > clicks Join. **Zero `game.dll` calls on the join path**, so nothing on it can crash the game.
+  > Auto-join returns as separate follow-up work if the routine is ever pinned down.
+  >
+  > Task 9 is rewritten accordingly: it orchestrates connect → snapshot → LocalHost → UDP advert,
+  > and does NOT call `g_fnJoinLanGame`. The typedef below is retained only as a record of the
+  > hypothesis that was tested and not confirmed.
+  >
   > **This task is research; its output is not known in advance.** The following typedef is a *hypothesis to test*, not a specification to code against:
   > `typedef void (__thiscall *fnJoinLanGame_t)(void* pLanManager, const char* hostIp, uint16_t port, uint32_t entryKey);`
   > The real calling convention, parameter count, and parameter types are whatever IDA shows. Record the actual signature in this plan (edit this block) before Task 9 consumes it. If the routine turns out to take a packed `sockaddr_in` or a game-list entry struct rather than `(ip, port)`, Task 9's step 4 changes accordingly.
@@ -640,13 +666,21 @@ To eliminate race conditions and avoid blocking the Warcraft III main render loo
 - [ ] **Step 1: Write failing unit test `test_autojoin.cpp` for state transitions**
   Test the state machine through: `Idle` → `ConnectingNet` → `WaitingSnapshot` → `StartingLocalHost` → `InvokingJoin` → `CatchingUp` → `Watching` / `Error`.
 - [ ] **Step 2: Implement `AutoJoin` controller**
+
+  Per the Task 5 null result, step 4 is a UDP advert, NOT a `game.dll` call. Nothing in this
+  sequence calls into the game, so no step here can fault inside the game process.
+
   Upon Connect click:
   1. Update UI state to `Connecting...`.
   2. Connect `NetClient` to `host:port`.
   3. On receipt of `GAME_START_SNAPSHOT` and player list, start `LocalHost` on `127.0.0.1:<port>`.
-  4. Invoke `g_fnJoinLanGame` passing `127.0.0.1` and the `LocalHost` port.
-  5. Calculate catch-up progress `Loading N%` as `received_actions / target_history_count * 100.0f`.
-  6. Transition to `Watching - <game_name>` once `HISTORY_END` is reached.
+  4. Begin broadcasting `W3GS_GAMEINFO` (0x30) by UDP to `127.0.0.1:6112` every 1500 ms, carrying
+     the game name from the snapshot and the `LocalHost` TCP port, so the stream appears in the
+     stock Local Area Network tab. Keep broadcasting until the client connects to `LocalHost`.
+  5. Set UI state to `Ready - open Local Area Network and join "<game name>"`, so the user knows
+     the one manual step that remains.
+  6. Calculate catch-up progress `Loading N%` as `received_actions / target_history_count * 100.0f`.
+  7. Transition to `Watching - <game_name>` once `HISTORY_END` is reached.
 - [ ] **Step 3: Implement comprehensive error handling**
   Define clear failure messages shown on the overlay:
   - Relay connection timeout / refused: `"Error: Cannot reach spectator server"`.
