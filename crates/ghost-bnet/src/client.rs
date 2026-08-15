@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::advert::{MapAdvert, encode_game_statstring};
-use crate::auth::{create_key_info, hash_password_double};
+use crate::auth::create_key_info;
 
 #[derive(Debug, Clone)]
 pub struct BnetConfig {
@@ -26,6 +26,7 @@ pub struct BnetConfig {
     pub war3_version: u8,
     pub exe_version: [u8; 4],
     pub exe_version_hash: [u8; 4],
+    pub password_hash_type: String,
     pub reconnect_delay: Duration,
 }
 
@@ -78,7 +79,9 @@ enum Stage {
     AwaitAuthInfo,
     AwaitAuthCheck,
     AwaitLogonResponse,
-    AwaitLogonProof,
+    AwaitAccountLogon,
+    AwaitAccountLogonProof,
+    AwaitEnterChat,
     InChat,
 }
 
@@ -146,6 +149,7 @@ async fn run(
         let mut active_advert: Option<ActiveAdvert> = None;
         let mut cur_client_token = 0u32;
         let mut cur_server_token = 0u32;
+        let mut cur_nls: Option<usize> = None;
 
         let mut null_timer = tokio::time::interval(Duration::from_secs(30));
         let mut adv_timer = tokio::time::interval(Duration::from_secs(3));
@@ -245,6 +249,19 @@ async fn run(
                         }
                     };
 
+                    tracing::info!(
+                        "<-- [RECV] BNCS packet id=0x{:02X} len={}",
+                        frame.id,
+                        frame.payload.len()
+                    );
+
+                    if frame.id == ids::SID_PING {
+                        if let Ok(ping_val) = incoming::decode_ping(&frame.payload) {
+                            let _ = framed_write.send(outgoing::ping(ping_val)).await;
+                        }
+                        continue;
+                    }
+
                     match (stage, frame.id) {
                         (Stage::AwaitAuthInfo, ids::SID_AUTH_INFO) => {
                             if let Ok(info) = incoming::AuthInfo::decode(&frame.payload) {
@@ -258,19 +275,45 @@ async fn run(
                                 let key_info_roc = create_key_info(&cfg.cdkey_roc, cur_client_token, cur_server_token, false);
                                 let key_info_tft = create_key_info(&cfg.cdkey_tft, cur_client_token, cur_server_token, true);
 
+                                let (exe_info, exe_version, exe_version_hash) = if let Some(bu) = crate::bncsutil::BncsUtil::global() {
+                                    let war3_exe = if std::path::Path::new("war3/warcraft.exe").exists() {
+                                        "war3/warcraft.exe"
+                                    } else if std::path::Path::new("war3/Warcraft III.exe").exists() {
+                                        "war3/Warcraft III.exe"
+                                    } else {
+                                        ""
+                                    };
+                                    let storm_dll = "war3/Storm.dll";
+                                    let game_dll = "war3/game.dll";
+
+                                    if !war3_exe.is_empty() && std::path::Path::new(storm_dll).exists() && std::path::Path::new(game_dll).exists() {
+                                        let mpq_num = bu.extract_mpq_number(&info.ix86_ver_file_name).unwrap_or(1);
+                                        let (info_str, ver) = bu.get_exe_info(war3_exe, 1)
+                                            .unwrap_or_else(|| (info.ix86_ver_file_name.clone(), u32::from_le_bytes(cfg.exe_version)));
+                                        let hash = bu.check_revision_flat(&info.value_string_formula, war3_exe, storm_dll, game_dll, mpq_num)
+                                            .unwrap_or_else(|| u32::from_le_bytes(cfg.exe_version_hash));
+                                        (info_str, ver.to_le_bytes(), hash.to_le_bytes())
+                                    } else {
+                                        (info.ix86_ver_file_name.clone(), cfg.exe_version, cfg.exe_version_hash)
+                                    }
+                                } else {
+                                    (info.ix86_ver_file_name.clone(), cfg.exe_version, cfg.exe_version_hash)
+                                };
+
                                 if let Ok(check_pkt) = outgoing::auth_check(
                                     true,
                                     cur_client_token.to_le_bytes(),
-                                    cfg.exe_version,
-                                    cfg.exe_version_hash,
+                                    exe_version,
+                                    exe_version_hash,
                                     &key_info_roc,
                                     &key_info_tft,
-                                    &info.ix86_ver_file_name,
+                                    &exe_info,
                                     "GHost",
                                 ) {
                                     tracing::info!(
-                                        "--> [SEND] SID_AUTH_CHECK (0x51) [client_token=0x{:08X}, ver=1.26a]",
-                                        cur_client_token
+                                        "--> [SEND] SID_AUTH_CHECK (0x51) [client_token=0x{:08X}, exe_info=\"{}\"]",
+                                        cur_client_token,
+                                        exe_info
                                     );
                                     let _ = framed_write.send(check_pkt).await;
                                     stage = Stage::AwaitAuthCheck;
@@ -286,19 +329,36 @@ async fn run(
                                     check.key_state_description
                                 );
                                 if check.key_state == 0 {
-                                    let password_hash = hash_password_double(&cfg.password, cur_client_token, cur_server_token);
-                                    if let Ok(logon_pkt) = outgoing::logon_response(
-                                        cur_client_token.to_le_bytes(),
-                                        cur_server_token.to_le_bytes(),
-                                        &password_hash,
+                                    tracing::info!("cd keys accepted");
+                                    // Both logon types go through SID_AUTH_ACCOUNTLOGON here, exactly
+                                    // as `bnet.cpp:845-846` does. They diverge only at the proof
+                                    // (`bnet.cpp:883-897`): pvpgn proves with the password hash,
+                                    // battle.net with the SRP M1. Sending the old SID_LOGONRESPONSE
+                                    // (0x29) instead makes PvPGN answer status=0 and then ignore
+                                    // SID_ENTERCHAT forever, because the connection never leaves the
+                                    // new-auth state machine it entered at SID_AUTH_INFO.
+                                    let client_key = if let Some(bu) = crate::bncsutil::BncsUtil::global() {
+                                        if let Some(nls) = bu.nls_init(&cfg.username, &cfg.password) {
+                                            cur_nls = Some(nls);
+                                            bu.nls_get_a(nls).unwrap_or([0u8; 32])
+                                        } else {
+                                            [0u8; 32]
+                                        }
+                                    } else {
+                                        [0u8; 32]
+                                    };
+
+                                    if let Ok(logon_pkt) = outgoing::auth_accountlogon(
+                                        &client_key,
                                         &cfg.username,
                                     ) {
                                         tracing::info!(
-                                            "--> [SEND] SID_LOGONRESPONSE (0x29) [account=\"{}\"]",
-                                            cfg.username
+                                            "--> [SEND] SID_AUTH_ACCOUNTLOGON (0x53) [account=\"{}\", logon_type={}]",
+                                            cfg.username,
+                                            cfg.password_hash_type
                                         );
                                         let _ = framed_write.send(logon_pkt).await;
-                                        stage = Stage::AwaitLogonProof;
+                                        stage = Stage::AwaitAccountLogon;
                                     }
                                 } else {
                                     let msg = format!("CD keys rejected: {}", check.key_state_description);
@@ -309,31 +369,29 @@ async fn run(
                             }
                         }
 
-                        (Stage::AwaitLogonProof, ids::SID_LOGONRESPONSE2) | (Stage::AwaitLogonProof, ids::SID_LOGONRESPONSE) | (Stage::AwaitLogonProof, ids::SID_AUTH_ACCOUNTLOGONPROOF) => {
+                        (Stage::AwaitLogonResponse, ids::SID_LOGONRESPONSE2) | (Stage::AwaitLogonResponse, ids::SID_LOGONRESPONSE) => {
                             if let Ok(proof) = incoming::LogonProof::decode(&frame.payload) {
                                 tracing::info!(
-                                    "<-- [RECV] SID_LOGONRESPONSE2 (0x3A) [status={} (SUCCESS)]",
+                                    "<-- [RECV] SID_LOGONRESPONSE (0x29/0x3A) [status={}]",
                                     proof.status
                                 );
                                 if proof.status == 0 || proof.status == 0x0E {
-                                    // Enter chat
+                                    tracing::info!("logon successful");
+                                    stage = Stage::AwaitEnterChat;
+                                    tracing::info!("--> [SEND] SID_NETGAMEPORT (0x45) [port={}]", cfg.host_port);
+                                    let _ = framed_write.send(outgoing::netgameport(cfg.host_port)).await;
                                     if let Ok(enter_pkt) = outgoing::enter_chat() {
                                         tracing::info!("--> [SEND] SID_ENTERCHAT (0x0A)");
                                         let _ = framed_write.send(enter_pkt).await;
-                                        stage = Stage::InChat;
-                                        tracing::info!("--> [SEND] SID_NETGAMEPORT (0x45) [port={}]", cfg.host_port);
-                                        let _ = framed_write.send(outgoing::netgameport(cfg.host_port)).await;
-                                        if !cfg.first_channel.is_empty()
-                                            && let Ok(join_pkt) = outgoing::join_channel(&cfg.first_channel)
-                                        {
-                                            tracing::info!("--> [SEND] SID_JOINCHANNEL (0x0C) [channel=\"{}\"]", cfg.first_channel);
-                                            let _ = framed_write.send(join_pkt).await;
-                                        }
-                                        let _ = events.send(BnetEvent::LoggedIn).await;
-                                        tracing::info!(user = %cfg.username, "successfully logged into battle.net as userbot");
+                                    }
+                                    if let Ok(f_pkt) = outgoing::friendslist() {
+                                        let _ = framed_write.send(f_pkt).await;
+                                    }
+                                    if let Ok(c_pkt) = outgoing::clanmemberlist() {
+                                        let _ = framed_write.send(c_pkt).await;
                                     }
                                 } else {
-                                    let msg = format!("Password rejected: status {}", proof.status);
+                                    let msg = format!("Logon failed - invalid password (status {})", proof.status);
                                     tracing::error!(%msg);
                                     let _ = events.send(BnetEvent::Disconnected(msg)).await;
                                     break 'session;
@@ -341,16 +399,133 @@ async fn run(
                             }
                         }
 
+                        (Stage::AwaitAccountLogon, ids::SID_AUTH_ACCOUNTLOGON) => {
+                            if let Ok(acc) = incoming::AccountLogon::decode(&frame.payload) {
+                                tracing::info!(
+                                    "<-- [RECV] SID_AUTH_ACCOUNTLOGON (0x53) [status={}]",
+                                    acc.status
+                                );
+                                if acc.status == 0 {
+                                    tracing::info!("username {} accepted", cfg.username);
+                                    // `bnet.cpp:883-897`: pvpgn proves with the raw password hash,
+                                    // battle.net with the SRP-6a M1 derived from the server's salt
+                                    // and public key.
+                                    let proof_bytes: Vec<u8> = if cfg.password_hash_type.eq_ignore_ascii_case("pvpgn") {
+                                        crate::auth::hash_password_pvpgn(&cfg.password).to_vec()
+                                    } else if let (Some(bu), Some(nls)) = (crate::bncsutil::BncsUtil::global(), cur_nls) {
+                                        bu.nls_get_m1(nls, &acc.server_public_key, &acc.salt).map(|m| m.to_vec()).unwrap_or_default()
+                                    } else {
+                                        Vec::new()
+                                    };
+
+                                    if let Ok(proof_pkt) = outgoing::auth_accountlogonproof(&proof_bytes) {
+                                        tracing::info!("--> [SEND] SID_AUTH_ACCOUNTLOGONPROOF (0x54)");
+                                        let _ = framed_write.send(proof_pkt).await;
+                                        stage = Stage::AwaitAccountLogonProof;
+                                    }
+                                } else {
+                                    let msg = format!("Logon failed - invalid username (status {})", acc.status);
+                                    tracing::error!(%msg);
+                                    let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                    break 'session;
+                                }
+                            }
+                        }
+
+                        (Stage::AwaitAccountLogonProof, ids::SID_AUTH_ACCOUNTLOGONPROOF) | (Stage::AwaitAccountLogonProof, ids::SID_LOGONRESPONSE2) | (Stage::AwaitAccountLogonProof, ids::SID_LOGONRESPONSE) => {
+                            if let Ok(proof) = incoming::LogonProof::decode(&frame.payload) {
+                                tracing::info!(
+                                    "<-- [RECV] SID_AUTH_ACCOUNTLOGONPROOF (0x54) [status={}]",
+                                    proof.status
+                                );
+                                if proof.status == 0 || proof.status == 0x0E {
+                                    tracing::info!("logon successful");
+                                    if !proof.message.is_empty() {
+                                        tracing::info!("[BNET SERVER INFO] {}", proof.message);
+                                    }
+                                    stage = Stage::AwaitEnterChat;
+                                    tracing::info!("--> [SEND] SID_NETGAMEPORT (0x45) [port={}]", cfg.host_port);
+                                    let _ = framed_write.send(outgoing::netgameport(cfg.host_port)).await;
+                                    if let Ok(enter_pkt) = outgoing::enter_chat() {
+                                        tracing::info!("--> [SEND] SID_ENTERCHAT (0x0A)");
+                                        let _ = framed_write.send(enter_pkt).await;
+                                    }
+                                    if let Ok(f_pkt) = outgoing::friendslist() {
+                                        let _ = framed_write.send(f_pkt).await;
+                                    }
+                                    if let Ok(c_pkt) = outgoing::clanmemberlist() {
+                                        let _ = framed_write.send(c_pkt).await;
+                                    }
+                                } else {
+                                    let msg = format!("Logon failed - invalid password (status {})", proof.status);
+                                    tracing::error!(%msg);
+                                    let _ = events.send(BnetEvent::Disconnected(msg)).await;
+                                    break 'session;
+                                }
+                            }
+                        }
+
+                        (Stage::AwaitEnterChat, ids::SID_ENTERCHAT) | (Stage::InChat, ids::SID_ENTERCHAT) => {
+                            let text = String::from_utf8_lossy(&frame.payload);
+                            tracing::info!(raw = %text, "<-- [RECV] SID_ENTERCHAT (0x0A)");
+                            if !cfg.first_channel.is_empty()
+                                && let Ok(join_pkt) = outgoing::join_channel(&cfg.first_channel)
+                            {
+                                tracing::info!("--> [SEND] SID_JOINCHANNEL (0x0C) [channel=\"{}\"]", cfg.first_channel);
+                                let _ = framed_write.send(join_pkt).await;
+                            }
+                            stage = Stage::InChat;
+                            let _ = events.send(BnetEvent::LoggedIn).await;
+                            tracing::info!(user = %cfg.username, "successfully logged into battle.net as userbot");
+                        }
+
                         (Stage::InChat, ids::SID_CHATEVENT) => {
-                            if let Ok(ev) = incoming::ChatEvent::decode(&frame.payload) {
-                                match ev.event_id {
-                                    0x04 => {
-                                        let _ = events.send(BnetEvent::Whisper { user: ev.user, text: ev.message }).await;
+                            match incoming::ChatEvent::decode(&frame.payload) {
+                                Ok(ev) => {
+                                    match ev.event_id {
+                                        0x01 => {
+                                            tracing::info!("[BNET] channel user: {} (ping: {}ms)", ev.user, ev.ping);
+                                        }
+                                        0x02 => {
+                                            tracing::info!("[BNET] joined channel: {}", ev.user);
+                                        }
+                                        0x03 => {
+                                            tracing::info!("[BNET] left channel: {}", ev.user);
+                                        }
+                                        0x04 => {
+                                            tracing::info!("[BNET WHISPER] <{}> {}", ev.user, ev.message);
+                                            let _ = events.send(BnetEvent::Whisper { user: ev.user, text: ev.message }).await;
+                                        }
+                                        0x05 => {
+                                            tracing::info!("[BNET CHAT] <{}> {}", ev.user, ev.message);
+                                            let _ = events.send(BnetEvent::ChatMessage { user: ev.user, text: ev.message }).await;
+                                        }
+                                        0x06 => {
+                                            tracing::info!("[BNET BROADCAST] {}", ev.message);
+                                        }
+                                        0x07 => {
+                                            tracing::info!("[BNET CHANNEL] joined channel \"{}\"", ev.message);
+                                        }
+                                        0x0A => {
+                                            tracing::info!("[BNET WHISPER SENT] -> <{}> {}", ev.user, ev.message);
+                                        }
+                                        0x12 => {
+                                            tracing::info!("[BNET SERVER INFO] {}", ev.message);
+                                        }
+                                        0x13 => {
+                                            tracing::warn!("[BNET SERVER ERROR] {}", ev.message);
+                                        }
+                                        0x17 => {
+                                            tracing::info!("[BNET EMOTE] <{}> {}", ev.user, ev.message);
+                                        }
+                                        other => {
+                                            tracing::info!(event_id = other, user = %ev.user, msg = %ev.message, "[BNET EVENT]");
+                                        }
                                     }
-                                    0x05 => {
-                                        let _ = events.send(BnetEvent::ChatMessage { user: ev.user, text: ev.message }).await;
-                                    }
-                                    _ => {}
+                                }
+                                Err(e) => {
+                                    let raw_text = String::from_utf8_lossy(&frame.payload);
+                                    tracing::warn!(error = %e, raw = %raw_text, "failed to decode SID_CHATEVENT payload");
                                 }
                             }
                         }
@@ -361,7 +536,10 @@ async fn run(
                             }
                         }
 
-                        _ => {}
+                        (st, pkt_id) => {
+                            let text = String::from_utf8_lossy(&frame.payload);
+                            tracing::info!(stage = ?st, pkt_id = format!("0x{:02X}", pkt_id), len = frame.payload.len(), raw = %text, "unhandled BNCS packet");
+                        }
                     }
                 }
             }
