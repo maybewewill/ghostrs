@@ -114,6 +114,7 @@ pub struct GameState {
     /// PID of the fake "bot" player shown in the lobby, or 255 when absent.
     /// Mirrors GHost++ `m_VirtualHostPID` (game_base.cpp:4702).
     pub virtual_host_pid: u8,
+    pub started_loading_at: Option<Instant>,
 }
 
 impl GameState {
@@ -156,6 +157,7 @@ impl GameState {
             last_player_left: None,
             holds: std::collections::HashMap::new(),
             virtual_host_pid: 255,
+            started_loading_at: None,
             cfg,
         }
     }
@@ -248,6 +250,14 @@ impl GameState {
             if matches!(self.phase, GamePhase::Lobby) {
                 self.send_all_slot_info();
             }
+        }
+
+        if matches!(self.phase, GamePhase::Loading)
+            && !self.players.is_empty()
+            && self.players.iter().filter(|p| !p.virtual_host).all(|p| p.loaded)
+        {
+            tracing::info!(game = %self.cfg.name, "all remaining players loaded after leaver, starting game");
+            self.begin_playing();
         }
     }
 

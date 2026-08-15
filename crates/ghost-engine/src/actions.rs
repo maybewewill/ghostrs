@@ -53,14 +53,15 @@ impl GameState {
     }
     pub fn begin_loading(&mut self) {
         self.phase = GamePhase::Loading;
+        self.started_loading_at = Some(std::time::Instant::now());
         self.delete_virtual_host();
         self.broadcast(outgoing::countdown_start());
         self.broadcast(outgoing::countdown_end());
     }
 
-
     pub fn begin_playing(&mut self) {
         self.phase = GamePhase::Playing;
+        self.started_loading_at = None;
         for p in self.players.iter_mut() {
             p.loaded = true;
             p.sync_counter = 0;
@@ -103,7 +104,19 @@ impl GameState {
                     }
                 }
             }
-            GamePhase::Loading => {}
+            GamePhase::Loading => {
+                if let Some(started) = self.started_loading_at {
+                    if started.elapsed() >= std::time::Duration::from_secs(60) {
+                        tracing::warn!(game = %self.cfg.name, "loading timed out, dropping unready players");
+                        for p in self.players.iter_mut() {
+                            if !p.loaded && p.left.is_none() && !p.virtual_host {
+                                p.left = Some("loading timed out (60s)".into());
+                            }
+                        }
+                        self.reap_left_players();
+                    }
+                }
+            }
             GamePhase::Playing => {
                 if self.check_lag() {
                     self.drop_lagging_players(std::time::Duration::from_secs(60));
@@ -333,5 +346,35 @@ mod tests {
         assert_eq!(st.phase, GamePhase::Loading);
         st.handle_loaded(2);
         assert_eq!(st.phase, GamePhase::Playing);
+    }
+
+    #[test]
+    fn player_disconnect_during_loading_starts_game_for_remaining_loaded_players() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_loading();
+        // Player 1 sends loaded
+        st.handle_loaded(1);
+        assert_eq!(st.phase, GamePhase::Loading);
+
+        // Player 2 disconnects without loading
+        st.players.by_pid_mut(2).unwrap().left = Some("disconnected".into());
+        st.reap_left_players();
+
+        // With Player 2 gone, 100% of seated players (Player 1) are loaded
+        assert_eq!(st.phase, GamePhase::Playing);
+    }
+
+    #[test]
+    fn loading_timeout_drops_unready_players_and_starts_game() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_loading();
+        st.started_loading_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(65));
+        st.handle_loaded(1);
+
+        st.on_tick(0);
+        // Player 2 should be dropped due to timeout, game starts for Player 1
+        assert_eq!(st.phase, GamePhase::Playing);
+        assert_eq!(st.players.len(), 1);
+        assert_eq!(st.players.iter().next().unwrap().pid, 1);
     }
 }
