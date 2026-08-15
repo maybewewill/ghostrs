@@ -515,7 +515,14 @@ impl Supervisor {
     }
 
     fn clean_finished_games(&mut self) {
-        self.running_games.retain(|(_, h, _)| !h.is_closed());
+        self.running_games.retain(|(name, h, _)| {
+            if h.is_closed() {
+                tracing::info!(game = %name, "game actor closed; cleaned up game handle");
+                false
+            } else {
+                true
+            }
+        });
         self.conn_to_game.retain(|_, h| !h.is_closed());
         if let Some(h) = &self.current_game
             && h.is_closed()
