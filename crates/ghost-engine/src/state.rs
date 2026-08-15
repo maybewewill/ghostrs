@@ -230,6 +230,16 @@ impl GameState {
             .filter_map(|p| p.left.as_ref().map(|r| (p.pid, r.clone())))
             .collect();
 
+        if gone.is_empty() {
+            return;
+        }
+
+        if matches!(self.phase, GamePhase::Countdown { .. }) {
+            tracing::info!(game = %self.cfg.name, "player left during countdown, aborting to lobby");
+            self.phase = GamePhase::Lobby;
+            self.send_chat_all(&crate::lang::countdown_aborted());
+        }
+
         for (pid, reason) in gone {
             self.players.remove_pid(pid);
             self.slots.release(pid);

@@ -248,6 +248,31 @@ mod tests {
     }
 
     #[test]
+    fn countdown_aborts_when_a_player_leaves() {
+        let (mut st, mut rxs) = seated_game(2);
+        for rx in &mut rxs {
+            let _ = drain_ids(rx);
+        }
+        st.phase = GamePhase::Countdown {
+            started_at: std::time::Instant::now(),
+            total_duration: crate::state::COUNTDOWN_TOTAL,
+            last_announced_step: 5,
+        };
+
+        // Mark player 1 as left
+        st.players.by_pid_mut(1).unwrap().left = Some("left voluntarily".into());
+        st.reap_left_players();
+
+        // Must revert back to Lobby phase (game_base.cpp:1616-1620)
+        assert_eq!(st.phase, GamePhase::Lobby);
+        // Lobby must be notified via chat, player leave, and updated slot info
+        let sent = drain_ids(&mut rxs[1]); // player 2 (pid 2) is still in the lobby
+        assert!(sent.contains(&ids::CHAT_FROM_HOST));
+        assert!(sent.contains(&ids::PLAYER_LEAVE_OTHERS));
+        assert!(sent.contains(&ids::SLOT_INFO));
+    }
+
+    #[test]
     fn countdown_progresses_by_wall_clock_time() {
         let (mut st, mut rxs) = seated_game(2);
         st.phase = GamePhase::Countdown {
