@@ -10,6 +10,13 @@ path = "src/main.rs"
 
 [dependencies]
 ghost-protocol = { path = "../ghost-protocol" }
+ghost-net = { path = "../ghost-net" }
+ghost-engine = { path = "../ghost-engine" }
+ghost-bnet = { path = "../ghost-bnet" }
+ghost-spectator = { path = "../ghost-spectator" }
+ghost-store = { path = "../ghost-store" }
+bytes.workspace = true
+rand.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
