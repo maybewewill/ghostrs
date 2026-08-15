@@ -37,6 +37,16 @@ fn keepalive_bytes(checksum: u32) -> Bytes {
         .unwrap()
 }
 
+/// Pulls the host's map size out of a W3GS_MAPCHECK payload, skipping the
+/// leading u32 and the NUL-terminated map path. Returns `None` if the payload
+/// is truncated rather than guessing a size.
+fn map_size_from_mapcheck(payload: &[u8]) -> Option<u32> {
+    let after_unknown = payload.get(4..)?;
+    let nul = after_unknown.iter().position(|&b| b == 0)?;
+    let size = after_unknown.get(nul + 1..nul + 5)?;
+    Some(u32::from_le_bytes([size[0], size[1], size[2], size[3]]))
+}
+
 fn mapsize_bytes(size: u32) -> Bytes {
     let mut b = BytesMut::new();
     b.put_slice(&[0, 0, 0, 0]); // unknown 4 bytes
@@ -117,8 +127,17 @@ async fn run_client(
                         tracing::debug!(player = %player_name, "seated in slot");
                     }
                     ids::MAP_CHECK => {
-                        // Reply with map size confirmation (100% downloaded)
-                        let _ = framed_write.send(mapsize_bytes(1000)).await;
+                        // Report back the size the host just advertised, so the host
+                        // treats us as already having the map. Replying with a made-up
+                        // size makes the host start a real map download — on the iCCup
+                        // DotA map that is a 17 MB stream of MAP_PART packets per client,
+                        // which drowns out the action ticks this harness exists to
+                        // measure.
+                        //
+                        // W3GS_MAPCHECK payload (outgoing.rs:229-235):
+                        //   u32 unknown, cstring path, u32 size, u32 info, u32 crc, 20B sha1
+                        let size = map_size_from_mapcheck(&frame.payload).unwrap_or(1000);
+                        let _ = framed_write.send(mapsize_bytes(size)).await;
                     }
                     ids::COUNTDOWN_START => {
                         tracing::debug!(player = %player_name, "countdown started");

@@ -43,6 +43,7 @@ impl GameState {
         };
         if let Some(p) = self.players.by_pid_mut(pid) {
             p.loaded = true;
+            tracing::info!(game = %self.cfg.name, pid, name = %p.name, "player finished loading");
         }
         self.broadcast(outgoing::game_loaded_others(pid));
 
@@ -52,6 +53,11 @@ impl GameState {
         }
     }
     pub fn begin_loading(&mut self) {
+        tracing::info!(
+            game = %self.cfg.name,
+            players = self.players.human_count(),
+            "countdown finished, players are loading"
+        );
         self.phase = GamePhase::Loading;
         self.started_loading_at = Some(std::time::Instant::now());
         self.delete_virtual_host();
