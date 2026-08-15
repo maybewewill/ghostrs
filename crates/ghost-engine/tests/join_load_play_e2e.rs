@@ -18,6 +18,7 @@ fn test_game_cfg() -> GameConfig {
         virtual_host_name: "|cFF4080C0Ghost".into(),
         reconnect_wait: Duration::from_secs(180),
         custom_slots: None,
+        replay_path: std::path::PathBuf::from("replays/e2e.w3g"),
         relay: None,
     }
 }

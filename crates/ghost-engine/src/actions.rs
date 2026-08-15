@@ -72,6 +72,18 @@ impl GameState {
         self.sync_counter = 0;
         self.game_ticks = 0;
 
+        if let Some(rep) = self.replay.as_mut() {
+            for p in self.players.iter().filter(|p| !p.virtual_host) {
+                rep.add_player(p.pid, &p.name);
+            }
+            let _ = rep.set_start(
+                self.slots.as_wire_bytes(),
+                self.random_seed,
+                self.cfg.map.layout_style,
+                self.cfg.map.num_players,
+            );
+        }
+
         if let Some(hcl) = &self.hcl {
             let host_pid = self.players.iter().next().map(|p| p.pid).unwrap_or(1);
             let hcl_actions = crate::hcl::Hcl::encode_hcl_actions(hcl, host_pid);
@@ -204,6 +216,11 @@ impl GameState {
             Ok(b) => {
                 if let Some(r) = &self.relay {
                     r.push(b.clone());
+                }
+                if let Some(rep) = self.replay.as_mut() {
+                    if b.len() >= 6 {
+                        rep.add_timeslot(send_interval, &b[6..]);
+                    }
                 }
                 self.broadcast(b);
             }
@@ -447,5 +464,31 @@ mod tests {
         st.on_tick(0);
         assert_eq!(st.players.iter().filter(|p| p.left.is_none()).count(), 0);
         assert!(st.finished, "game must transition to finished when all players stopped");
+    }
+
+    #[tokio::test]
+    async fn game_actions_chat_and_leavers_are_recorded_in_replay_body() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(2);
+        let mut rep = ghost_spectator::ReplayBody::new(1, "iCCupHost");
+        rep.set_game("Test DotA", &[0u8; 4], 1);
+        st.replay = Some(rep);
+
+        st.begin_playing();
+
+        // Tick with latency increment 100ms
+        st.on_tick(0);
+        st.send_chat_all("Good luck have fun!");
+
+        // Mark player 2 as left
+        if let Some(p) = st.players.by_pid_mut(2) {
+            p.left = Some("disconnected".into());
+        }
+        st.reap_left_players();
+
+        let rep = st.replay.take().expect("replay must exist");
+        let (body_bytes, duration_ms) = rep.finish().expect("replay finish must succeed");
+
+        assert!(body_bytes.len() > 64);
+        assert_eq!(duration_ms, 100, "replay duration must match total timeslots");
     }
 }

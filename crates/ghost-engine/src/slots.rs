@@ -41,6 +41,14 @@ impl SlotTable {
         &self.slots
     }
 
+    pub fn as_wire_bytes(&self) -> Vec<u8> {
+        let mut b = bytes::BytesMut::with_capacity(self.slots.len() * 9);
+        for s in &self.slots {
+            s.encode(&mut b);
+        }
+        b.to_vec()
+    }
+
     fn get_mut(&mut self, sid: u8) -> Option<&mut SlotInfo> {
         self.slots.get_mut(sid as usize)
     }
