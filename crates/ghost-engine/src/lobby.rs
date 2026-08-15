@@ -15,7 +15,7 @@ pub const REJECT_WRONG_PASSWORD: u32 = 0x1B;
 pub const MAX_SLOTS: usize = 24;
 
 impl GameState {
-    pub(crate) fn handle_req_join(&mut self, conn_id: u64, payload: &Bytes) {
+    pub fn handle_req_join(&mut self, conn_id: u64, payload: &Bytes) {
         let Some(idx) = self.pending.iter().position(|(id, _, _)| *id == conn_id) else {
             tracing::debug!(conn_id, "REQ_JOIN from an already-seated connection, ignoring");
             return;
@@ -133,7 +133,7 @@ impl GameState {
         tracing::info!(game = %self.cfg.name, %pid, name = %req.name, "player joined");
     }
 
-    pub(crate) fn handle_leave(&mut self, conn_id: u64, reason_code: u32) {
+    pub fn handle_leave(&mut self, conn_id: u64, reason_code: u32) {
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.left = Some(format!("left the game voluntarily (code {reason_code})"));
         } else {
@@ -141,7 +141,7 @@ impl GameState {
         }
     }
 
-    pub(crate) fn handle_conn_closed(&mut self, conn_id: u64, reason: String) {
+    pub fn handle_conn_closed(&mut self, conn_id: u64, reason: String) {
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             if p.gproxy {
                 if p.disconnected_since.is_none() {
