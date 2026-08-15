@@ -7,7 +7,6 @@ use ghost_protocol::frame::Frame;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tokio_util::codec::{Decoder, Encoder};
 
 #[tokio::test]
 async fn bnet_client_completes_handshake_to_login() {
@@ -22,7 +21,7 @@ async fn bnet_client_completes_handshake_to_login() {
         stream.read_exact(&mut proto_byte).await.unwrap();
         assert_eq!(proto_byte[0], 0x01);
 
-        let (read_half, mut write_half) = stream.into_split();
+        let (read_half, write_half) = stream.into_split();
         let mut framed_read = tokio_util::codec::FramedRead::new(read_half, BncsCodec::default());
         let mut framed_write = tokio_util::codec::FramedWrite::new(write_half, BncsCodec::default());
 

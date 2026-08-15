@@ -20,6 +20,7 @@ pub use actor::spawn_game;
 pub use chat::{ChatCommand, parse_command};
 pub use gproxy::GProxyBuffer;
 pub use handle::{GameCmd, GameHandle};
+pub use map::{ParsedMap, xor_rotate_left};
 pub use mapxfer::{Download, MAP_CHUNK, MAX_PARTS_PER_TICK};
 pub use players::{NameMatch, Player, PlayerTable};
 pub use slots::{SlotStatus, SlotTable};

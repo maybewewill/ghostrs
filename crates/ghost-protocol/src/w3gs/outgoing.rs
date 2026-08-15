@@ -257,6 +257,43 @@ pub fn map_part(from_pid: u8, to_pid: u8, start: u32, chunk: &[u8]) -> Result<By
     Frame::new(ids::MAP_PART, p.freeze()).encode()
 }
 
+/// W3GS_GAMEINFO (0x30): LAN game announcement broadcast.
+#[allow(clippy::too_many_arguments)]
+pub fn game_info(
+    tft: bool,
+    war3_version: u8,
+    host_counter: u32,
+    entry_key: u32,
+    game_name: &str,
+    stat_string: &[u8],
+    slots_total: u32,
+    map_game_type: [u8; 4],
+    slots_open: u32,
+    up_time: u32,
+    port: u16,
+) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(64 + game_name.len() + stat_string.len());
+    if tft {
+        p.put_slice(&[80, 88, 51, 87]); // "PX3W"
+    } else {
+        p.put_slice(&[51, 82, 65, 87]); // "3RAW"
+    }
+    p.put_slice(&[war3_version, 0, 0, 0]);
+    p.put_u32_le(host_counter);
+    p.put_u32_le(entry_key);
+    put_cstring(&mut p, game_name);
+    p.put_u8(0);
+    p.put_slice(stat_string);
+    p.put_u8(0);
+    p.put_u32_le(slots_total);
+    p.put_slice(&map_game_type);
+    p.put_slice(&[1, 0, 0, 0]); // unknown2
+    p.put_u32_le(slots_open);
+    p.put_u32_le(up_time);
+    p.put_u16_le(port);
+    Frame::new(ids::GAME_INFO, p.freeze()).encode()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
