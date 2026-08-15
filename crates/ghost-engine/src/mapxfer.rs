@@ -43,7 +43,11 @@ impl GameState {
             return;
         }
         if self.cfg.map.data.is_none() {
-            tracing::info!(pid, "player lacks the map and downloads are disabled");
+            tracing::info!(pid, "player lacks the map and downloads are disabled, dropping");
+            if let Some(p) = self.players.by_pid_mut(pid) {
+                p.left = Some("lacks map and downloads are disabled".into());
+            }
+            self.reap_left_players();
             return;
         }
         if self.downloads.iter().any(|d| d.pid == pid) {
@@ -191,5 +195,28 @@ mod tests {
         st.pump_downloads();
 
         assert!(st.downloads.is_empty());
+    }
+
+    #[test]
+    fn client_without_map_is_dropped_when_downloads_are_disabled() {
+        let (mut st, mut rxs) = seated_game(2);
+        st.cfg.map.size = 50_000;
+        st.cfg.map.data = None; // downloads disabled
+        for rx in &mut rxs {
+            let _ = drain_ids(rx);
+        }
+
+        let mut p = bytes::BytesMut::new();
+        bytes::BufMut::put_slice(&mut p, &[0, 0, 0, 0]);
+        bytes::BufMut::put_u8(&mut p, 1);
+        bytes::BufMut::put_u32_le(&mut p, 0); // client has 0 bytes
+        st.handle_map_size(1, &p.freeze());
+
+        // Player 1 must be dropped and slot freed
+        assert!(st.players.by_pid(1).is_none());
+        assert_eq!(st.slots.as_wire()[0].slot_status, 0); // open slot
+        let sent = drain_ids(&mut rxs[1]);
+        assert!(sent.contains(&ids::PLAYER_LEAVE_OTHERS));
+        assert!(sent.contains(&ids::SLOT_INFO));
     }
 }
