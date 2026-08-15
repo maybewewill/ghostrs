@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 pub mod mpq_num;
 pub mod xsha1;
 pub mod cdkey;
+pub mod exe_info;
 
 use libloading::{Library, Symbol};
 
