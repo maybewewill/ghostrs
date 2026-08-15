@@ -7,6 +7,7 @@ pub mod mpq_num;
 pub mod xsha1;
 pub mod cdkey;
 pub mod exe_info;
+pub mod check_revision;
 
 use libloading::{Library, Symbol};
 
