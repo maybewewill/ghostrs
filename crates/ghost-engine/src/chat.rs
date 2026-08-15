@@ -57,7 +57,10 @@ pub fn parse_command(trigger: char, msg: &str) -> Option<ChatCommand> {
 
     Some(match verb.as_str() {
         "start" => {
-            let force = args.first().map(|s| s.eq_ignore_ascii_case("force")).unwrap_or(false);
+            let force = args
+                .first()
+                .map(|s| s.eq_ignore_ascii_case("force"))
+                .unwrap_or(false);
             ChatCommand::Start { force }
         }
         "abort" => ChatCommand::Abort,
@@ -75,14 +78,21 @@ pub fn parse_command(trigger: char, msg: &str) -> Option<ChatCommand> {
         "kick" => ChatCommand::Kick(args.first()?.to_string()),
         "ban" => {
             let name = args.first()?.to_string();
-            let reason = args.get(1..).map(|r| r.join(" ")).unwrap_or_else(|| "banned by host".into());
+            let reason = args
+                .get(1..)
+                .map(|r| r.join(" "))
+                .unwrap_or_else(|| "banned by host".into());
             ChatCommand::Ban { name, reason }
         }
         "unban" => ChatCommand::Unban(args.first()?.to_string()),
         "checkban" => ChatCommand::CheckBan(args.first()?.to_string()),
         "banlast" => {
             let reason = args.join(" ");
-            ChatCommand::BanLast(if reason.is_empty() { "banned by host".into() } else { reason })
+            ChatCommand::BanLast(if reason.is_empty() {
+                "banned by host".into()
+            } else {
+                reason
+            })
         }
         "checkadmin" => ChatCommand::CheckAdmin(args.first()?.to_string()),
         "addadmin" => ChatCommand::AddAdmin(args.first()?.to_string()),
@@ -103,7 +113,9 @@ pub fn parse_command(trigger: char, msg: &str) -> Option<ChatCommand> {
             ChatCommand::Whisper { user, message }
         }
         "stats" => ChatCommand::Stats(args.first().map(|s| s.to_string()).unwrap_or_default()),
-        "statsdota" => ChatCommand::StatsDotA(args.first().map(|s| s.to_string()).unwrap_or_default()),
+        "statsdota" => {
+            ChatCommand::StatsDotA(args.first().map(|s| s.to_string()).unwrap_or_default())
+        }
         "drop" => ChatCommand::Drop,
         "draw" => ChatCommand::Draw,
         "hcl" => ChatCommand::Hcl(args.first()?.to_string()),
@@ -326,7 +338,10 @@ impl GameState {
                 }
             }
             ChatCommand::Version => {
-                self.send_chat_to(pid, "Ghost-RS v0.2.0 (High-Performance Async Warcraft III Hostbot)");
+                self.send_chat_to(
+                    pid,
+                    "Ghost-RS v0.2.0 (High-Performance Async Warcraft III Hostbot)",
+                );
             }
             ChatCommand::Ping => {
                 let pairs: Vec<(String, Option<u32>)> = self
@@ -347,7 +362,10 @@ impl GameState {
                     if let Some(summary) = dota.format_player_stats(target_name) {
                         self.send_chat_to(pid, &summary);
                     } else {
-                        self.send_chat_to(pid, &format!("No DotA stats found for [{target_name}]."));
+                        self.send_chat_to(
+                            pid,
+                            &format!("No DotA stats found for [{target_name}]."),
+                        );
                     }
                 } else {
                     self.send_chat_to(pid, "Not a DotA map.");
@@ -396,8 +414,12 @@ impl GameState {
     }
 
     fn apply_slot_request(&mut self, pid: u8, flag: u8, value: u8) {
-        let Some(sid) = self.slots.sid_of_pid(pid) else { return };
-        let Some(slot) = self.slots.as_wire().get(sid as usize).copied() else { return };
+        let Some(sid) = self.slots.sid_of_pid(pid) else {
+            return;
+        };
+        let Some(slot) = self.slots.as_wire().get(sid as usize).copied() else {
+            return;
+        };
         let mut updated = slot;
         match flag {
             0x11 => updated.team = value.min(11),
@@ -416,7 +438,9 @@ impl GameState {
             0x20
         };
         let extra: &[u8] = if flag == 0x20 { &[0, 0, 0, 0] } else { &[] };
-        if let Ok(b) = ghost_protocol::w3gs::outgoing::chat_from_host(255, &[pid], flag, extra, message) {
+        if let Ok(b) =
+            ghost_protocol::w3gs::outgoing::chat_from_host(255, &[pid], flag, extra, message)
+        {
             self.send_to(pid, b);
         }
     }
@@ -428,22 +452,52 @@ mod tests {
 
     #[test]
     fn parses_comprehensive_command_set() {
-        assert_eq!(parse_command('!', "!start"), Some(ChatCommand::Start { force: false }));
-        assert_eq!(parse_command('!', "!start force"), Some(ChatCommand::Start { force: true }));
+        assert_eq!(
+            parse_command('!', "!start"),
+            Some(ChatCommand::Start { force: false })
+        );
+        assert_eq!(
+            parse_command('!', "!start force"),
+            Some(ChatCommand::Start { force: true })
+        );
         assert_eq!(parse_command('!', "!close 3"), Some(ChatCommand::Close(2)));
         assert_eq!(parse_command('!', "!open 1"), Some(ChatCommand::Open(0)));
-        assert_eq!(parse_command('!', "!swap 1 4"), Some(ChatCommand::Swap(0, 3)));
-        assert_eq!(parse_command('!', "!kick Slash"), Some(ChatCommand::Kick("Slash".into())));
+        assert_eq!(
+            parse_command('!', "!swap 1 4"),
+            Some(ChatCommand::Swap(0, 3))
+        );
+        assert_eq!(
+            parse_command('!', "!kick Slash"),
+            Some(ChatCommand::Kick("Slash".into()))
+        );
         assert_eq!(parse_command('!', "!ping"), Some(ChatCommand::Ping));
         assert_eq!(parse_command('!', "!muteall"), Some(ChatCommand::MuteAll));
-        assert_eq!(parse_command('!', "!unmuteall"), Some(ChatCommand::UnmuteAll));
-        assert_eq!(parse_command('!', "!mute Slash"), Some(ChatCommand::Mute("Slash".into())));
+        assert_eq!(
+            parse_command('!', "!unmuteall"),
+            Some(ChatCommand::UnmuteAll)
+        );
+        assert_eq!(
+            parse_command('!', "!mute Slash"),
+            Some(ChatCommand::Mute("Slash".into()))
+        );
         assert_eq!(parse_command('!', "!sp"), Some(ChatCommand::ShufflePlayers));
-        assert_eq!(parse_command('!', "!synclimit 60"), Some(ChatCommand::SyncLimit(60)));
-        assert_eq!(parse_command('!', "!latency 50"), Some(ChatCommand::Latency(50)));
-        assert_eq!(parse_command('!', "!hcl -apem"), Some(ChatCommand::Hcl("-apem".into())));
+        assert_eq!(
+            parse_command('!', "!synclimit 60"),
+            Some(ChatCommand::SyncLimit(60))
+        );
+        assert_eq!(
+            parse_command('!', "!latency 50"),
+            Some(ChatCommand::Latency(50))
+        );
+        assert_eq!(
+            parse_command('!', "!hcl -apem"),
+            Some(ChatCommand::Hcl("-apem".into()))
+        );
         assert_eq!(parse_command('!', "!draw"), Some(ChatCommand::Draw));
-        assert_eq!(parse_command('!', "!votestart"), Some(ChatCommand::VoteStart));
+        assert_eq!(
+            parse_command('!', "!votestart"),
+            Some(ChatCommand::VoteStart)
+        );
     }
 
     #[test]
@@ -459,7 +513,11 @@ mod tests {
         // would let `!start` fire with only one real player present.
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
         st.create_virtual_host();
-        assert_eq!(st.players.len(), 2, "virtual host is seated alongside the one human");
+        assert_eq!(
+            st.players.len(),
+            2,
+            "virtual host is seated alongside the one human"
+        );
 
         st.run_command(1, "P1", ChatCommand::Start { force: false });
 

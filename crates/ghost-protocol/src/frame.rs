@@ -117,7 +117,13 @@ mod tests {
     #[test]
     fn encode_with_uses_the_requested_header() {
         let f = Frame::new(0x02, Bytes::from_static(&[1]));
-        assert_eq!(&f.encode_with(0xF8).unwrap()[..], &[0xF8, 0x02, 0x05, 0x00, 0x01]);
-        assert_eq!(&f.encode_with(0xFF).unwrap()[..], &[0xFF, 0x02, 0x05, 0x00, 0x01]);
+        assert_eq!(
+            &f.encode_with(0xF8).unwrap()[..],
+            &[0xF8, 0x02, 0x05, 0x00, 0x01]
+        );
+        assert_eq!(
+            &f.encode_with(0xFF).unwrap()[..],
+            &[0xFF, 0x02, 0x05, 0x00, 0x01]
+        );
     }
 }

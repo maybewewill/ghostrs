@@ -1,9 +1,9 @@
-use std::time::Duration;
 use bytes::{BufMut, Bytes, BytesMut};
 use ghost_engine::handle::GameCmd;
-use ghost_engine::state::{GameConfig, GamePhase, GameState, MapInfo, COUNTDOWN_TOTAL};
+use ghost_engine::state::{COUNTDOWN_TOTAL, GameConfig, GamePhase, GameState, MapInfo};
 use ghost_net::PlayerLink;
 use ghost_protocol::w3gs::ids;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 fn test_game_cfg() -> GameConfig {
@@ -61,8 +61,14 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
         st.handle_req_join(conn_id, &make_reqjoin(&format!("Player_{i}")));
 
         let received = drain_all_ids(&mut rx);
-        assert!(received.contains(&ids::SLOT_INFO_JOIN), "player {i} must receive SLOT_INFO_JOIN");
-        assert!(received.contains(&ids::MAP_CHECK), "player {i} must receive MAP_CHECK");
+        assert!(
+            received.contains(&ids::SLOT_INFO_JOIN),
+            "player {i} must receive SLOT_INFO_JOIN"
+        );
+        assert!(
+            received.contains(&ids::MAP_CHECK),
+            "player {i} must receive MAP_CHECK"
+        );
         rxs.push(rx);
     }
     assert_eq!(st.players.len(), 4); // 3 humans + 1 virtual host
@@ -77,10 +83,17 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
         p.put_u32_le(st.cfg.map.size);
         st.handle_map_size(conn_id, &p.freeze());
     }
-    assert!(st.players.iter().filter(|p| !p.virtual_host).all(|p| p.download_status == 100));
+    assert!(
+        st.players
+            .iter()
+            .filter(|p| !p.virtual_host)
+            .all(|p| p.download_status == 100)
+    );
 
     // 3. Start game countdown
-    st.handle_cmd(GameCmd::Start { by: "HostPlayer".into() });
+    st.handle_cmd(GameCmd::Start {
+        by: "HostPlayer".into(),
+    });
     assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
     // Drain countdown chat announcements
@@ -89,7 +102,10 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
     }
 
     // Fast-forward countdown duration past total (2.5s)
-    if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+    if let GamePhase::Countdown {
+        ref mut started_at, ..
+    } = st.phase
+    {
         *started_at = std::time::Instant::now() - COUNTDOWN_TOTAL - Duration::from_millis(100);
     }
     st.on_tick(0);
@@ -99,8 +115,16 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
     // Verify COUNTDOWN_START and COUNTDOWN_END received
     for (i, rx) in rxs.iter_mut().enumerate() {
         let received = drain_all_ids(rx);
-        assert!(received.contains(&ids::COUNTDOWN_START), "player {} missing COUNTDOWN_START", i + 1);
-        assert!(received.contains(&ids::COUNTDOWN_END), "player {} missing COUNTDOWN_END", i + 1);
+        assert!(
+            received.contains(&ids::COUNTDOWN_START),
+            "player {} missing COUNTDOWN_START",
+            i + 1
+        );
+        assert!(
+            received.contains(&ids::COUNTDOWN_END),
+            "player {} missing COUNTDOWN_END",
+            i + 1
+        );
     }
 
     // 4. All 3 players send GAME_LOADED_SELF
@@ -113,7 +137,11 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
     st.on_tick(0);
     for (i, rx) in rxs.iter_mut().enumerate() {
         let received = drain_all_ids(rx);
-        assert!(received.contains(&ids::INCOMING_ACTION), "player {} missing INCOMING_ACTION", i + 1);
+        assert!(
+            received.contains(&ids::INCOMING_ACTION),
+            "player {} missing INCOMING_ACTION",
+            i + 1
+        );
     }
 
     // 6. Action propagation test: Player 1 sends an OUTGOING_ACTION
@@ -125,7 +153,11 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
     st.on_tick(0);
     for (i, rx) in rxs.iter_mut().enumerate() {
         let received = drain_all_ids(rx);
-        assert!(received.contains(&ids::INCOMING_ACTION), "player {} missing action tick", i + 1);
+        assert!(
+            received.contains(&ids::INCOMING_ACTION),
+            "player {} missing action tick",
+            i + 1
+        );
     }
     assert_eq!(st.sync_counter, 2);
 }
@@ -142,7 +174,9 @@ async fn countdown_aborted_by_leaver_lifecycle() {
     st.handle_req_join(2, &make_reqjoin("Player_2"));
 
     // Start countdown
-    st.handle_cmd(GameCmd::Start { by: "Player_1".into() });
+    st.handle_cmd(GameCmd::Start {
+        by: "Player_1".into(),
+    });
     assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
     // Drain pending packets from rx2

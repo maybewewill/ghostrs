@@ -22,8 +22,8 @@ pub fn getadvlistex(game_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(20 + game_name.len());
     p.put_slice(&[255, 3, 0, 0]); // map filter 1
     p.put_slice(&[255, 3, 0, 0]); // map filter 2
-    p.put_slice(&[0, 0, 0, 0]);   // map filter 3
-    p.put_slice(&[1, 0, 0, 0]);   // num games
+    p.put_slice(&[0, 0, 0, 0]); // map filter 3
+    p.put_slice(&[1, 0, 0, 0]); // num games
     put_cstring(&mut p, game_name);
     p.put_u8(0);
     p.put_u8(0);
@@ -97,7 +97,7 @@ pub fn startadvex3(
     p.put_u32_le(up_time);
     p.put_slice(&map_game_type);
     p.put_slice(&[255, 3, 0, 0]); // unknown
-    p.put_slice(&[0, 0, 0, 0]);   // custom game
+    p.put_slice(&[0, 0, 0, 0]); // custom game
     put_cstring(&mut p, game_name);
     p.put_u8(0);
     // bnetprotocol.cpp:712-714 sends 110 when MAX_SLOTS > 12; gameslot.h:39 sets MAX_SLOTS = 24.
@@ -111,7 +111,7 @@ pub fn startadvex3(
 
 pub fn notifyjoin(game_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(9 + game_name.len());
-    p.put_slice(&[0, 0, 0, 0]);  // product id
+    p.put_slice(&[0, 0, 0, 0]); // product id
     p.put_slice(&[14, 0, 0, 0]); // product version
     put_cstring(&mut p, game_name);
     Frame::new(ids::SID_NOTIFYJOIN, p.freeze()).encode_with(BNCS_HEADER)
@@ -203,8 +203,8 @@ pub fn auth_info(
     }
     p.put_slice(&[ver, 0, 0, 0]);
     p.put_slice(&[83, 85, 110, 101]); // language "SUne" ("enUS" reversed)
-    p.put_slice(&[127, 0, 0, 1]);     // local IP
-    p.put_slice(&[44, 1, 0, 0]);      // time zone bias
+    p.put_slice(&[127, 0, 0, 1]); // local IP
+    p.put_slice(&[44, 1, 0, 0]); // time zone bias
     p.put_u32_le(locale_id);
     p.put_u32_le(locale_id);
     put_cstring(&mut p, country_abbrev);
@@ -314,7 +314,11 @@ mod tests {
         ];
         for p in packets {
             assert_eq!(p[0], 0xFF, "bncs header");
-            assert_eq!(u16::from_le_bytes([p[2], p[3]]) as usize, p.len(), "length field");
+            assert_eq!(
+                u16::from_le_bytes([p[2], p[3]]) as usize,
+                p.len(),
+                "length field"
+            );
         }
     }
 

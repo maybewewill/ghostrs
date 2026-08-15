@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bytes::{BufMut, BytesMut};
 use ghost_bnet::{BnetConfig, BnetEvent, spawn_bnet};
-use ghost_protocol::bncs::{ids, BncsCodec};
+use ghost_protocol::bncs::{BncsCodec, ids};
 use ghost_protocol::frame::Frame;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
@@ -23,7 +23,8 @@ async fn bnet_client_completes_handshake_to_login() {
 
         let (read_half, write_half) = stream.into_split();
         let mut framed_read = tokio_util::codec::FramedRead::new(read_half, BncsCodec::default());
-        let mut framed_write = tokio_util::codec::FramedWrite::new(write_half, BncsCodec::default());
+        let mut framed_write =
+            tokio_util::codec::FramedWrite::new(write_half, BncsCodec::default());
 
         use futures_util::{SinkExt, StreamExt};
 
@@ -39,7 +40,9 @@ async fn bnet_client_completes_handshake_to_login() {
         p.put_u32_le(0); // mpq high
         p.put_slice(b"IX86ver1.mpq\0");
         p.put_slice(b"A=47 B=1\0");
-        let resp = Frame::new(ids::SID_AUTH_INFO, p.freeze()).encode_with(0xFF).unwrap();
+        let resp = Frame::new(ids::SID_AUTH_INFO, p.freeze())
+            .encode_with(0xFF)
+            .unwrap();
         framed_write.send(resp).await.unwrap();
 
         // 3. Expect SID_AUTH_CHECK -> respond with SID_AUTH_CHECK (good)
@@ -49,7 +52,9 @@ async fn bnet_client_completes_handshake_to_login() {
         let mut p = BytesMut::new();
         p.put_u32_le(0); // key_state = KR_GOOD
         p.put_slice(b"passed\0");
-        let resp = Frame::new(ids::SID_AUTH_CHECK, p.freeze()).encode_with(0xFF).unwrap();
+        let resp = Frame::new(ids::SID_AUTH_CHECK, p.freeze())
+            .encode_with(0xFF)
+            .unwrap();
         framed_write.send(resp).await.unwrap();
 
         // 4. Expect SID_AUTH_ACCOUNTLOGON -> respond with SID_AUTH_ACCOUNTLOGON (status = 0)
@@ -60,7 +65,9 @@ async fn bnet_client_completes_handshake_to_login() {
         p.put_u32_le(0); // status = 0 (Success)
         p.put_slice(&[0u8; 32]); // salt
         p.put_slice(&[0u8; 32]); // server public key
-        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze()).encode_with(0xFF).unwrap();
+        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze())
+            .encode_with(0xFF)
+            .unwrap();
         framed_write.send(resp).await.unwrap();
 
         // 4b. Expect SID_AUTH_ACCOUNTLOGONPROOF -> respond with SID_AUTH_ACCOUNTLOGONPROOF (status = 0)
@@ -71,7 +78,9 @@ async fn bnet_client_completes_handshake_to_login() {
         p.put_u32_le(0); // status = 0 (Success)
         p.put_slice(&[0u8; 20]); // server password proof
         p.put_slice(b"\0"); // message
-        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze()).encode_with(0xFF).unwrap();
+        let resp = Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze())
+            .encode_with(0xFF)
+            .unwrap();
         framed_write.send(resp).await.unwrap();
 
         // 5. Expect SID_NETGAMEPORT
@@ -81,7 +90,12 @@ async fn bnet_client_completes_handshake_to_login() {
         // 6. Expect SID_ENTERCHAT -> respond with SID_ENTERCHAT
         let f = framed_read.next().await.unwrap().unwrap();
         assert_eq!(f.id, ids::SID_ENTERCHAT);
-        let resp = Frame::new(ids::SID_ENTERCHAT, bytes::Bytes::from_static(b"Unique\0Stat\0Account\0")).encode_with(0xFF).unwrap();
+        let resp = Frame::new(
+            ids::SID_ENTERCHAT,
+            bytes::Bytes::from_static(b"Unique\0Stat\0Account\0"),
+        )
+        .encode_with(0xFF)
+        .unwrap();
         framed_write.send(resp).await.unwrap();
     });
 

@@ -49,10 +49,16 @@ pub struct OutgoingAction {
 impl OutgoingAction {
     pub fn decode(payload: &Bytes) -> Result<Self, ProtoError> {
         if payload.len() < 4 {
-            return Err(ProtoError::Truncated { need: 4, have: payload.len() });
+            return Err(ProtoError::Truncated {
+                need: 4,
+                have: payload.len(),
+            });
         }
         let crc = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-        Ok(Self { crc, data: payload.slice(4..) })
+        Ok(Self {
+            crc,
+            data: payload.slice(4..),
+        })
     }
 }
 
@@ -90,7 +96,14 @@ impl ChatToHost {
             _ => return Err(ProtoError::BadValue("unknown chat-to-host flag")),
         }
 
-        Ok(Self { to_pids, from_pid, flag, extra, message, byte })
+        Ok(Self {
+            to_pids,
+            from_pid,
+            flag,
+            extra,
+            message,
+            byte,
+        })
     }
 }
 
@@ -104,7 +117,10 @@ impl MapSizeReport {
     pub fn decode(payload: &Bytes) -> Result<Self, ProtoError> {
         let mut b = payload.clone();
         let _unknown = b.try_get_bytes(4)?;
-        Ok(Self { size_flag: b.try_get_u8()?, map_size: b.try_get_u32_le()? })
+        Ok(Self {
+            size_flag: b.try_get_u8()?,
+            map_size: b.try_get_u32_le()?,
+        })
     }
 }
 
@@ -137,10 +153,10 @@ mod tests {
 
     fn reqjoin_payload(name: &str) -> Bytes {
         let mut b = BytesMut::new();
-        b.put_u32_le(7);           // host counter
+        b.put_u32_le(7); // host counter
         b.put_u32_le(0xDEAD_BEEF); // entry key
-        b.put_u8(0);               // unknown
-        b.put_u16_le(6112);        // listen port
+        b.put_u8(0); // unknown
+        b.put_u16_le(6112); // listen port
         b.put_u32_le(0x1234_5678); // peer key
         b.put_slice(name.as_bytes());
         b.put_u8(0);
@@ -188,8 +204,8 @@ mod tests {
         let mut b = BytesMut::new();
         b.put_u8(2);
         b.put_slice(&[3, 4]); // to pids
-        b.put_u8(1);          // from pid
-        b.put_u8(0x10);       // flag: plain message
+        b.put_u8(1); // from pid
+        b.put_u8(0x10); // flag: plain message
         b.put_slice(b"gl hf");
         b.put_u8(0);
         let c = ChatToHost::decode(&b.freeze()).unwrap();
@@ -205,7 +221,7 @@ mod tests {
         b.put_slice(&[2]);
         b.put_u8(1);
         b.put_u8(0x20);
-        b.put_u32_le(0);      // extra flags (chat scope)
+        b.put_u32_le(0); // extra flags (chat scope)
         b.put_slice(b"ally");
         b.put_u8(0);
         let c = ChatToHost::decode(&b.freeze()).unwrap();

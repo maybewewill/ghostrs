@@ -6,9 +6,9 @@ use std::sync::Arc;
 use mpq::Archive;
 use sha1::{Digest, Sha1};
 
-use ghost_protocol::w3gs::SlotInfo;
 use crate::slots::SlotStatus;
 use crate::state::MapInfo;
+use ghost_protocol::w3gs::SlotInfo;
 
 pub const MAPSPEED_SLOW: u8 = 1;
 pub const MAPSPEED_NORMAL: u8 = 2;
@@ -84,7 +84,10 @@ fn read_cstring(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
         }
         buf.push(b[0]);
         if buf.len() > 512 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "CString too long"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "CString too long",
+            ));
         }
     }
     Ok(String::from_utf8_lossy(&buf).into_owned())
@@ -105,8 +108,12 @@ impl ParsedMap {
         let map_data = fs::read(path)?;
         let map_size = map_data.len() as u32;
 
-        let mut map_archive = Archive::open(path)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("failed to open MPQ archive: {e}")))?;
+        let mut map_archive = Archive::open(path).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to open MPQ archive: {e}"),
+            )
+        })?;
 
         let mut val: u32 = 0;
         let mut hasher = Sha1::new();
@@ -123,9 +130,7 @@ impl ParsedMap {
                 hasher.update(&buf[..read_bytes]);
             }
         }
-        if !overrode_common_j
-            && let Some(cj) = common_j
-        {
+        if !overrode_common_j && let Some(cj) = common_j {
             val ^= xor_rotate_left(cj);
             hasher.update(cj);
         }
@@ -142,9 +147,7 @@ impl ParsedMap {
                 hasher.update(&buf[..read_bytes]);
             }
         }
-        if !overrode_blizzard_j
-            && let Some(bj) = blizzard_j
-        {
+        if !overrode_blizzard_j && let Some(bj) = blizzard_j {
             val ^= xor_rotate_left(bj);
             hasher.update(bj);
         }
@@ -228,7 +231,8 @@ impl ParsedMap {
 
                             width = raw_w;
                             height = raw_h;
-                            map_options = raw_flags & (MAPOPT_MELEE | MAPOPT_FIXEDPLAYERSETTINGS | MAPOPT_CUSTOMFORCES);
+                            map_options = raw_flags
+                                & (MAPOPT_MELEE | MAPOPT_FIXEDPLAYERSETTINGS | MAPOPT_CUSTOMFORCES);
 
                             let _ = cursor.seek(SeekFrom::Current(1));
                             let _ = cursor.seek(SeekFrom::Current(4));
@@ -358,9 +362,9 @@ impl ParsedMap {
         }
 
         let mut flags: u32 = 0x0000_0002; // MAPSPEED_FAST
-        flags |= 0x0000_0800;             // MAPVIS_DEFAULT
-        flags |= 0x0000_4000;             // MAPFLAG_TEAMSTOGETHER
-        flags |= 0x0006_0000;             // MAPFLAG_FIXEDTEAMS
+        flags |= 0x0000_0800; // MAPVIS_DEFAULT
+        flags |= 0x0000_4000; // MAPFLAG_TEAMSTOGETHER
+        flags |= 0x0006_0000; // MAPFLAG_FIXEDTEAMS
 
         let file_name = path
             .file_name()
@@ -423,14 +427,19 @@ mod tests {
         println!("CRC: 0x{:08X}", parsed.info.crc);
         println!("SHA1: {:02x?}", parsed.info.sha1);
         println!("Dimensions: {}x{}", parsed.info.width, parsed.info.height);
-        println!("Players: {}, Teams: {}", parsed.info.num_players, parsed.info.num_teams);
+        println!(
+            "Players: {}, Teams: {}",
+            parsed.info.num_players, parsed.info.num_teams
+        );
         println!("Layout Style: {}", parsed.layout_style);
         println!("Game Type: 0x{:08X}", parsed.info.game_type);
         println!("Flags: 0x{:08X}", parsed.info.flags);
         println!("Slots count: {}", parsed.slots.len());
         for (i, slot) in parsed.slots.iter().enumerate() {
-            println!("  Slot {}: team={}, colour={}, status={}, race=0x{:02X}, computer={}", 
-                i, slot.team, slot.colour, slot.slot_status, slot.race, slot.computer);
+            println!(
+                "  Slot {}: team={}, colour={}, status={}, race=0x{:02X}, computer={}",
+                i, slot.team, slot.colour, slot.slot_status, slot.race, slot.computer
+            );
         }
 
         assert_eq!(parsed.info.path, "Maps\\Download\\iCCup DotA 454.w3x");
@@ -457,15 +466,15 @@ mod tests {
 
     #[test]
     fn test_iccup_dota_game_simulation_and_packets() {
-        use std::time::Duration;
+        use crate::actor::tests_support::reqjoin_bytes;
+        use crate::handle::GameCmd;
+        use crate::state::{GameConfig, GamePhase, GameState};
         use bytes::{BufMut, BytesMut};
-        use tokio::sync::mpsc;
         use ghost_net::{AnyFrame, PlayerLink};
         use ghost_protocol::frame::Frame;
         use ghost_protocol::w3gs::ids;
-        use crate::actor::tests_support::reqjoin_bytes;
-        use crate::state::{GameConfig, GamePhase, GameState};
-        use crate::handle::GameCmd;
+        use std::time::Duration;
+        use tokio::sync::mpsc;
 
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let workspace_dir = manifest_dir.parent().unwrap().parent().unwrap();
@@ -506,7 +515,10 @@ mod tests {
         // 1. Connect Player 1 (Alice)
         let (tx1, mut rx1) = mpsc::channel(128);
         st.add_conn(1, PlayerLink::for_test(tx1), [192, 168, 1, 10]);
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Alice"))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Alice"))),
+        );
 
         // Verify Alice seated in Sentinel Slot 0
         let p1 = st.players.by_name_partial("Alice").unwrap();
@@ -528,7 +540,10 @@ mod tests {
         // 2. Connect Player 2 (Bob)
         let (tx2, mut rx2) = mpsc::channel(128);
         st.add_conn(2, PlayerLink::for_test(tx2), [192, 168, 1, 11]);
-        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Bob"))));
+        st.on_frame(
+            2,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Bob"))),
+        );
 
         let p2 = st.players.by_name_partial("Bob").unwrap();
         assert_eq!(p2.pid, 2);
@@ -543,15 +558,24 @@ mod tests {
         assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
         // Fast-forward countdown duration
-        if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+        if let GamePhase::Countdown {
+            ref mut started_at, ..
+        } = st.phase
+        {
             *started_at = std::time::Instant::now() - std::time::Duration::from_millis(2600);
         }
         st.on_tick(0);
         assert_eq!(st.phase, GamePhase::Loading);
 
         // 4. Both players report GAME_LOADED_SELF
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())));
-        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())),
+        );
+        st.on_frame(
+            2,
+            AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())),
+        );
 
         // All players loaded -> Game is live Playing!
         assert_eq!(st.phase, GamePhase::Playing);
@@ -563,8 +587,12 @@ mod tests {
         // 5. Game tick in Playing state: Action packet W3GS_INCOMING_ACTION is broadcast
         st.on_tick(0);
 
-        let p1_pkt = rx1.try_recv().expect("Alice must receive INCOMING_ACTION clock tick");
-        let p2_pkt = rx2.try_recv().expect("Bob must receive INCOMING_ACTION clock tick");
+        let p1_pkt = rx1
+            .try_recv()
+            .expect("Alice must receive INCOMING_ACTION clock tick");
+        let p2_pkt = rx2
+            .try_recv()
+            .expect("Bob must receive INCOMING_ACTION clock tick");
         assert_eq!(p1_pkt[1], ids::INCOMING_ACTION);
         assert_eq!(p2_pkt[1], ids::INCOMING_ACTION);
 
@@ -572,12 +600,18 @@ mod tests {
         let mut action_body = BytesMut::new();
         action_body.put_u32_le(0); // crc
         action_body.put_slice(&[0x10, 0x01, 0x02, 0x03]); // arbitrary action payload
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::OUTGOING_ACTION, action_body.freeze())));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::OUTGOING_ACTION, action_body.freeze())),
+        );
 
         // Alice sends keepalive
         let mut keepalive = BytesMut::new();
         keepalive.put_u32_le(0);
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::OUTGOING_KEEPALIVE, keepalive.freeze())));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::OUTGOING_KEEPALIVE, keepalive.freeze())),
+        );
 
         // Next tick: the action is bundled into INCOMING_ACTION and sent to all players
         st.on_tick(0);
@@ -587,9 +621,8 @@ mod tests {
         assert_eq!(p1_action_tick[1], ids::INCOMING_ACTION);
         assert_eq!(p2_action_tick[1], ids::INCOMING_ACTION);
 
-        println!("Simulation completed successfully: Map resolved, Lobby seated, Game started, Loading finished, Playing ticks & Actions streamed!");
+        println!(
+            "Simulation completed successfully: Map resolved, Lobby seated, Game started, Loading finished, Playing ticks & Actions streamed!"
+        );
     }
 }
-
-
-

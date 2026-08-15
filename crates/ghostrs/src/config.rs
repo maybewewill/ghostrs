@@ -45,29 +45,75 @@ pub struct Config {
     pub db_path: PathBuf,
 }
 
-fn default_war3_path() -> String { "war3".into() }
-fn default_map_path() -> String { "maps".into() }
-fn default_max_games() -> usize { 20 }
-fn default_true() -> bool { true }
-fn default_bind_address() -> String { "0.0.0.0".into() }
-fn default_host_port() -> u16 { 6112 }
-fn default_bnet_server() -> String { "wc3.theabyss.ru".into() }
-fn default_bnet_port() -> u16 { 6112 }
-fn default_bnet_username() -> String { "BOT".into() }
-fn default_cdkey() -> String { "FFFFFFFFFFFFFFFFFFFFFFFFFF".into() }
-fn default_first_channel() -> String { "The Abyss".into() }
-fn default_command_trigger() -> char { '!' }
-fn default_war3_version() -> u8 { 26 }
-fn default_reconnect_delay_sec() -> u64 { 5 }
-fn default_password_hash_type() -> String { "pvpgn".into() }
-fn default_latency_ms() -> u64 { 100 }
-fn default_sync_limit() -> u32 { 50 }
-fn default_virtual_host_name() -> String { "|cFF4080C0Ghost".into() }
-fn default_reconnect_wait_sec() -> u64 { 180 }
-fn default_spectator_port() -> u16 { 6114 }
-fn default_spectator_delay_sec() -> u64 { 120 }
-fn default_max_viewers() -> usize { 32 }
-fn default_db_path() -> PathBuf { PathBuf::from("ghost.db") }
+fn default_war3_path() -> String {
+    "war3".into()
+}
+fn default_map_path() -> String {
+    "maps".into()
+}
+fn default_max_games() -> usize {
+    20
+}
+fn default_true() -> bool {
+    true
+}
+fn default_bind_address() -> String {
+    "0.0.0.0".into()
+}
+fn default_host_port() -> u16 {
+    6112
+}
+fn default_bnet_server() -> String {
+    "wc3.theabyss.ru".into()
+}
+fn default_bnet_port() -> u16 {
+    6112
+}
+fn default_bnet_username() -> String {
+    "BOT".into()
+}
+fn default_cdkey() -> String {
+    "FFFFFFFFFFFFFFFFFFFFFFFFFF".into()
+}
+fn default_first_channel() -> String {
+    "The Abyss".into()
+}
+fn default_command_trigger() -> char {
+    '!'
+}
+fn default_war3_version() -> u8 {
+    26
+}
+fn default_reconnect_delay_sec() -> u64 {
+    5
+}
+fn default_password_hash_type() -> String {
+    "pvpgn".into()
+}
+fn default_latency_ms() -> u64 {
+    100
+}
+fn default_sync_limit() -> u32 {
+    50
+}
+fn default_virtual_host_name() -> String {
+    "|cFF4080C0Ghost".into()
+}
+fn default_reconnect_wait_sec() -> u64 {
+    180
+}
+fn default_spectator_port() -> u16 {
+    6114
+}
+fn default_spectator_delay_sec() -> u64 {
+    120
+}
+fn default_max_viewers() -> usize {
+    32
+}
+fn default_db_path() -> PathBuf {
+    PathBuf::from("ghost.db")
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TomlBot {
@@ -233,8 +279,8 @@ impl Config {
     }
 
     pub fn from_toml(s: &str) -> anyhow::Result<Self> {
-        let toml_cfg: TomlConfig = toml::from_str(s)
-            .context("failed to parse TOML configuration")?;
+        let toml_cfg: TomlConfig =
+            toml::from_str(s).context("failed to parse TOML configuration")?;
 
         let bot = toml_cfg.bot.unwrap_or_default();
         let bnet = toml_cfg.bnet.unwrap_or_default();
@@ -301,13 +347,28 @@ impl Config {
         let bot_tft = parse_bool(&map, "bot_tft", true);
         let bot_hostport = parse_int(&map, "bot_hostport", 6112)?;
 
-        let bnet_server = map.get("bnet_server").cloned().unwrap_or_else(|| "wc3.theabyss.ru".into());
+        let bnet_server = map
+            .get("bnet_server")
+            .cloned()
+            .unwrap_or_else(|| "wc3.theabyss.ru".into());
         let bnet_port = parse_int(&map, "bnet_serverport", 6112)?;
-        let bnet_username = map.get("bnet_username").cloned().unwrap_or_else(|| "BOT".into());
+        let bnet_username = map
+            .get("bnet_username")
+            .cloned()
+            .unwrap_or_else(|| "BOT".into());
         let bnet_password = map.get("bnet_password").cloned().unwrap_or_default();
-        let bnet_cdkey_roc = map.get("bnet_cdkeyroc").cloned().unwrap_or_else(|| "FFFFFFFFFFFFFFFFFFFFFFFFFF".into());
-        let bnet_cdkey_tft = map.get("bnet_cdkeytft").cloned().unwrap_or_else(|| "FFFFFFFFFFFFFFFFFFFFFFFFFF".into());
-        let bnet_first_channel = map.get("bnet_firstchannel").cloned().unwrap_or_else(|| "The Abyss".into());
+        let bnet_cdkey_roc = map
+            .get("bnet_cdkeyroc")
+            .cloned()
+            .unwrap_or_else(|| "FFFFFFFFFFFFFFFFFFFFFFFFFF".into());
+        let bnet_cdkey_tft = map
+            .get("bnet_cdkeytft")
+            .cloned()
+            .unwrap_or_else(|| "FFFFFFFFFFFFFFFFFFFFFFFFFF".into());
+        let bnet_first_channel = map
+            .get("bnet_firstchannel")
+            .cloned()
+            .unwrap_or_else(|| "The Abyss".into());
         let bnet_root_admins = map
             .get("bnet_rootadmin")
             .map(|s| s.split_whitespace().map(String::from).collect())
@@ -335,11 +396,17 @@ impl Config {
         Ok(Config {
             bot: BotConfig {
                 war3_path: map.get("bot_war3path").cloned().unwrap_or_default(),
-                map_path: map.get("bot_mappath").cloned().unwrap_or_else(|| "maps/".into()),
+                map_path: map
+                    .get("bot_mappath")
+                    .cloned()
+                    .unwrap_or_else(|| "maps/".into()),
                 default_map: map.get("bot_defaultmap").cloned(),
                 max_games: bot_maxgames,
                 tft: bot_tft,
-                bind_address: map.get("bot_bindaddress").cloned().unwrap_or_else(|| "0.0.0.0".into()),
+                bind_address: map
+                    .get("bot_bindaddress")
+                    .cloned()
+                    .unwrap_or_else(|| "0.0.0.0".into()),
                 host_port: bot_hostport,
             },
             bnet: BnetConfig {
@@ -356,13 +423,19 @@ impl Config {
                 war3_version: bnet_war3_version,
                 exe_version: [1, 0, 26, 1],
                 exe_version_hash: [0, 0, 0, 0],
-                password_hash_type: map.get("bnet_custom_passwordhashtype").cloned().unwrap_or_else(|| "pvpgn".into()),
+                password_hash_type: map
+                    .get("bnet_custom_passwordhashtype")
+                    .cloned()
+                    .unwrap_or_else(|| "pvpgn".into()),
                 reconnect_delay: Duration::from_secs(5),
             },
             game: GameDefaults {
                 latency: Duration::from_millis(latency_ms),
                 sync_limit: sync_limit as u32,
-                virtual_host_name: map.get("bot_virtualhostname").cloned().unwrap_or_else(|| "|cFF4080C0Ghost".into()),
+                virtual_host_name: map
+                    .get("bot_virtualhostname")
+                    .cloned()
+                    .unwrap_or_else(|| "|cFF4080C0Ghost".into()),
                 reconnect_wait: Duration::from_secs(reconnect_wait_sec),
             },
             spectator: SpectatorConfig {
@@ -376,9 +449,15 @@ impl Config {
     }
 }
 
-fn parse_int<T: std::str::FromStr>(map: &HashMap<String, String>, key: &str, default: T) -> anyhow::Result<T> {
+fn parse_int<T: std::str::FromStr>(
+    map: &HashMap<String, String>,
+    key: &str,
+    default: T,
+) -> anyhow::Result<T> {
     match map.get(key) {
-        Some(v) => v.parse().map_err(|_| anyhow::anyhow!("failed to parse integer for key {key}: {v}")),
+        Some(v) => v
+            .parse()
+            .map_err(|_| anyhow::anyhow!("failed to parse integer for key {key}: {v}")),
         None => Ok(default),
     }
 }

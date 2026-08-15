@@ -110,7 +110,10 @@ mod tests {
     fn encode_decode_roundtrip() {
         let frame = Frame::new(ids::PING_FROM_HOST, Bytes::from_static(&[1, 2, 3, 4]));
         let mut buf = BytesMut::from(&frame.encode().unwrap()[..]);
-        let back = W3gsCodec::default().decode(&mut buf).unwrap().expect("frame");
+        let back = W3gsCodec::default()
+            .decode(&mut buf)
+            .unwrap()
+            .expect("frame");
         assert_eq!(back, frame);
         assert!(buf.is_empty());
     }

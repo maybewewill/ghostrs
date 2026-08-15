@@ -29,7 +29,10 @@ impl Decoder for DualCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
         // Resync past any byte that is neither W3GS (0xF7) nor GPS (0xF8).
         while !src.is_empty() && src[0] != W3GS_HEADER && src[0] != GPS_HEADER {
-            match src.iter().position(|&b| b == W3GS_HEADER || b == GPS_HEADER) {
+            match src
+                .iter()
+                .position(|&b| b == W3GS_HEADER || b == GPS_HEADER)
+            {
                 Some(pos) => src.advance(pos),
                 None => {
                     src.clear();
@@ -139,7 +142,10 @@ pub fn spawn_conn(
             match framed.next().await {
                 Some(Ok(frame)) => {
                     if reader_events
-                        .send(ConnEvent { conn_id, kind: ConnEventKind::Frame(frame) })
+                        .send(ConnEvent {
+                            conn_id,
+                            kind: ConnEventKind::Frame(frame),
+                        })
                         .await
                         .is_err()
                     {
@@ -154,7 +160,10 @@ pub fn spawn_conn(
         };
         cancel.cancel();
         let _ = reader_events
-            .send(ConnEvent { conn_id, kind: ConnEventKind::Closed(reason) })
+            .send(ConnEvent {
+                conn_id,
+                kind: ConnEventKind::Closed(reason),
+            })
             .await;
     });
 
@@ -206,7 +215,10 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(16);
         let _link = spawn_conn(1, server, tx, 8);
 
-        client.write_all(&[0xF7, 0x27, 0x09, 0x00, 0, 1, 2, 3, 4]).await.unwrap();
+        client
+            .write_all(&[0xF7, 0x27, 0x09, 0x00, 0, 1, 2, 3, 4])
+            .await
+            .unwrap();
 
         let ev = rx.recv().await.expect("event");
         assert_eq!(ev.conn_id, 1);
@@ -225,7 +237,8 @@ mod tests {
         let (tx, _rx) = mpsc::channel(16);
         let link = spawn_conn(1, server, tx, 8);
 
-        link.try_send(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00])).unwrap();
+        link.try_send(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]))
+            .unwrap();
 
         let mut buf = [0u8; 4];
         client.read_exact(&mut buf).await.unwrap();
@@ -242,7 +255,10 @@ mod tests {
 
         let ev = rx.recv().await.expect("event");
         assert_eq!(ev.conn_id, 7);
-        assert!(matches!(ev.kind, ConnEventKind::Closed(CloseReason::PeerClosed)));
+        assert!(matches!(
+            ev.kind,
+            ConnEventKind::Closed(CloseReason::PeerClosed)
+        ));
     }
 
     #[tokio::test]
@@ -259,7 +275,10 @@ mod tests {
                 break;
             }
         }
-        assert!(hit_backpressure, "a never-reading peer must trigger backpressure");
+        assert!(
+            hit_backpressure,
+            "a never-reading peer must trigger backpressure"
+        );
     }
 
     #[tokio::test]

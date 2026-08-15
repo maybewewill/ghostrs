@@ -101,15 +101,24 @@ impl StatsDotA {
                 if data_str == "Data" {
                     if key_str.starts_with("Courier") {
                         if (1..=5).contains(&value_int) || (7..=11).contains(&value_int) {
-                            self.players.entry(value_int).or_insert_with(|| DotAPlayerStats::new(value_int)).courier_kills += 1;
+                            self.players
+                                .entry(value_int)
+                                .or_insert_with(|| DotAPlayerStats::new(value_int))
+                                .courier_kills += 1;
                         }
                     } else if key_str.starts_with("Tower") {
                         if (1..=5).contains(&value_int) || (7..=11).contains(&value_int) {
-                            self.players.entry(value_int).or_insert_with(|| DotAPlayerStats::new(value_int)).tower_kills += 1;
+                            self.players
+                                .entry(value_int)
+                                .or_insert_with(|| DotAPlayerStats::new(value_int))
+                                .tower_kills += 1;
                         }
                     } else if key_str.starts_with("Rax") {
                         if (1..=5).contains(&value_int) || (7..=11).contains(&value_int) {
-                            self.players.entry(value_int).or_insert_with(|| DotAPlayerStats::new(value_int)).rax_kills += 1;
+                            self.players
+                                .entry(value_int)
+                                .or_insert_with(|| DotAPlayerStats::new(value_int))
+                                .rax_kills += 1;
                         }
                     } else if key_str.starts_with("Throne") {
                         self.throne_hp = value_int.min(100);
@@ -124,33 +133,92 @@ impl StatsDotA {
                     } else if key_str == "s" {
                         self.duration_sec = value_int;
                     }
-                } else if let Ok(id) = data_str.parse::<u32>() {
-                    if (1..=5).contains(&id) || (7..=11).contains(&id) {
-                        let p = self.players.entry(id).or_insert_with(|| DotAPlayerStats::new(id));
-                        match key_str.as_ref() {
-                            "1" => p.kills = value_int,
-                            "2" => p.deaths = value_int,
-                            "3" => p.creep_kills = value_int,
-                            "4" => p.creep_denies = value_int,
-                            "5" => p.assists = value_int,
-                            "6" => p.gold = value_int,
-                            "7" => p.neutral_kills = value_int,
-                            "8_0" => p.items[0] = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "8_1" => p.items[1] = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "8_2" => p.items[2] = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "8_3" => p.items[3] = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "8_4" => p.items[4] = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "8_5" => p.items[5] = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "9" => p.hero = String::from_utf8_lossy(&[value_raw[3], value_raw[2], value_raw[1], value_raw[0]]).to_string(),
-                            "id" => {
-                                if value_int >= 6 {
-                                    p.new_colour = value_int + 1;
-                                } else {
-                                    p.new_colour = value_int;
-                                }
-                            }
-                            _ => {}
+                } else if let Ok(id) = data_str.parse::<u32>()
+                    && ((1..=5).contains(&id) || (7..=11).contains(&id))
+                {
+                    let p = self
+                        .players
+                        .entry(id)
+                        .or_insert_with(|| DotAPlayerStats::new(id));
+                    match key_str.as_ref() {
+                        "1" => p.kills = value_int,
+                        "2" => p.deaths = value_int,
+                        "3" => p.creep_kills = value_int,
+                        "4" => p.creep_denies = value_int,
+                        "5" => p.assists = value_int,
+                        "6" => p.gold = value_int,
+                        "7" => p.neutral_kills = value_int,
+                        "8_0" => {
+                            p.items[0] = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
                         }
+                        "8_1" => {
+                            p.items[1] = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
+                        }
+                        "8_2" => {
+                            p.items[2] = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
+                        }
+                        "8_3" => {
+                            p.items[3] = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
+                        }
+                        "8_4" => {
+                            p.items[4] = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
+                        }
+                        "8_5" => {
+                            p.items[5] = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
+                        }
+                        "9" => {
+                            p.hero = String::from_utf8_lossy(&[
+                                value_raw[3],
+                                value_raw[2],
+                                value_raw[1],
+                                value_raw[0],
+                            ])
+                            .to_string()
+                        }
+                        "id" => {
+                            if value_int >= 6 {
+                                p.new_colour = value_int + 1;
+                            } else {
+                                p.new_colour = value_int;
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
@@ -164,11 +232,22 @@ impl StatsDotA {
     }
 
     pub fn format_player_stats(&self, name: &str) -> Option<String> {
-        let p = self.players.values().find(|p| p.name.eq_ignore_ascii_case(name))?;
+        let p = self
+            .players
+            .values()
+            .find(|p| p.name.eq_ignore_ascii_case(name))?;
         let hero = if p.hero.is_empty() { "None" } else { &p.hero };
         Some(format!(
             "[{}] Hero: {}, K/D/A: {}/{}/{}, CS: {}/{}, Neutrals: {}, Gold: {}",
-            p.name, hero, p.kills, p.deaths, p.assists, p.creep_kills, p.creep_denies, p.neutral_kills, p.gold
+            p.name,
+            hero,
+            p.kills,
+            p.deaths,
+            p.assists,
+            p.creep_kills,
+            p.creep_denies,
+            p.neutral_kills,
+            p.gold
         ))
     }
 
@@ -206,7 +285,10 @@ mod tests {
         // Winner event: Data="Global", Key="Winner", Value=1 (Sentinel)
         let winner_act = make_dr_x_action("Global", "Winner", 1);
         let finished = dota.process_action(&winner_act);
-        assert!(finished, "process_action must return true when winner is set");
+        assert!(
+            finished,
+            "process_action must return true when winner is set"
+        );
         assert_eq!(dota.winner, 1);
         assert_eq!(dota.format_winner(), "Sentinel");
 

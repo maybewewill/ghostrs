@@ -53,8 +53,14 @@ mod save_tests {
 
         let data = std::fs::read(&path).unwrap();
         assert!(data.starts_with(b"Warcraft III recorded game\x1A\0"));
-        assert_eq!(u32::from_le_bytes([data[32], data[33], data[34], data[35]]) as usize, data.len());
-        assert_eq!(u32::from_le_bytes([data[60], data[61], data[62], data[63]]), 100);
+        assert_eq!(
+            u32::from_le_bytes([data[32], data[33], data[34], data[35]]) as usize,
+            data.len()
+        );
+        assert_eq!(
+            u32::from_le_bytes([data[60], data[61], data[62], data[63]]),
+            100
+        );
     }
 
     /// Proves `save_replay` does not block the runtime it's awaited on, rather

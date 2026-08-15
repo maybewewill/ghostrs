@@ -183,7 +183,12 @@ mod tests {
 
     fn test_player(pid: u8, name: &str) -> Player {
         let (tx, _rx) = mpsc::channel(8);
-        Player::new(pid, name.to_string(), 0, ghost_net::PlayerLink::for_test(tx))
+        Player::new(
+            pid,
+            name.to_string(),
+            0,
+            ghost_net::PlayerLink::for_test(tx),
+        )
     }
 
     #[test]
@@ -203,7 +208,10 @@ mod tests {
         t.insert(test_player(3, "Other"));
 
         assert_eq!(t.by_name_partial("Oth").unwrap().pid, 3);
-        assert!(matches!(t.by_name_partial("Sla"), Err(NameMatch::Ambiguous(2))));
+        assert!(matches!(
+            t.by_name_partial("Sla"),
+            Err(NameMatch::Ambiguous(2))
+        ));
         assert!(matches!(t.by_name_partial("zzz"), Err(NameMatch::None)));
         // An exact match wins even when it is a prefix of another name.
         assert_eq!(t.by_name_partial("Slash").unwrap().pid, 1);

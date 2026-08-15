@@ -19,7 +19,12 @@ pub struct W3gWriter {
 
 impl W3gWriter {
     pub fn new(war3_version: u32, build: u16, tft: bool) -> Self {
-        Self { war3_version, build, tft, replay_length_ms: 0 }
+        Self {
+            war3_version,
+            build,
+            tft,
+            replay_length_ms: 0,
+        }
     }
 
     pub fn set_replay_length(&mut self, ms: u32) {
@@ -36,7 +41,8 @@ impl W3gWriter {
         let mut blocks: Vec<Vec<u8>> = Vec::with_capacity(padded.len() / BLOCK_SIZE);
         for chunk in padded.chunks_exact(BLOCK_SIZE) {
             let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
-            enc.write_all(chunk).expect("zlib encode into Vec cannot fail");
+            enc.write_all(chunk)
+                .expect("zlib encode into Vec cannot fail");
             blocks.push(enc.finish().expect("zlib finish into Vec cannot fail"));
         }
 
@@ -71,8 +77,14 @@ impl W3gWriter {
             bh.extend_from_slice(&0u32.to_le_bytes()); // CRC placeholder
 
             // Folded 16+16 checksum, packed.cpp:377-382.
-            let crc1 = { let c = crc32fast::hash(&bh); c ^ (c >> 16) };
-            let crc2 = { let c = crc32fast::hash(block); c ^ (c >> 16) };
+            let crc1 = {
+                let c = crc32fast::hash(&bh);
+                c ^ (c >> 16)
+            };
+            let crc2 = {
+                let c = crc32fast::hash(block);
+                c ^ (c >> 16)
+            };
             let block_crc = (crc1 & 0xFFFF) | (crc2 << 16);
             bh[4..8].copy_from_slice(&block_crc.to_le_bytes());
 
@@ -87,8 +99,8 @@ impl W3gWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
     use flate2::read::ZlibDecoder;
+    use std::io::Read;
 
     fn read_u32(d: &[u8], at: usize) -> u32 {
         u32::from_le_bytes([d[at], d[at + 1], d[at + 2], d[at + 3]])
@@ -98,7 +110,7 @@ mod tests {
     fn the_header_carries_the_flags_length_and_a_self_consistent_crc() {
         let mut w = W3gWriter::new(26, 6059, true);
         w.set_replay_length(123_456);
-        let out = w.pack(&vec![0xABu8; 100]);
+        let out = w.pack(&[0xABu8; 100]);
 
         assert_eq!(&out[..28], b"Warcraft III recorded game\x1A\0");
         assert_eq!(read_u32(&out, 28), 68, "header size");
@@ -106,7 +118,11 @@ mod tests {
         assert_eq!(&out[48..52], b"PX3W", "W3XP, little-endian on the wire");
         assert_eq!(read_u32(&out, 52), 26, "war3 version");
         assert_eq!(u16::from_le_bytes([out[56], out[57]]), 6059, "build");
-        assert_eq!(u16::from_le_bytes([out[58], out[59]]), 32768, "flags must be 32768");
+        assert_eq!(
+            u16::from_le_bytes([out[58], out[59]]),
+            32768,
+            "flags must be 32768"
+        );
         assert_eq!(read_u32(&out, 60), 123_456, "replay length ms");
 
         // The stored CRC must equal CRC32 of the header with its CRC field zeroed.
@@ -126,7 +142,11 @@ mod tests {
 
         let n_blocks = read_u32(&out, 44) as usize;
         assert_eq!(n_blocks, 3);
-        assert_eq!(read_u32(&out, 40) as usize, 8192 * 2 + 7, "decompressed size is the unpadded original length, used by reader to trim padding");
+        assert_eq!(
+            read_u32(&out, 40) as usize,
+            8192 * 2 + 7,
+            "decompressed size is the unpadded original length, used by reader to trim padding"
+        );
 
         let mut pos = 68;
         for i in 0..n_blocks {
@@ -142,22 +162,35 @@ mod tests {
             pos += 8 + c_len;
         }
         assert_eq!(pos, out.len(), "compressed size accounting");
-        assert_eq!(read_u32(&out, 32) as usize, out.len(), "field 32 is the whole file size");
+        assert_eq!(
+            read_u32(&out, 32) as usize,
+            out.len(),
+            "field 32 is the whole file size"
+        );
     }
 
     #[test]
     fn the_block_crc_folds_the_header_and_data_checksums() {
         let w = W3gWriter::new(26, 6059, true);
-        let out = w.pack(&vec![1u8; 10]);
+        let out = w.pack(&[1u8; 10]);
         let c_len = u16::from_le_bytes([out[68], out[69]]) as usize;
 
         let mut bh = out[68..76].to_vec();
         bh[4..8].copy_from_slice(&0u32.to_le_bytes());
-        let crc1 = { let c = crc32fast::hash(&bh); c ^ (c >> 16) };
-        let crc2 = { let c = crc32fast::hash(&out[76..76 + c_len]); c ^ (c >> 16) };
+        let crc1 = {
+            let c = crc32fast::hash(&bh);
+            c ^ (c >> 16)
+        };
+        let crc2 = {
+            let c = crc32fast::hash(&out[76..76 + c_len]);
+            c ^ (c >> 16)
+        };
         let expected = (crc1 & 0xFFFF) | (crc2 << 16);
 
-        assert_eq!(u32::from_le_bytes([out[72], out[73], out[74], out[75]]), expected);
+        assert_eq!(
+            u32::from_le_bytes([out[72], out[73], out[74], out[75]]),
+            expected
+        );
     }
 
     #[test]
@@ -192,6 +225,9 @@ mod tests {
 
         // Truncate to the original unpadded length and verify exact match.
         decompressed.truncate(stored_decompressed_len);
-        assert_eq!(decompressed, body, "decompressed and truncated must match original body");
+        assert_eq!(
+            decompressed, body,
+            "decompressed and truncated must match original body"
+        );
     }
 }

@@ -17,7 +17,10 @@ pub enum ProtoError {
 impl Clone for ProtoError {
     fn clone(&self) -> Self {
         match self {
-            Self::Truncated { need, have } => Self::Truncated { need: *need, have: *have },
+            Self::Truncated { need, have } => Self::Truncated {
+                need: *need,
+                have: *have,
+            },
             Self::UnterminatedString => Self::UnterminatedString,
             Self::BadValue(s) => Self::BadValue(s),
             Self::TooLarge(l) => Self::TooLarge(*l),

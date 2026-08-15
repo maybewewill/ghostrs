@@ -106,7 +106,7 @@ impl ReplayBody {
         select_mode: u8,
         start_spots: u8,
     ) -> Result<(), ReplayBodyError> {
-        if slots.len() % 9 != 0 {
+        if !slots.len().is_multiple_of(9) {
             return Err(ReplayBodyError::InvalidSlotsLength(slots.len()));
         }
         self.num_slots = slots.len() / 9;
@@ -138,8 +138,8 @@ impl ReplayBody {
     /// C++ block is `[RecordID][PID][u16 len placeholder][flags][u32 chatMode][message + NUL]`
     /// and the length written back is `Block.size() - 4`, i.e. flags + chatMode
     /// + message bytes including the string's own null terminator (GHost++'s
-    /// `UTIL_AppendByteArrayFast` appends one by default), but not the RecordID,
-    /// PID, or the length field itself.
+    ///   `UTIL_AppendByteArrayFast` appends one by default), but not the RecordID,
+    ///   PID, or the length field itself.
     pub fn add_chat(&mut self, pid: u8, flag: u8, extra: u32, message: &str) {
         self.blocks.push(REPLAY_CHATMESSAGE);
         self.blocks.push(pid);
@@ -235,10 +235,16 @@ mod tests {
         assert_eq!(len_ms, 0);
 
         // RecordID 25 introduces the GameStartRecord, then 0x1A/0x1B/0x1C.
-        let start = body.windows(1).position(|w| w[0] == 25).expect("GameStartRecord");
+        let start = body
+            .windows(1)
+            .position(|w| w[0] == 25)
+            .expect("GameStartRecord");
         assert_eq!(body[start + 1..start + 3], (7u16 + 2 * 9).to_le_bytes());
         let tail = &body[body.len() - 15..];
-        assert_eq!(tail, &[0x1A, 1, 0, 0, 0, 0x1B, 1, 0, 0, 0, 0x1C, 1, 0, 0, 0]);
+        assert_eq!(
+            tail,
+            &[0x1A, 1, 0, 0, 0, 0x1B, 1, 0, 0, 0, 0x1C, 1, 0, 0, 0]
+        );
     }
 
     #[test]
@@ -259,7 +265,8 @@ mod tests {
         let (body, _) = b.finish().unwrap();
 
         // Locate the 0x1E block: [0x1E][u16 len][u16 time][actions...]
-        let at = body.windows(5)
+        let at = body
+            .windows(5)
             .position(|w| w[0] == 0x1E && u16::from_le_bytes([w[3], w[4]]) == 100)
             .expect("timeslot block");
         let len = u16::from_le_bytes([body[at + 1], body[at + 2]]) as usize;

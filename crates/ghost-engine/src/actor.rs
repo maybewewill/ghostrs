@@ -66,7 +66,9 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
             if let Some(parent) = replay_path.parent() {
                 let _ = tokio::fs::create_dir_all(parent).await;
             }
-            if let Err(e) = ghost_spectator::save_replay(replay_path.clone(), rep, 26, 6059, true).await {
+            if let Err(e) =
+                ghost_spectator::save_replay(replay_path.clone(), rep, 26, 6059, true).await
+            {
                 tracing::error!(path = ?replay_path, error = %e, "failed to save .w3g replay file");
             } else {
                 tracing::info!(path = ?replay_path, "successfully saved .w3g replay file off-thread");
@@ -78,9 +80,11 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
 impl GameState {
     pub fn handle_cmd(&mut self, cmd: GameCmd) {
         match cmd {
-            GameCmd::NewConn { conn_id, link, external_ip } => {
-                self.add_conn(conn_id, link, external_ip)
-            }
+            GameCmd::NewConn {
+                conn_id,
+                link,
+                external_ip,
+            } => self.add_conn(conn_id, link, external_ip),
             GameCmd::Conn(ev) => match ev.kind {
                 ConnEventKind::Frame(f) => self.on_frame(ev.conn_id, f),
                 ConnEventKind::Closed(reason) => {
@@ -162,10 +166,10 @@ impl GameState {
 #[cfg(test)]
 pub mod tests_support {
     use super::*;
-    use std::time::Duration;
+    use crate::state::MapInfo;
     use bytes::{BufMut, Bytes, BytesMut};
     use ghost_net::PlayerLink;
-    use crate::state::MapInfo;
+    use std::time::Duration;
 
     pub fn test_cfg() -> GameConfig {
         GameConfig {
@@ -214,7 +218,10 @@ pub mod tests_support {
             let conn_id = i as u64;
             let (tx, rx) = mpsc::channel(64);
             st.add_conn(conn_id, PlayerLink::for_test(tx), [1, 2, 3, 4]);
-            st.on_frame(conn_id, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes(&format!("P{i}")))));
+            st.on_frame(
+                conn_id,
+                AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes(&format!("P{i}")))),
+            );
             rxs.push(rx);
         }
         (st, rxs)
@@ -223,12 +230,12 @@ pub mod tests_support {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::tests_support::*;
-    use std::time::Duration;
+    use super::*;
     use bytes::Bytes;
     use ghost_net::PlayerLink;
     use ghost_protocol::w3gs::ids;
+    use std::time::Duration;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -237,7 +244,10 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(64);
         st.add_conn(1, PlayerLink::for_test(tx), [1, 2, 3, 4]);
 
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))),
+        );
 
         assert_eq!(st.players.len(), 1);
         let p = st.players.by_conn(1).expect("seated");
@@ -254,8 +264,14 @@ mod tests {
         st.add_conn(1, PlayerLink::for_test(tx1), [1, 1, 1, 1]);
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
 
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))));
-        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))),
+        );
+        st.on_frame(
+            2,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))),
+        );
 
         assert_eq!(st.players.len(), 1);
         assert!(drain_ids(&mut rx2).contains(&ids::REJECT_JOIN));
@@ -271,8 +287,14 @@ mod tests {
         st.add_conn(1, PlayerLink::for_test(tx1), [1, 1, 1, 1]);
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
 
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))));
-        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("B"))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))),
+        );
+        st.on_frame(
+            2,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("B"))),
+        );
 
         assert_eq!(st.players.len(), 1);
         assert!(drain_ids(&mut rx2).contains(&ids::REJECT_JOIN));
@@ -284,11 +306,23 @@ mod tests {
         let (tx2, mut rx2) = mpsc::channel(64);
         st.add_conn(1, PlayerLink::for_test(tx1), [1, 1, 1, 1]);
         st.add_conn(2, PlayerLink::for_test(tx2), [2, 2, 2, 2]);
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))));
-        st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("B"))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))),
+        );
+        st.on_frame(
+            2,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("B"))),
+        );
         let _ = drain_ids(&mut rx2);
 
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::LEAVE_GAME, Bytes::from_static(&[7, 0, 0, 0]))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(
+                ids::LEAVE_GAME,
+                Bytes::from_static(&[7, 0, 0, 0]),
+            )),
+        );
         st.reap_left_players();
 
         assert_eq!(st.players.len(), 1);
@@ -301,7 +335,10 @@ mod tests {
         let mut st = GameState::new(test_cfg());
         let (tx, rx) = mpsc::channel(64);
         st.add_conn(1, PlayerLink::for_test(tx), [1, 1, 1, 1]);
-        st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))));
+        st.on_frame(
+            1,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))),
+        );
         drop(rx); // the writer task is gone
 
         st.broadcast(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]));

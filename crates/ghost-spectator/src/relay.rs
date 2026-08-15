@@ -99,9 +99,8 @@ impl Relay {
     }
 
     pub fn broadcast(&mut self, bytes: &Bytes) {
-        self.viewers.retain(|(_, link)| {
-            link.try_send(bytes.clone()).is_ok()
-        });
+        self.viewers
+            .retain(|(_, link)| link.try_send(bytes.clone()).is_ok());
     }
 }
 
@@ -118,18 +117,18 @@ pub fn spawn_relay(cfg: RelayConfig) -> (RelayHandle, JoinHandle<()>) {
                 tracing::info!(%addr, "spectator relay listening for DotaTV viewers");
                 let mut conn_counter = 100_000u64;
                 let (conn_tx, mut conn_rx) = mpsc::channel(256);
-                tokio::spawn(async move {
-                    while let Some(_ev) = conn_rx.recv().await {}
-                });
+                tokio::spawn(async move { while let Some(_ev) = conn_rx.recv().await {} });
 
                 while let Ok((stream, peer)) = listener.accept().await {
                     conn_counter += 1;
                     tracing::info!(%peer, conn_id = conn_counter, "spectator viewer connected");
                     let link = ghost_net::spawn_conn(conn_counter, stream, conn_tx.clone(), 1024);
-                    let _ = tx_clone.send(RelayCmd::ViewerJoined {
-                        conn_id: conn_counter,
-                        link,
-                    }).await;
+                    let _ = tx_clone
+                        .send(RelayCmd::ViewerJoined {
+                            conn_id: conn_counter,
+                            link,
+                        })
+                        .await;
                 }
             } else {
                 tracing::warn!(%addr, "failed to bind spectator relay TCP port");
@@ -232,5 +231,4 @@ mod tests {
         assert!(relay.add_viewer(2, test_link()).is_ok());
         assert!(relay.add_viewer(3, test_link()).is_err());
     }
-
 }

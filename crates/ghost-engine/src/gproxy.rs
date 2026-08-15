@@ -19,7 +19,11 @@ pub struct GProxyBuffer {
 
 impl GProxyBuffer {
     pub fn new(capacity: usize) -> Self {
-        Self { capacity, first_packet_id: 0, packets: VecDeque::with_capacity(capacity) }
+        Self {
+            capacity,
+            first_packet_id: 0,
+            packets: VecDeque::with_capacity(capacity),
+        }
     }
 
     pub fn push(&mut self, packet: Bytes) {
@@ -70,7 +74,11 @@ impl GameState {
             return false;
         };
 
-        let received = p.gproxy_buffer.as_ref().map(|b| b.total_sent()).unwrap_or(0);
+        let received = p
+            .gproxy_buffer
+            .as_ref()
+            .map(|b| b.total_sent())
+            .unwrap_or(0);
         p.conn_id = conn_id;
         p.link = link;
         p.disconnected_since = None;
@@ -152,7 +160,11 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(64);
         let ok = st.handle_gps_reconnect(
             99,
-            ReconnectReq { pid: 1, reconnect_key: key, last_packet: 0 },
+            ReconnectReq {
+                pid: 1,
+                reconnect_key: key,
+                last_packet: 0,
+            },
             PlayerLink::for_test(tx),
         );
 
@@ -170,7 +182,11 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel(64);
         let ok = st.handle_gps_reconnect(
             99,
-            ReconnectReq { pid: 1, reconnect_key: 0xBAD, last_packet: 0 },
+            ReconnectReq {
+                pid: 1,
+                reconnect_key: 0xBAD,
+                last_packet: 0,
+            },
             PlayerLink::for_test(tx),
         );
         assert!(!ok);

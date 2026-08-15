@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use ghost_engine::tick::TickScheduler;
 use ghost_engine::{GameConfig, GameState, MapInfo, Player};
 use ghost_net::PlayerLink;

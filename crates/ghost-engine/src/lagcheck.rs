@@ -61,7 +61,10 @@ impl GameState {
                 && p.left.is_none()
                 && p.started_lagging.is_some_and(|t| t.elapsed() >= max_lag)
             {
-                p.left = Some(format!("was dropped after lagging for {}s", max_lag.as_secs()));
+                p.left = Some(format!(
+                    "was dropped after lagging for {}s",
+                    max_lag.as_secs()
+                ));
             }
         }
     }
