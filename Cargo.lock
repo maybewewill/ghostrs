@@ -541,6 +541,7 @@ dependencies = [
  "bytes",
  "ghost-net",
  "ghost-protocol",
+ "ghost-spectator",
  "rand",
  "thiserror",
  "tokio",
@@ -571,6 +572,20 @@ dependencies = [
  "sha1",
  "thiserror",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "ghost-spectator"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "flate2",
+ "ghost-net",
+ "ghost-protocol",
+ "thiserror",
+ "tokio",
  "tracing",
 ]
 

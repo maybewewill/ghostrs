@@ -86,6 +86,7 @@ pub struct GameState {
     pub lagging: bool,
     pub finished: bool,
     pub downloads: Vec<crate::mapxfer::Download>,
+    pub relay: Option<ghost_spectator::RelayHandle>,
 }
 
 impl GameState {
@@ -107,6 +108,7 @@ impl GameState {
             lagging: false,
             finished: false,
             downloads: Vec::new(),
+            relay: None,
             cfg,
         }
     }

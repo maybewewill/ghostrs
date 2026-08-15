@@ -121,7 +121,12 @@ impl GameState {
 
         // The main packet always goes out, even empty: it is the clock tick.
         match outgoing::incoming_action(&batch, send_interval) {
-            Ok(b) => self.broadcast(b),
+            Ok(b) => {
+                if let Some(r) = &self.relay {
+                    r.push(b.clone());
+                }
+                self.broadcast(b);
+            }
             Err(e) => tracing::warn!(error = %e, "failed to build action packet"),
         }
     }

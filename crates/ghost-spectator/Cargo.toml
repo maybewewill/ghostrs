@@ -1,5 +1,5 @@
 [package]
-name = "ghost-engine"
+name = "ghost-spectator"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -7,12 +7,12 @@ rust-version.workspace = true
 [dependencies]
 ghost-protocol = { path = "../ghost-protocol" }
 ghost-net = { path = "../ghost-net" }
-ghost-spectator = { path = "../ghost-spectator" }
 bytes.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-rand.workspace = true
+flate2.workspace = true
+crc32fast.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
