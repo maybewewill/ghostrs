@@ -144,6 +144,19 @@ impl PlayerTable {
         self.players.iter_mut()
     }
 
+    /// Every seated player except the virtual host: the set that can actually
+    /// vote, chat, or be counted toward "enough players to start".
+    pub fn iter_humans(&self) -> impl Iterator<Item = &Player> {
+        self.players.iter().filter(|p| !p.virtual_host)
+    }
+
+    /// Count of real (non-virtual-host) players. Use this anywhere GHost++
+    /// counts `GetNumPlayers()`/human headcount, since the virtual host is
+    /// seated in this table but must never be counted as a human.
+    pub fn human_count(&self) -> usize {
+        self.iter_humans().count()
+    }
+
     pub fn len(&self) -> usize {
         self.players.len()
     }
