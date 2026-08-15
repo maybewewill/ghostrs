@@ -87,6 +87,8 @@ pub struct GameState {
     pub finished: bool,
     pub downloads: Vec<crate::mapxfer::Download>,
     pub relay: Option<ghost_spectator::RelayHandle>,
+    pub jitter_histogram: [u64; 5],
+    pub last_jitter_report: Instant,
 }
 
 impl GameState {
@@ -109,6 +111,8 @@ impl GameState {
             finished: false,
             downloads: Vec::new(),
             relay: None,
+            jitter_histogram: [0; 5],
+            last_jitter_report: Instant::now(),
             cfg,
         }
     }
@@ -201,6 +205,32 @@ impl GameState {
         ) {
             Ok(b) => self.broadcast(b),
             Err(e) => tracing::warn!(error = %e, "failed to build slot info"),
+        }
+    }
+    pub fn record_jitter(&mut self, jitter: Duration) {
+        let ms = jitter.as_millis();
+        if ms < 1 {
+            self.jitter_histogram[0] += 1;
+        } else if ms < 2 {
+            self.jitter_histogram[1] += 1;
+        } else if ms < 5 {
+            self.jitter_histogram[2] += 1;
+        } else if ms < 20 {
+            self.jitter_histogram[3] += 1;
+        } else {
+            self.jitter_histogram[4] += 1;
+        }
+        if self.last_jitter_report.elapsed() >= Duration::from_secs(60) {
+            tracing::info!(
+                game = %self.cfg.name,
+                lt_1ms = self.jitter_histogram[0],
+                lt_2ms = self.jitter_histogram[1],
+                lt_5ms = self.jitter_histogram[2],
+                lt_20ms = self.jitter_histogram[3],
+                gte_20ms = self.jitter_histogram[4],
+                "tick jitter summary"
+            );
+            self.last_jitter_report = Instant::now();
         }
     }
 }

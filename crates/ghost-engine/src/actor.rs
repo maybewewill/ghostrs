@@ -41,7 +41,11 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
             }
 
             () = &mut sleep => {
-                let skipped = state.tick.advance(Instant::now());
+                let now = Instant::now();
+                let deadline = state.tick.deadline();
+                let jitter = now.saturating_duration_since(deadline);
+                state.record_jitter(jitter);
+                let skipped = state.tick.advance(now);
                 if skipped > 0 {
                     tracing::warn!(game = %state.cfg.name, skipped, "tick deadline missed");
                 }
