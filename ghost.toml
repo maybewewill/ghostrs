@@ -101,4 +101,4 @@ history_max_mb = 64
 
 [database]
 # SQLite database file path
-path = "ghost.db"
+path = "data/ghost.db"
