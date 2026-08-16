@@ -21,7 +21,10 @@ if ! docker compose version &> /dev/null; then
 fi
 
 # 3. Ensure directories exist
-mkdir -p maps war3 replays
+mkdir -p maps war3 replays data
+if [ -d "ghost.db" ]; then
+    rm -rf ghost.db
+fi
 
 # 4. Pull and Run Ghost-RS
 echo "[+] Pulling and starting Ghost-RS in Docker..."

@@ -14,7 +14,7 @@ services:
       - ./maps:/app/maps:ro
       - ./war3:/app/war3:ro
       - ./replays:/app/replays:rw
-      - ./ghost.db:/app/ghost.db:rw
+      - ./data:/app/data:rw
     logging:
       driver: json-file
       options:
