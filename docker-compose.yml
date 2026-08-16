@@ -3,6 +3,7 @@ services:
     image: ghcr.io/maybewewill/ghostrs:latest
     container_name: ghostrs
     restart: unless-stopped
+    entrypoint: ["/app/ghostrs"]
     # host networking ensures direct high-performance socket access without Docker bridge/NAT overhead
     network_mode: host
     environment:
