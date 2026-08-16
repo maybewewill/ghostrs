@@ -318,6 +318,28 @@ pub fn warden(response: &[u8]) -> Result<Bytes, ProtoError> {
     Frame::new(ids::SID_WARDEN, Bytes::copy_from_slice(response)).encode_with(BNCS_HEADER)
 }
 
+pub fn iccup_antihack(payload: &[u8]) -> Result<Bytes, ProtoError> {
+    Frame::new(ids::SID_ICCUP_ANTIHACK, Bytes::copy_from_slice(payload)).encode_with(BNCS_HEADER)
+}
+
+pub fn iccup_challenge_reply(challenge: &[u8]) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(24);
+    if challenge.len() >= 8 {
+        p.put_slice(&[0x00, 0x69, 0x59, 0x2f]);
+        p.put_slice(&challenge[0..4]);
+        p.put_slice(&[0x7a, 0xc1, 0x15, 0x5a]);
+        p.put_slice(&challenge[4..8]);
+        p.put_slice(&[0x27, 0x00, 0x00, 0x0a, 0x0a, 0x00, 0x00, 0xae]);
+    } else {
+        p.put_slice(&[
+            0x00, 0x69, 0x59, 0x2f, 0xdd, 0xe9, 0x08, 0x6b,
+            0x7a, 0xc1, 0x15, 0x5a, 0xfb, 0x93, 0x1d, 0x8d,
+            0x27, 0x00, 0x00, 0x0a, 0x0a, 0x00, 0x00, 0xae,
+        ]);
+    }
+    Frame::new(ids::SID_ICCUP_ANTIHACK, p.freeze()).encode_with(BNCS_HEADER)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
