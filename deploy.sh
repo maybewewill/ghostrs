@@ -23,10 +23,11 @@ fi
 # 3. Ensure directories exist
 mkdir -p maps war3 replays
 
-# 4. Build and Run Ghost-RS
-echo "[+] Building and starting Ghost-RS in Docker..."
+# 4. Pull and Run Ghost-RS
+echo "[+] Pulling and starting Ghost-RS in Docker..."
 docker compose down || true
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 
 echo "========================================="
 echo "   Ghost-RS is now running in background "
