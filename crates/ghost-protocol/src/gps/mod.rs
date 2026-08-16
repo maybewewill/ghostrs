@@ -42,6 +42,15 @@ pub fn ack(last_packet: u32) -> Bytes {
         .expect("4-byte gps ack always fits")
 }
 
+/// Acknowledges a reconnect request and indicates the bot's total packets received.
+pub fn reconnect_ok(last_packet: u32) -> Bytes {
+    let mut p = BytesMut::with_capacity(4);
+    p.put_u32_le(last_packet);
+    Frame::new(ids::RECONNECT, p.freeze())
+        .encode_with(GPS_HEADER)
+        .expect("4-byte gps reconnect always fits")
+}
+
 pub fn reject(reason: u32) -> Bytes {
     let mut p = BytesMut::with_capacity(4);
     p.put_u32_le(reason);

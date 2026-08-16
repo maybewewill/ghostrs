@@ -146,6 +146,21 @@ pub fn decode_map_part_ok(payload: &Bytes) -> Result<u32, ProtoError> {
     b.try_get_u32_le()
 }
 
+pub fn decode_map_part_not_ok(payload: &Bytes) -> Result<u32, ProtoError> {
+    if payload.len() < 6 {
+        return Err(ProtoError::Truncated {
+            need: 6,
+            have: payload.len(),
+        });
+    }
+    let offset_bytes = if payload.len() >= 10 {
+        &payload[6..10]
+    } else {
+        &payload[2..6]
+    };
+    Ok(u32::from_le_bytes(offset_bytes.try_into().unwrap()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,5 +261,20 @@ mod tests {
         let m = MapSizeReport::decode(&b.freeze()).unwrap();
         assert_eq!(m.size_flag, 1);
         assert_eq!(m.map_size, 1_234_567);
+    }
+
+    #[test]
+    fn test_decode_map_part_not_ok() {
+        // GHost++ golden fixture from gameprotocol.h:99 (f7 45 0a 00 01 02 01 00 00 00)
+        let payload_6b = Bytes::from_static(&[0x01, 0x02, 0x01, 0x00, 0x00, 0x00]);
+        assert_eq!(decode_map_part_not_ok(&payload_6b).unwrap(), 1);
+
+        // 10-byte payload variant (with 4-byte unknown field before offset)
+        let payload_10b = Bytes::from_static(&[0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00]);
+        assert_eq!(decode_map_part_not_ok(&payload_10b).unwrap(), 0x1234);
+
+        // Short payload
+        let short = Bytes::from_static(&[0x01, 0x02]);
+        assert!(decode_map_part_not_ok(&short).is_err());
     }
 }

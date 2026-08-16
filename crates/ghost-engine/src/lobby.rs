@@ -46,7 +46,38 @@ impl GameState {
             let _ = link.try_send(outgoing::reject_join(REJECT_FULL));
             return;
         }
-        let (Some(sid), Some(pid)) = (self.slots.first_open(), self.players.next_free_pid()) else {
+
+        let reserved_sid = self
+            .holds
+            .iter()
+            .find(|(_, name)| name.eq_ignore_ascii_case(&req.name))
+            .map(|(&sid, _)| sid);
+
+        let target_sid = if let Some(rsid) = reserved_sid {
+            if self.slots.is_open(rsid) {
+                Some(rsid)
+            } else {
+                self.slots
+                    .as_wire()
+                    .iter()
+                    .enumerate()
+                    .find(|(s_idx, s)| {
+                        s.slot_status == 0 && !self.holds.contains_key(&(*s_idx as u8))
+                    })
+                    .map(|(s_idx, _)| s_idx as u8)
+            }
+        } else {
+            self.slots
+                .as_wire()
+                .iter()
+                .enumerate()
+                .find(|(s_idx, s)| {
+                    s.slot_status == 0 && !self.holds.contains_key(&(*s_idx as u8))
+                })
+                .map(|(s_idx, _)| s_idx as u8)
+        };
+
+        let (Some(sid), Some(pid)) = (target_sid, self.players.next_free_pid()) else {
             let _ = link.try_send(outgoing::reject_join(REJECT_FULL));
             return;
         };
@@ -57,6 +88,16 @@ impl GameState {
         player.external_ip = external_ip;
         player.internal_ip = req.internal_ip;
         player.reconnect_key = rand::random();
+        if reserved_sid.is_some() {
+            player.reserved = true;
+        }
+        if self.cfg.spoof_checks == 0
+            || external_ip == [127, 0, 0, 1]
+            || external_ip[0] == 192
+            || external_ip[0] == 10
+        {
+            player.spoofed = true;
+        }
 
         // 1. Tell the joiner who they are and what the lobby looks like.
         match outgoing::slot_info_join(
@@ -104,10 +145,6 @@ impl GameState {
             let _ = player.link.try_send(b);
         }
 
-        let _ = player
-            .link
-            .try_send(ghost_protocol::gps::init(1, pid, player.reconnect_key, 0));
-
         self.players.insert(player);
 
         // 4. Tell everyone else about the joiner.
@@ -145,6 +182,11 @@ impl GameState {
     pub fn handle_leave(&mut self, conn_id: u64, reason_code: u32) {
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.left = Some(format!("left the game voluntarily (code {reason_code})"));
+            p.left_code = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
+            } else {
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST
+            };
         } else {
             self.pending.retain(|(id, _, _)| *id != conn_id);
         }
@@ -159,12 +201,18 @@ impl GameState {
                 }
             } else if p.left.is_none() {
                 p.left = Some(reason);
+                p.left_code = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
+                    ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
+                } else {
+                    ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT
+                };
             }
         } else {
             self.pending.retain(|(id, _, _)| *id != conn_id);
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {

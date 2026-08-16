@@ -26,6 +26,7 @@ pub fn spawn_game(cfg: GameConfig) -> (GameHandle, JoinHandle<()>) {
 async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
     let sleep = tokio::time::sleep_until(state.tick.deadline().into());
     tokio::pin!(sleep);
+    let mut last_lobby_status: Option<(u32, u32, u32)> = None;
 
     loop {
         tokio::select! {
@@ -55,10 +56,29 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
         }
 
         state.reap_left_players();
+
+        if matches!(state.phase, GamePhase::Lobby) {
+            let open = state.slots.open_slots() as u32;
+            let total = state.slots.len() as u32;
+            let human = state.players.human_count() as u32;
+            if last_lobby_status != Some((open, total, human)) {
+                last_lobby_status = Some((open, total, human));
+                if let Some(tx) = &state.cfg.event_tx {
+                    let _ = tx.try_send(crate::handle::GameEvent::LobbyStatus {
+                        host_counter: state.cfg.host_counter,
+                        slots_open: open,
+                        slots_total: total,
+                        human_players: human,
+                    });
+                }
+            }
+        }
+
         if state.finished {
             break;
         }
     }
+
 
     if let Some(rep) = state.replay.take() {
         let replay_path = state.cfg.replay_path.clone();
@@ -85,6 +105,25 @@ impl GameState {
                 link,
                 external_ip,
             } => self.add_conn(conn_id, link, external_ip),
+            GameCmd::AdoptReconnect {
+                conn_id,
+                pid,
+                reconnect_key,
+                last_packet,
+                link,
+                response,
+            } => {
+                let ok = self.handle_gps_reconnect(
+                    conn_id,
+                    ghost_protocol::gps::ReconnectReq {
+                        pid,
+                        reconnect_key,
+                        last_packet,
+                    },
+                    link,
+                );
+                let _ = response.send(ok);
+            }
             GameCmd::Conn(ev) => match ev.kind {
                 ConnEventKind::Frame(f) => self.on_frame(ev.conn_id, f),
                 ConnEventKind::Closed(reason) => {
@@ -107,10 +146,14 @@ impl GameState {
         match frame {
             AnyFrame::W3gs(f) => self.on_w3gs_frame(conn_id, f),
             AnyFrame::Gps(f) => self.on_gps_frame(conn_id, f),
+            AnyFrame::DotaTv(_) => {}
         }
     }
 
     pub fn on_w3gs_frame(&mut self, conn_id: u64, frame: Frame) {
+        if frame.id != ids::OUTGOING_KEEPALIVE {
+            tracing::info!(conn_id, id = format!("0x{:02X}", frame.id), len = frame.payload.len(), phase = ?self.phase, "w3gs frame");
+        }
         match frame.id {
             ids::REQ_JOIN => self.handle_req_join(conn_id, &frame.payload),
             ids::LEAVE_GAME => {
@@ -124,13 +167,37 @@ impl GameState {
             ids::PONG_TO_HOST => self.handle_pong(conn_id, &frame.payload),
             ids::MAP_SIZE => self.handle_map_size(conn_id, &frame.payload),
             ids::MAP_PART_OK => self.handle_map_part_ok(conn_id, &frame.payload),
+            ids::MAP_PART_NOT_OK => self.handle_map_part_not_ok(conn_id, &frame.payload),
             ids::DROP_REQ => self.handle_drop_request(conn_id),
-            other => tracing::trace!(conn_id, id = format!("0x{other:02X}"), "ignoring packet"),
+            other => tracing::warn!(conn_id, id = format!("0x{other:02X}"), len = frame.payload.len(), "unknown w3gs packet id"),
         }
     }
 
     pub fn on_gps_frame(&mut self, conn_id: u64, frame: Frame) {
         match frame.id {
+            ghost_protocol::gps::ids::INIT => {
+                let empty_actions = self.gproxy_empty_actions();
+                let port = if self.cfg.gproxy_reconnect_port != 0 {
+                    self.cfg.gproxy_reconnect_port
+                } else if self.cfg.host_port != 0 {
+                    self.cfg.host_port
+                } else {
+                    6114
+                };
+                if let Some(p) = self.players.by_conn_mut(conn_id) {
+                    p.gproxy = true;
+                    if p.gproxy_buffer.is_none() {
+                        p.gproxy_buffer = Some(crate::gproxy::GProxyBuffer::new(500));
+                    }
+                    let _ = p.link.try_send(ghost_protocol::gps::init(
+                        port as u32,
+                        p.pid,
+                        p.reconnect_key,
+                        empty_actions,
+                    ));
+                    tracing::info!(game = %self.cfg.name, pid = p.pid, name = %p.name, "player is using GProxy++");
+                }
+            }
             ghost_protocol::gps::ids::ACK => {
                 if let Some(p) = self.players.by_conn_mut(conn_id) {
                     p.gproxy = true;
@@ -163,7 +230,7 @@ impl GameState {
     }
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 pub mod tests_support {
     use super::*;
     use crate::state::MapInfo;
@@ -185,8 +252,29 @@ pub mod tests_support {
             custom_slots: None,
             replay_path: std::path::PathBuf::from("replays/test.w3g"),
             relay: None,
+            max_downloaders: 3,
+            max_download_speed: 100,
+            allow_downloads: 1,
+            autokick_ping: 400,
+            lc_pings: true,
+            spoof_checks: 0,
+            require_spoof_checks: false,
+            host_port: 6112,
+            gproxy_reconnect_port: 6114,
+            store: None,
+            stat_string: Vec::new(),
+            event_tx: None,
+            lobby_time_limit: 10,
+            load_in_game: false,
+            auto_save: false,
+            creator_name: String::new(),
+            creator_server: String::new(),
+            min_score: 0.0,
+            max_score: 0.0,
+            matchmaking: false,
         }
     }
+
 
     pub fn reqjoin_bytes(name: &str) -> Bytes {
         let mut b = BytesMut::new();
@@ -345,6 +433,68 @@ mod tests {
         st.reap_left_players();
 
         assert_eq!(st.players.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn backpressure_drops_player_only_after_max_consecutive_drops() {
+        let (mut st, _rxs) = tests_support::seated_game(1);
+        st.begin_playing();
+
+        let (tx, _rx) = mpsc::channel(1);
+        tx.try_send(Bytes::from_static(&[1, 2, 3])).unwrap();
+        st.players.by_pid_mut(1).unwrap().link = PlayerLink::for_test(tx);
+
+        let packet = Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]);
+
+        for _ in 0..99 {
+            st.send_to(1, packet.clone());
+            assert!(
+                st.players.by_pid(1).unwrap().left.is_none(),
+                "player must not be dropped before reaching MAX_CONSECUTIVE_DROPS"
+            );
+        }
+        assert_eq!(
+            st.players.by_pid(1).unwrap().consecutive_send_failures,
+            99
+        );
+
+        st.send_to(1, packet);
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_some(),
+            "player must be marked left on the 100th consecutive backpressure failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_send_resets_consecutive_send_failures() {
+        let (mut st, mut rx) = {
+            let (mut st, _rxs) = tests_support::seated_game(1);
+            st.begin_playing();
+            let (tx, rx) = mpsc::channel(1);
+            st.players.by_pid_mut(1).unwrap().link = PlayerLink::for_test(tx);
+            (st, rx)
+        };
+
+        let packet = Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]);
+
+        st.send_to(1, packet.clone());
+
+        for _ in 0..50 {
+            st.send_to(1, packet.clone());
+        }
+        assert_eq!(
+            st.players.by_pid(1).unwrap().consecutive_send_failures,
+            50
+        );
+
+        let _ = rx.try_recv();
+
+        st.send_to(1, packet.clone());
+        assert_eq!(
+            st.players.by_pid(1).unwrap().consecutive_send_failures,
+            0
+        );
+        assert!(st.players.by_pid(1).unwrap().left.is_none());
     }
 
     #[tokio::test]

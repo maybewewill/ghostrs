@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use ghost_protocol::ProtoError;
-use ghost_protocol::frame::Frame;
+use ghost_protocol::frame::{Frame, HeaderCodec};
 use ghost_protocol::gps::{GPS_HEADER, GpsCodec};
 use ghost_protocol::w3gs::{W3GS_HEADER, W3gsCodec};
 use thiserror::Error;
@@ -14,6 +14,45 @@ use tokio_util::sync::CancellationToken;
 pub enum AnyFrame {
     W3gs(Frame),
     Gps(Frame),
+    DotaTv(Frame),
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DotaTvConnCodec {
+    codec: HeaderCodec<0xFD>,
+}
+
+impl Decoder for DotaTvConnCodec {
+    type Item = AnyFrame;
+    type Error = ProtoError;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
+        // Resync past any byte that is not DotaTV (0xFD).
+        while !src.is_empty() && src[0] != 0xFD {
+            match src.iter().position(|&b| b == 0xFD) {
+                Some(pos) => src.advance(pos),
+                None => {
+                    src.clear();
+                    return Ok(None);
+                }
+            }
+        }
+        if src.is_empty() {
+            return Ok(None);
+        }
+
+        self.codec.decode(src).map(|opt| opt.map(AnyFrame::DotaTv))
+    }
+}
+
+impl Encoder<Bytes> for DotaTvConnCodec {
+    type Error = ProtoError;
+
+    fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), ProtoError> {
+        dst.reserve(item.len());
+        dst.put_slice(&item);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -33,9 +72,13 @@ impl Decoder for DualCodec {
                 .iter()
                 .position(|&b| b == W3GS_HEADER || b == GPS_HEADER)
             {
-                Some(pos) => src.advance(pos),
+                Some(pos) => {
+                    let skipped = src.split_to(pos);
+                    tracing::warn!(skipped_len = pos, skipped = format!("{skipped:02X?}"), "DualCodec skipped non-header bytes");
+                }
                 None => {
-                    src.clear();
+                    let skipped = src.split_to(src.len());
+                    tracing::warn!(skipped_len = skipped.len(), skipped = format!("{skipped:02X?}"), "DualCodec cleared non-header buffer");
                     return Ok(None);
                 }
             }
@@ -153,7 +196,10 @@ pub fn spawn_conn(
                         return;
                     }
                 }
-                Some(Err(ProtoError::BadValue(_))) => continue,
+                Some(Err(ProtoError::BadValue(e))) => {
+                    tracing::info!(conn_id, error = %e, "codec dropped a frame");
+                    continue;
+                }
                 Some(Err(e)) => break CloseReason::Protocol(e),
                 None => break CloseReason::PeerClosed,
             }
@@ -170,6 +216,84 @@ pub fn spawn_conn(
     // Writer: engine -> socket
     tokio::spawn(async move {
         let mut framed = FramedWrite::new(write_half, DualCodec::default());
+        loop {
+            tokio::select! {
+                _ = cancel_writer.cancelled() => break,
+                maybe_bytes = out_rx.recv() => {
+                    match maybe_bytes {
+                        Some(bytes) => {
+                            if let Err(e) = framed.send(bytes).await {
+                                tracing::debug!(conn_id, error = %e, "write failed, closing connection");
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
+        let _ = framed.close().await;
+    });
+
+    PlayerLink { tx: out_tx }
+}
+
+/// Spawns the reader and writer tasks for a DotaTV spectator connection.
+pub fn spawn_dtv_conn(
+    conn_id: u64,
+    stream: TcpStream,
+    events: mpsc::Sender<ConnEvent>,
+    write_capacity: usize,
+) -> PlayerLink {
+    if let Err(e) = stream.set_nodelay(true) {
+        tracing::warn!(conn_id, error = %e, "failed to set TCP_NODELAY");
+    }
+
+    let (read_half, write_half) = stream.into_split();
+    let (out_tx, mut out_rx) = mpsc::channel::<Bytes>(write_capacity);
+
+    let cancel = CancellationToken::new();
+    let cancel_writer = cancel.clone();
+
+    // Reader: socket -> relay
+    let reader_events = events.clone();
+    tokio::spawn(async move {
+        let mut framed = FramedRead::new(read_half, DotaTvConnCodec::default());
+        let reason = loop {
+            match framed.next().await {
+                Some(Ok(frame)) => {
+                    if reader_events
+                        .send(ConnEvent {
+                            conn_id,
+                            kind: ConnEventKind::Frame(frame),
+                        })
+                        .await
+                        .is_err()
+                    {
+                        cancel.cancel();
+                        return;
+                    }
+                }
+                Some(Err(ProtoError::BadValue(e))) => {
+                    tracing::info!(conn_id, error = %e, "codec dropped a frame");
+                    continue;
+                }
+                Some(Err(e)) => break CloseReason::Protocol(e),
+                None => break CloseReason::PeerClosed,
+            }
+        };
+        cancel.cancel();
+        let _ = reader_events
+            .send(ConnEvent {
+                conn_id,
+                kind: ConnEventKind::Closed(reason),
+            })
+            .await;
+    });
+
+    // Writer: relay -> socket
+    tokio::spawn(async move {
+        let mut framed = FramedWrite::new(write_half, DotaTvConnCodec::default());
         loop {
             tokio::select! {
                 _ = cancel_writer.cancelled() => break,

@@ -20,8 +20,29 @@ fn test_game_cfg() -> GameConfig {
         custom_slots: None,
         replay_path: std::path::PathBuf::from("replays/e2e.w3g"),
         relay: None,
+        max_downloaders: 3,
+        max_download_speed: 100,
+        allow_downloads: 1,
+        autokick_ping: 400,
+        lc_pings: true,
+        spoof_checks: 0,
+        require_spoof_checks: false,
+        host_port: 6112,
+        gproxy_reconnect_port: 6114,
+        store: None,
+        stat_string: Vec::new(),
+        event_tx: None,
+        lobby_time_limit: 10,
+        load_in_game: false,
+        auto_save: false,
+        creator_name: String::new(),
+        creator_server: String::new(),
+        min_score: 0.0,
+        max_score: 0.0,
+        matchmaking: false,
     }
 }
+
 
 fn make_reqjoin(name: &str) -> Bytes {
     let mut b = BytesMut::new();

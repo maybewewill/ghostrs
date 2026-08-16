@@ -35,6 +35,7 @@ pub fn is_known_id(id: u8) -> bool {
             | ids::SEARCH_GAME
             | ids::MAP_SIZE
             | ids::MAP_PART_OK
+            | ids::MAP_PART_NOT_OK
             | ids::PONG_TO_HOST
     )
 }

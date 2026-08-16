@@ -15,6 +15,8 @@ use crate::bncsutil::NlsSession;
 #[derive(Debug, Clone)]
 pub struct BnetConfig {
     pub server: String,
+    pub server_alias: String,
+    pub pvpgn_realm_name: String,
     pub port: u16,
     pub host_port: u16,
     pub username: String,
@@ -37,6 +39,22 @@ pub enum BnetEvent {
     LoggedIn,
     ChatMessage { user: String, text: String },
     Whisper { user: String, text: String },
+    FriendsList(Vec<ghost_protocol::bncs::incoming::FriendListEntry>),
+    ClanList(Vec<ghost_protocol::bncs::incoming::ClanMemberEntry>),
+    ClanInviteReceived {
+        clan_name: String,
+        inviter: String,
+        creation: bool,
+    },
+    ClanRankChanged {
+        status: u8,
+    },
+    ClanMemberRemoved {
+        status: u8,
+    },
+    ClanMotdSet {
+        status: u8,
+    },
     Disconnected(String),
 }
 
@@ -47,6 +65,8 @@ pub enum BnetCmd {
         map: MapAdvert,
         host_counter: u32,
         visibility: ghost_protocol::GameVisibility,
+        host_name: Option<String>,
+        port: Option<u16>,
     },
     RefreshGame {
         players: u32,
@@ -54,6 +74,13 @@ pub enum BnetCmd {
     },
     UnhostGame,
     SendChat(String),
+    GetFriendsList,
+    GetClanList,
+    ClanInvitation(String),
+    ClanRemoveMember(String),
+    ClanChangeRank { account: String, rank: u8 },
+    ClanSetMotd(String),
+    ClanAcceptInvite(bool),
     Shutdown,
 }
 
@@ -99,6 +126,8 @@ struct ActiveAdvert {
     host_counter: u32,
     stat_string: Vec<u8>,
     visibility: ghost_protocol::GameVisibility,
+    host_name: String,
+    port: Option<u16>,
 }
 
 /// `bnet.cpp:2284` ORs MAPGAMETYPE_PRIVATEGAME into the game type for a private
@@ -167,10 +196,16 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
         }
 
         let mut stage = Stage::AwaitAuthInfo;
-        let mut active_advert: Option<ActiveAdvert> = None;
+        let mut active_adverts: Vec<ActiveAdvert> = Vec::new();
         let mut cur_nls: Option<NlsSession> = None;
         // The advert is re-sent every 3 s, so only log the transition, not every ack.
         let mut advert_listed = false;
+
+        let mut _friends: Vec<incoming::FriendListEntry> = Vec::new();
+        let mut _clan_members: Vec<incoming::ClanMemberEntry> = Vec::new();
+        let mut last_clan_invite_tag = [0u8; 4];
+        let mut last_clan_invite_name = String::new();
+        let mut last_invite_creation = false;
 
         let mut null_timer = tokio::time::interval(Duration::from_secs(30));
         let mut adv_timer = tokio::time::interval(Duration::from_secs(3));
@@ -189,37 +224,102 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                                 let _ = framed_write.send(p).await;
                             }
                         }
-                        Some(BnetCmd::CreateGame { name, map, host_counter, visibility }) => {
-                            let stat_string = encode_game_statstring(&map, &name, &cfg.username);
-                            if stage == Stage::InChat
-                                && let Ok(p) = outgoing::startadvex3(
+                        Some(BnetCmd::GetFriendsList) => {
+                            if let Ok(p) = outgoing::friendslist() {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
+                        Some(BnetCmd::GetClanList) => {
+                            if let Ok(p) = outgoing::clanmemberlist() {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
+                        Some(BnetCmd::ClanInvitation(name)) => {
+                            if let Ok(p) = outgoing::claninvitation(&name) {
+                                let _ = framed_write.send(p).await;
+                            }
+                            if let Ok(p) = outgoing::clanmemberlist() {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
+                        Some(BnetCmd::ClanRemoveMember(name)) => {
+                            if let Ok(p) = outgoing::clanremovemember(&name) {
+                                let _ = framed_write.send(p).await;
+                            }
+                            if let Ok(p) = outgoing::clanmemberlist() {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
+                        Some(BnetCmd::ClanChangeRank { account, rank }) => {
+                            if let Ok(p) = outgoing::clanchangerank(&account, rank) {
+                                let _ = framed_write.send(p).await;
+                            }
+                            if let Ok(p) = outgoing::clanmemberlist() {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
+                        Some(BnetCmd::ClanSetMotd(motd)) => {
+                            if let Ok(p) = outgoing::clansetmotd(&motd) {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
+                        Some(BnetCmd::ClanAcceptInvite(accept)) => {
+                            if last_invite_creation {
+                                if let Ok(p) = outgoing::clancreationinvitation(&last_clan_invite_tag, &last_clan_invite_name, accept) {
+                                    let _ = framed_write.send(p).await;
+                                }
+                            } else {
+                                if let Ok(p) = outgoing::claninvitationresponse(&last_clan_invite_tag, &last_clan_invite_name, accept) {
+                                    let _ = framed_write.send(p).await;
+                                }
+                            }
+                        }
+                        Some(BnetCmd::CreateGame { name, map, host_counter, visibility, host_name, port }) => {
+                            let host_user = host_name.unwrap_or_else(|| cfg.username.clone());
+                            let stat_string = encode_game_statstring(&map, &name, &host_user);
+                            if stage == Stage::InChat {
+                                if let Some(p) = port {
+                                    let _ = framed_write.send(outgoing::netgameport(p)).await;
+                                }
+                                match outgoing::startadvex3(
                                     visibility,
                                     advert_game_type(&map, visibility),
                                     &name,
-                                    &cfg.username,
+                                    &host_user,
                                     0,
                                     &stat_string,
                                     host_counter,
-                                )
-                            {
-                                tracing::info!("--> [SEND] SID_STARTADVEX3 (0x1C) [game=\"{}\", host_counter={}, visibility={:?}]", name, host_counter, visibility);
-                                let _ = framed_write.send(p).await;
+                                ) {
+                                    Ok(p) => {
+                                        tracing::info!("--> [SEND] SID_STARTADVEX3 (0x1C) [game=\"{}\", host_counter={}, visibility={:?}, port={:?}]", name, host_counter, visibility, port);
+                                        let _ = framed_write.send(p).await;
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, game = %name, "failed to build startadvex3 packet for Battle.net advert");
+                                    }
+                                }
                             }
-                            active_advert = Some(ActiveAdvert { name, map, host_counter, stat_string, visibility });
+                            active_adverts.retain(|a| a.name != name);
+                            active_adverts.push(ActiveAdvert { name, map, host_counter, stat_string, visibility, host_name: host_user, port });
                         }
                         Some(BnetCmd::RefreshGame { players: _, slots: _ }) => {
-                            if let (Stage::InChat, Some(adv)) = (stage, &active_advert)
-                                && let Ok(p) = outgoing::startadvex3(
-                                    adv.visibility,
-                                    advert_game_type(&adv.map, adv.visibility),
-                                    &adv.name,
-                                    &cfg.username,
-                                    0,
-                                    &adv.stat_string,
-                                    adv.host_counter,
-                                )
-                            {
-                                let _ = framed_write.send(p).await;
+                            if stage == Stage::InChat {
+                                for adv in &active_adverts {
+                                    if let Some(p) = adv.port {
+                                        let _ = framed_write.send(outgoing::netgameport(p)).await;
+                                    }
+                                    if let Ok(p) = outgoing::startadvex3(
+                                        adv.visibility,
+                                        advert_game_type(&adv.map, adv.visibility),
+                                        &adv.name,
+                                        &adv.host_name,
+                                        0,
+                                        &adv.stat_string,
+                                        adv.host_counter,
+                                    ) {
+                                        let _ = framed_write.send(p).await;
+                                    }
+                                }
                             }
                         }
                         Some(BnetCmd::UnhostGame) => {
@@ -227,7 +327,7 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                                 tracing::info!("--> [SEND] SID_STOPADV (0x02)");
                                 let _ = framed_write.send(outgoing::stopadv()).await;
                             }
-                            active_advert = None;
+                            active_adverts.clear();
                         }
                     }
                 }
@@ -239,26 +339,33 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                 }
 
                 _ = adv_timer.tick() => {
-                    if let (Stage::InChat, Some(adv)) = (stage, &active_advert)
-                        && let Ok(p) = outgoing::startadvex3(
-                            adv.visibility,
-                            advert_game_type(&adv.map, adv.visibility),
-                            &adv.name,
-                            &cfg.username,
-                            0,
-                            &adv.stat_string,
-                            adv.host_counter,
-                        )
-                    {
-                        let _ = framed_write.send(p).await;
+                    if stage == Stage::InChat {
+                        for adv in &active_adverts {
+                            if let Some(p) = adv.port {
+                                let _ = framed_write.send(outgoing::netgameport(p)).await;
+                            }
+                            if let Ok(p) = outgoing::startadvex3(
+                                adv.visibility,
+                                advert_game_type(&adv.map, adv.visibility),
+                                &adv.name,
+                                &adv.host_name,
+                                0,
+                                &adv.stat_string,
+                                adv.host_counter,
+                            ) {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
                     }
                 }
 
                 _ = probe_timer.tick() => {
-                    if let (Stage::InChat, Some(adv)) = (stage, &active_advert)
-                        && let Ok(p) = outgoing::getadvlistex(&adv.name)
-                    {
-                        let _ = framed_write.send(p).await;
+                    if stage == Stage::InChat {
+                        for adv in &active_adverts {
+                            if let Ok(p) = outgoing::getadvlistex(&adv.name) {
+                                let _ = framed_write.send(p).await;
+                            }
+                        }
                     }
                 }
 
@@ -512,6 +619,23 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                                 let _ = framed_write.send(join_pkt).await;
                             }
                             stage = Stage::InChat;
+                            for adv in &active_adverts {
+                                if let Some(p) = adv.port {
+                                    let _ = framed_write.send(outgoing::netgameport(p)).await;
+                                }
+                                if let Ok(p) = outgoing::startadvex3(
+                                    adv.visibility,
+                                    advert_game_type(&adv.map, adv.visibility),
+                                    &adv.name,
+                                    &adv.host_name,
+                                    0,
+                                    &adv.stat_string,
+                                    adv.host_counter,
+                                ) {
+                                    tracing::info!("--> [SEND] SID_STARTADVEX3 (0x1C) [game=\"{}\", host_counter={}, visibility={:?}, port={:?}]", adv.name, adv.host_counter, adv.visibility, adv.port);
+                                    let _ = framed_write.send(p).await;
+                                }
+                            }
                             let _ = events.send(BnetEvent::LoggedIn).await;
                             tracing::info!(user = %cfg.username, "successfully logged into battle.net as userbot");
                         }
@@ -584,8 +708,8 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                             if status == 0 {
                                 if !advert_listed {
                                     advert_listed = true;
-                                    let name = active_advert.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-                                    tracing::info!(game = %name, "<-- [RECV] SID_STARTADVEX3 (0x1C) [status=0] game is listed on battle.net");
+                                    let names: Vec<String> = active_adverts.iter().map(|a| a.name.clone()).collect();
+                                    tracing::info!(games = ?names, "<-- [RECV] SID_STARTADVEX3 (0x1C) [status=0] game(s) listed on battle.net");
                                 }
                             } else {
                                 advert_listed = false;
@@ -610,9 +734,9 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                                     );
                                 }
                                 Ok(None) => {
-                                    let name = active_advert.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                                    let names: Vec<String> = active_adverts.iter().map(|a| a.name.clone()).collect();
                                     tracing::warn!(
-                                        game = %name,
+                                        games = ?names,
                                         "<-- [RECV] SID_GETADVLISTEX (0x09) [games_found=0] — the server does NOT have our game; joins will fail"
                                     );
                                 }
@@ -630,6 +754,128 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                             if let Ok(ping_val) = incoming::decode_ping(&frame.payload) {
                                 let _ = framed_write.send(outgoing::ping(ping_val)).await;
                             }
+                        }
+
+                        (Stage::InChat, ids::SID_FRIENDSLIST)
+                        | (Stage::AwaitEnterChat, ids::SID_FRIENDSLIST) => {
+                            if let Ok(fl) = incoming::decode_friendslist(&frame.payload) {
+                                _friends = fl.clone();
+                                let _ = events.send(BnetEvent::FriendsList(fl)).await;
+                            }
+                        }
+
+                        (Stage::InChat, ids::SID_CLANMEMBERLIST)
+                        | (Stage::AwaitEnterChat, ids::SID_CLANMEMBERLIST) => {
+                            if let Ok(cl) = incoming::decode_clanmemberlist(&frame.payload) {
+                                _clan_members = cl.clone();
+                                let _ = events.send(BnetEvent::ClanList(cl)).await;
+                            }
+                        }
+
+                        (Stage::InChat, ids::SID_CLANCREATIONINVITATION) => {
+                            if let Ok(invite) =
+                                incoming::decode_clancreationinvitation(&frame.payload)
+                            {
+                                last_clan_invite_tag = invite.tag;
+                                last_clan_invite_name = invite.inviter_name.clone();
+                                last_invite_creation = true;
+                                tracing::info!(
+                                    clan = %invite.clan_name,
+                                    inviter = %invite.inviter_name,
+                                    "[BNET: {}] Invited (creation) to clan {}, !accept to accept",
+                                    cfg.server_alias,
+                                    invite.clan_name
+                                );
+                                let _ = events
+                                    .send(BnetEvent::ClanInviteReceived {
+                                        clan_name: invite.clan_name,
+                                        inviter: invite.inviter_name,
+                                        creation: true,
+                                    })
+                                    .await;
+                            }
+                        }
+
+                        (Stage::InChat, ids::SID_CLANINVITATIONRESPONSE) => {
+                            if let Ok(invite) =
+                                incoming::decode_claninvitationresponse(&frame.payload)
+                            {
+                                last_clan_invite_tag = invite.tag;
+                                last_clan_invite_name = invite.inviter_name.clone();
+                                last_invite_creation = false;
+                                tracing::info!(
+                                    clan = %invite.clan_name,
+                                    inviter = %invite.inviter_name,
+                                    "[BNET: {}] Invited to clan {}, !accept to accept",
+                                    cfg.server_alias,
+                                    invite.clan_name
+                                );
+                                let _ = events
+                                    .send(BnetEvent::ClanInviteReceived {
+                                        clan_name: invite.clan_name,
+                                        inviter: invite.inviter_name,
+                                        creation: false,
+                                    })
+                                    .await;
+                            }
+                        }
+
+                        (_, ids::SID_WARDEN) => {
+                            if let Ok(w_data) = incoming::decode_warden(&frame.payload) {
+                                tracing::warn!(
+                                    len = w_data.len(),
+                                    "[BNET: {}] warning - received warden packet but no BNLS server is available, you will be kicked from battle.net soon",
+                                    cfg.server_alias
+                                );
+                            }
+                        }
+
+                        (_, ids::SID_CHECKAD) => {
+                            if incoming::decode_checkad(&frame.payload).is_ok() {
+                                let _ = framed_write.send(outgoing::checkad()).await;
+                            }
+                        }
+
+                        (Stage::InChat, ids::SID_CLANCHANGERANK) => {
+                            let status = if frame.payload.len() >= 5 {
+                                frame.payload[4]
+                            } else {
+                                frame.payload.first().copied().unwrap_or(0)
+                            };
+                            tracing::info!(
+                                "[BNET: {}] Received SID_CLANCHANGERANK response, status: {}",
+                                cfg.server_alias,
+                                status
+                            );
+                            let _ = events.send(BnetEvent::ClanRankChanged { status }).await;
+                        }
+
+                        (Stage::InChat, ids::SID_CLANREMOVEMEMBER) => {
+                            let status = if frame.payload.len() >= 5 {
+                                frame.payload[4]
+                            } else {
+                                frame.payload.first().copied().unwrap_or(0)
+                            };
+                            tracing::info!(
+                                "[BNET: {}] Received SID_CLANREMOVEMEMBER response, status: {}",
+                                cfg.server_alias,
+                                status
+                            );
+                            let _ = events.send(BnetEvent::ClanMemberRemoved { status }).await;
+                        }
+
+                        (Stage::InChat, ids::SID_CLANSETMOTD) => {
+                            let status = if frame.payload.len() >= 5 {
+                                frame.payload[4]
+                            } else {
+                                frame.payload.first().copied().unwrap_or(0)
+                            };
+                            tracing::info!(
+                                "[BNET: {}] Received SID_CLANSETMOTD response, status: {}",
+                                cfg.server_alias,
+                                status
+                            );
+                            let _ = events.send(BnetEvent::ClanMotdSet { status }).await;
                         }
 
                         (st, pkt_id) => {

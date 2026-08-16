@@ -1,12 +1,13 @@
 //! The decompressed replay body. Mirrors GHost++ `CReplay::BuildReplay`
 //! (ref/ghostpp/ghost/replay.cpp:135-212) and `CReplay::AddTimeSlot`/`AddChatMessage`.
 
+const REPLAY_LEAVEGAME: u8 = 0x17;
 const REPLAY_FIRSTSTARTBLOCK: u8 = 0x1A;
 const REPLAY_SECONDSTARTBLOCK: u8 = 0x1B;
 const REPLAY_THIRDSTARTBLOCK: u8 = 0x1C;
-const REPLAY_TIMESLOTBLOCK: u8 = 0x1E;
+const REPLAY_TIMESLOT2: u8 = 0x1E; // corresponds to W3GS_INCOMING_ACTION2
+const REPLAY_TIMESLOT: u8 = 0x1F; // corresponds to W3GS_INCOMING_ACTION
 const REPLAY_CHATMESSAGE: u8 = 0x20;
-const REPLAY_LEAVEGAME: u8 = 0x17;
 /// GHost++ hardcodes this language id (replay.cpp:143).
 const LANGUAGE_ID: u32 = 0x0012_F8B0;
 
@@ -52,6 +53,7 @@ pub struct ReplayBody {
     game_name: String,
     stat_string: Vec<u8>,
     map_game_type: u32,
+    loading_blocks: Vec<Vec<u8>>,
     blocks: Vec<u8>,
     replay_length_ms: u32,
 }
@@ -76,9 +78,15 @@ impl ReplayBody {
             game_name: String::new(),
             stat_string: Vec::new(),
             map_game_type: 0,
+            loading_blocks: Vec::new(),
             blocks: Vec::new(),
             replay_length_ms: 0,
         }
+    }
+
+    pub fn set_host(&mut self, host_pid: u8, host_name: &str) {
+        self.host_pid = host_pid;
+        self.host_name = host_name.to_string();
     }
 
     pub fn set_game(&mut self, game_name: &str, stat_string: &[u8], map_game_type: u32) {
@@ -118,19 +126,22 @@ impl ReplayBody {
         Ok(())
     }
 
-    /// One 100 ms action packet. `actions` is the payload of W3GS_INCOMING_ACTION
-    /// *after* the send-interval field, i.e. the CRC and action blocks.
-    ///
-    /// Length field matches `CReplay::AddTimeSlot` (replay.cpp:87-110): the C++
-    /// block is `[RecordID][u16 len placeholder][u16 timeIncrement][actions...]`
-    /// and the length written back is `Block.size() - 3`, i.e. it counts the
-    /// time increment plus the action bytes but not the RecordID or itself.
+    /// One 100 ms action packet (W3GS_INCOMING_ACTION). `actions` is the raw action blocks without CRC.
     pub fn add_timeslot(&mut self, time_increment: u16, actions: &[u8]) {
         self.replay_length_ms += time_increment as u32;
-        self.blocks.push(REPLAY_TIMESLOTBLOCK);
+        self.blocks.push(REPLAY_TIMESLOT);
         let len = 2 + actions.len();
         self.blocks.extend_from_slice(&(len as u16).to_le_bytes());
         self.blocks.extend_from_slice(&time_increment.to_le_bytes());
+        self.blocks.extend_from_slice(actions);
+    }
+
+    /// Overflow action packet (W3GS_INCOMING_ACTION2). `actions` is the raw action blocks without CRC.
+    pub fn add_timeslot2(&mut self, actions: &[u8]) {
+        self.blocks.push(REPLAY_TIMESLOT2);
+        let len = 2 + actions.len();
+        self.blocks.extend_from_slice(&(len as u16).to_le_bytes());
+        self.blocks.extend_from_slice(&0u16.to_le_bytes());
         self.blocks.extend_from_slice(actions);
     }
 
@@ -156,6 +167,16 @@ impl ReplayBody {
         self.blocks.push(pid);
         self.blocks.extend_from_slice(&result.to_le_bytes());
         self.blocks.extend_from_slice(&1u32.to_le_bytes());
+    }
+
+    pub fn add_leaver_loading(&mut self, pid: u8, reason: u32, result: u32) {
+        let mut block = Vec::with_capacity(14);
+        block.push(REPLAY_LEAVEGAME);
+        block.extend_from_slice(&reason.to_le_bytes());
+        block.push(pid);
+        block.extend_from_slice(&result.to_le_bytes());
+        block.extend_from_slice(&1u32.to_le_bytes());
+        self.loading_blocks.push(block);
     }
 
     /// Returns the decompressed body and the total replay length in ms.
@@ -208,6 +229,12 @@ impl ReplayBody {
         r.extend_from_slice(&1u32.to_le_bytes());
         r.push(REPLAY_SECONDSTARTBLOCK);
         r.extend_from_slice(&1u32.to_le_bytes());
+
+        // Leavers during loading must be placed between the second and third start blocks
+        for lb in &self.loading_blocks {
+            r.extend_from_slice(lb);
+        }
+
         r.push(REPLAY_THIRDSTARTBLOCK);
         r.extend_from_slice(&1u32.to_le_bytes());
 
@@ -264,13 +291,50 @@ mod tests {
         b.add_timeslot(100, &[0xAA, 0xBB]);
         let (body, _) = b.finish().unwrap();
 
-        // Locate the 0x1E block: [0x1E][u16 len][u16 time][actions...]
+        // Locate the 0x1F block: [0x1F][u16 len][u16 time][actions...]
         let at = body
             .windows(5)
-            .position(|w| w[0] == 0x1E && u16::from_le_bytes([w[3], w[4]]) == 100)
+            .position(|w| w[0] == 0x1F && u16::from_le_bytes([w[3], w[4]]) == 100)
             .expect("timeslot block");
         let len = u16::from_le_bytes([body[at + 1], body[at + 2]]) as usize;
         assert_eq!(len, 2 + 2, "length counts time increment plus actions");
+    }
+
+    #[test]
+    fn a_timeslot2_block_uses_record_0x1e() {
+        let mut b = ReplayBody::new(1, "h");
+        b.set_start(vec![0u8; 9], 1, 0, 1).unwrap();
+        b.add_timeslot2(&[0xCC, 0xDD]);
+        let (body, _) = b.finish().unwrap();
+
+        let at = body
+            .windows(5)
+            .position(|w| w[0] == 0x1E && u16::from_le_bytes([w[3], w[4]]) == 0)
+            .expect("timeslot2 block");
+        let len = u16::from_le_bytes([body[at + 1], body[at + 2]]) as usize;
+        assert_eq!(len, 2 + 2, "length counts time increment 0 plus actions");
+    }
+
+    #[test]
+    fn loading_leavers_are_placed_between_start_blocks_two_and_three() {
+        let mut b = ReplayBody::new(1, "h");
+        b.set_start(vec![0u8; 9], 1, 0, 1).unwrap();
+        b.add_leaver_loading(2, 13, 0);
+        let (body, _) = b.finish().unwrap();
+
+        let block2_idx = body
+            .windows(5)
+            .position(|w| w == [0x1B, 1, 0, 0, 0])
+            .expect("block 0x1B");
+        let block3_idx = body
+            .windows(5)
+            .position(|w| w == [0x1C, 1, 0, 0, 0])
+            .expect("block 0x1C");
+
+        assert!(block3_idx > block2_idx + 5);
+        let leaver_block = &body[block2_idx + 5..block3_idx];
+        assert_eq!(leaver_block[0], 0x17);
+        assert_eq!(leaver_block[5], 2); // pid 2
     }
 
     #[test]

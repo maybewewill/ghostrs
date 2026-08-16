@@ -13,7 +13,13 @@ impl GameState {
         let mut newly_lagging: Vec<(u8, u32)> = Vec::new();
         let mut recovered: Vec<(u8, u32)> = Vec::new();
 
-        for p in self.players.iter_mut() {
+        let was_lagging = self.lagging;
+
+        for p in self
+            .players
+            .iter_mut()
+            .filter(|p| !p.virtual_host && p.left.is_none())
+        {
             let behind = game_sync.saturating_sub(p.sync_counter);
             if p.lagging {
                 // Recover only once comfortably caught up (src/game_base.rs:667).
@@ -48,24 +54,62 @@ impl GameState {
                 Ok(b) => self.broadcast(b),
                 Err(e) => tracing::warn!(error = %e, "failed to build start_lag"),
             }
+            if !was_lagging {
+                self.last_lag_screen_reset = Instant::now();
+            }
         }
 
-        self.lagging = self.players.iter().any(|p| p.lagging);
+        self.lagging = self.players.iter().filter(|p| !p.virtual_host).any(|p| p.lagging);
+
+        // GHost++ game_base.cpp:923 - Reset lag screen every 60 seconds (or 30s if load_in_game)
+        let reset_interval = if self.load_in_game {
+            Duration::from_secs(30)
+        } else {
+            Duration::from_secs(60)
+        };
+        if self.lagging && self.last_lag_screen_reset.elapsed() >= reset_interval {
+            let laggers: Vec<(u8, u32)> = self
+                .players
+                .iter()
+                .filter(|p| p.lagging && p.left.is_none() && !p.virtual_host)
+                .map(|p| {
+                    (
+                        p.pid,
+                        p.started_lagging
+                            .map(|t| t.elapsed().as_millis() as u32)
+                            .unwrap_or(0),
+                    )
+                })
+                .collect();
+
+            if !laggers.is_empty() {
+                for &(pid, lag_ms) in &laggers {
+                    self.broadcast(outgoing::stop_lag(pid, lag_ms));
+                }
+                if let Ok(act) = outgoing::incoming_action(&[], 0) {
+                    self.broadcast(act);
+                }
+                if let Ok(b) = outgoing::start_lag(&laggers) {
+                    self.broadcast(b);
+                }
+                self.last_lag_screen_reset = Instant::now();
+            }
+        }
+
         self.lagging
     }
 
     /// Drops anyone stuck on the lag screen longer than `max_lag`.
     pub fn drop_lagging_players(&mut self, max_lag: Duration) {
-        for p in self.players.iter_mut() {
-            if p.lagging
-                && p.left.is_none()
-                && p.started_lagging.is_some_and(|t| t.elapsed() >= max_lag)
-            {
-                p.left = Some(format!(
-                    "was dropped after lagging for {}s",
-                    max_lag.as_secs()
-                ));
-            }
+        let to_drop: Vec<(u8, String)> = self
+            .players
+            .iter()
+            .filter(|p| !p.virtual_host && p.lagging && p.left.is_none() && p.started_lagging.is_some_and(|t| t.elapsed() >= max_lag))
+            .map(|p| (p.pid, format!("was dropped after lagging for {}s", max_lag.as_secs())))
+            .collect();
+
+        for (pid, reason) in to_drop {
+            self.kick_player(pid, &reason, ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT);
         }
     }
 }
@@ -140,4 +184,49 @@ mod tests {
 
         assert_eq!(st.players.len(), 1);
     }
+
+    #[test]
+    fn lag_screen_resets_after_60_seconds_with_nonzero_lag_time() {
+        let (mut st, mut rxs) = seated_game(2);
+        st.begin_playing();
+        st.sync_counter = 60;
+        st.players.by_pid_mut(1).unwrap().sync_counter = 60;
+        st.players.by_pid_mut(2).unwrap().sync_counter = 5;
+        assert!(st.check_lag()); // Initial raise
+
+        for rx in rxs.iter_mut() {
+            let _ = drain_ids(rx);
+        }
+
+        // Simulate 61 seconds passing
+        let past = Instant::now() - Duration::from_secs(61);
+        st.last_lag_screen_reset = past;
+        st.players.by_pid_mut(2).unwrap().started_lagging = Some(past);
+
+        // Run check_lag again
+        assert!(st.check_lag());
+
+        // We expect: STOP_LAG, INCOMING_ACTION, START_LAG in the output
+        let mut packets = Vec::new();
+        while let Ok(pkt) = rxs[0].try_recv() {
+            packets.push(pkt);
+        }
+
+        let ids: Vec<u8> = packets.iter().map(|p| p[1]).collect();
+        assert!(ids.contains(&ids::STOP_LAG), "must send STOP_LAG on reset, got {ids:?}");
+        assert!(ids.contains(&ids::START_LAG), "must send START_LAG on reset, got {ids:?}");
+
+        // Check that START_LAG packet contains non-zero lag time (>= 60,000 ms)
+        let start_lag_pkt = packets.iter().find(|p| p[1] == ids::START_LAG).unwrap();
+        let num_laggers = start_lag_pkt[4];
+        assert_eq!(num_laggers, 1);
+        let lag_time = u32::from_le_bytes([
+            start_lag_pkt[6],
+            start_lag_pkt[7],
+            start_lag_pkt[8],
+            start_lag_pkt[9],
+        ]);
+        assert!(lag_time >= 60_000, "lag_time must be >= 60000 ms, got {lag_time}");
+    }
 }
+

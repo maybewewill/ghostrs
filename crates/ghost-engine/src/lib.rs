@@ -22,9 +22,9 @@ pub use actions::MAX_ACTION_PAYLOAD;
 pub use actor::spawn_game;
 pub use chat::{ChatCommand, parse_command};
 pub use gproxy::GProxyBuffer;
-pub use handle::{GameCmd, GameHandle};
+pub use handle::{GameCmd, GameEvent, GameHandle};
 pub use hcl::Hcl;
-pub use map::{ParsedMap, xor_rotate_left};
+pub use map::{MapOverride, ParsedMap, xor_rotate_left};
 pub use mapxfer::{Download, MAP_CHUNK, MAX_PARTS_PER_TICK};
 pub use players::{NameMatch, Player, PlayerTable};
 pub use slots::{SlotStatus, SlotTable};
@@ -32,3 +32,4 @@ pub use state::{GameConfig, GamePhase, GameState, MapInfo};
 pub use stats_dota::{DotAPlayerStats, StatsDotA};
 pub use stats_w3mmd::StatsW3MMD;
 pub use tick::TickScheduler;
+

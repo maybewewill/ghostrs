@@ -91,6 +91,11 @@ impl RelayHandle {
         });
     }
 
+    pub fn send_game_over(&self) {
+        let _ = self.tx.try_send(RelayCmd::GameOver);
+    }
+
+
     pub async fn debug_released_count(&self) -> usize {
         let (tx, rx) = oneshot::channel();
         let _ = self.tx.send(RelayCmd::DebugGetReleasedCount(tx)).await;
@@ -148,7 +153,8 @@ impl Relay {
             ConnEventKind::Closed(_) => {
                 self.remove_viewer(ev.conn_id);
             }
-            ConnEventKind::Frame(AnyFrame::W3gs(ref frame))
+            ConnEventKind::Frame(AnyFrame::DotaTv(ref frame))
+            | ConnEventKind::Frame(AnyFrame::W3gs(ref frame))
                 if frame.id == dotatv_ids::CLIENT_CHAT =>
             {
                 if let Ok(text) = dotatv::decode_client_chat(&frame.payload) {
@@ -237,7 +243,7 @@ pub fn spawn_relay(cfg: RelayConfig) -> (RelayHandle, JoinHandle<()>) {
                 while let Ok((stream, peer)) = listener.accept().await {
                     conn_counter += 1;
                     tracing::info!(%peer, conn_id = conn_counter, "spectator viewer connected");
-                    let link = ghost_net::spawn_conn(conn_counter, stream, conn_tx.clone(), 1024);
+                    let link = ghost_net::spawn_dtv_conn(conn_counter, stream, conn_tx.clone(), 1024);
                     let _ = tx_clone
                         .send(RelayCmd::ViewerJoined {
                             conn_id: conn_counter,

@@ -1,0 +1,15 @@
+﻿target/
+.git/
+.github/
+.superpowers/
+.gemini/
+docs/
+*.log
+*.exe
+*.dll
+*.icc
+*.i64
+*.idb
+replays/*.w3g
+ghost.db-shm
+ghost.db-wal

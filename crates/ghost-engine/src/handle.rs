@@ -8,6 +8,14 @@ pub enum GameCmd {
         link: PlayerLink,
         external_ip: [u8; 4],
     },
+    AdoptReconnect {
+        conn_id: u64,
+        pid: u8,
+        reconnect_key: u32,
+        last_packet: u32,
+        link: PlayerLink,
+        response: tokio::sync::oneshot::Sender<bool>,
+    },
     Conn(ConnEvent),
     Start {
         by: String,
@@ -41,3 +49,14 @@ impl GameHandle {
         self.tx.is_closed()
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GameEvent {
+    LobbyStatus {
+        host_counter: u32,
+        slots_open: u32,
+        slots_total: u32,
+        human_players: u32,
+    },
+}
+
