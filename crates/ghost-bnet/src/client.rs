@@ -399,6 +399,19 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                         continue;
                     }
 
+                    if frame.id == ids::SID_ICCUP_CHALLENGE {
+                        tracing::info!(
+                            len = frame.payload.len(),
+                            "<-- [RECV] SID_ICCUP_CHALLENGE (0xF9) [len={}], sending iccup_challenge_reply (0xF7)",
+                            frame.payload.len()
+                        );
+                        if let Ok(reply_pkt) = outgoing::iccup_challenge_reply(&frame.payload) {
+                            tracing::info!("--> [SEND] SID_ICCUP_ANTIHACK (0xF7) [len={}]", reply_pkt.len());
+                            let _ = framed_write.send(reply_pkt).await;
+                        }
+                        continue;
+                    }
+
                     match (stage, frame.id) {
                         (Stage::AwaitAuthInfo, ids::SID_AUTH_INFO) => {
                             if let Ok(info) = incoming::AuthInfo::decode(&frame.payload) {
