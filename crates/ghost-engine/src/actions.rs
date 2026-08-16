@@ -1,21 +1,56 @@
 use bytes::Bytes;
 use ghost_protocol::w3gs::{ActionBlock, incoming::OutgoingAction, outgoing};
 
+use crate::lang;
 use crate::state::{GamePhase, GameState};
 
 /// Actions beyond this many wire bytes spill into an INCOMING_ACTION2 packet.
-/// Matches src/game_base.rs:988.
-pub const MAX_ACTION_PAYLOAD: usize = 1400;
+/// Matches GHost++ game_base.cpp:1373 (1452 bytes).
+pub const MAX_ACTION_PAYLOAD: usize = 1452;
 
 impl GameState {
     pub fn handle_action(&mut self, conn_id: u64, payload: &Bytes) {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
             return;
         };
+        // GHost++ EventPlayerAction (game_base.cpp:2724): actions are only valid
+        // once the game is loading or loaded; anything else gets the sender
+        // kicked with PLAYERLEAVE_LOST.
+        if !matches!(self.phase, GamePhase::Loading | GamePhase::Playing) {
+            tracing::warn!(conn_id, "blocked invalid action packet (game not loaded)");
+            self.kick_player(
+                pid,
+                "Invalid action packet",
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST,
+            );
+            return;
+        }
         match OutgoingAction::decode(payload) {
             // The body is a slice of the read buffer: queuing it costs a
             // refcount bump, and it is relayed without ever being parsed.
             Ok(a) => {
+                // GHost++ caps GetLength() (action bytes + 3) at 1027, i.e. 1024
+                // action bytes (game_base.cpp:2725), and kicks the offender.
+                if a.data.len() + 3 > 1027 {
+                    tracing::warn!(conn_id, len = a.data.len(), "blocked oversized action packet");
+                    self.kick_player(
+                        pid,
+                        "Invalid action packet",
+                        ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST,
+                    );
+                    return;
+                }
+                // Action type 6 = save game; announce it like GHost++ does
+                // (game_base.cpp:2737).
+                if !a.data.is_empty() && a.data[0] == 6 {
+                    let name = self
+                        .players
+                        .by_pid(pid)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    tracing::info!(game = %self.cfg.name, pid, name = %name, "player is saving the game");
+                    self.send_chat_all(&lang::player_is_saving_the_game(&name));
+                }
                 if let Some(w3mmd) = &mut self.w3mmd {
                     w3mmd.process_action(&a.data);
                 }
@@ -26,13 +61,121 @@ impl GameState {
     }
 
     pub fn handle_keepalive(&mut self, conn_id: u64, payload: &Bytes) {
-        if ghost_protocol::w3gs::incoming::decode_keepalive(payload).is_err() {
+        // GHost++ EventPlayerKeepAlive (game_base.cpp:2751): keepalives only
+        // count once the game is loaded.
+        if !matches!(self.phase, GamePhase::Playing) {
             return;
         }
+        let checksum = match ghost_protocol::w3gs::incoming::decode_keepalive(payload) {
+            Ok(cs) => cs,
+            Err(_) => return,
+        };
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.sync_counter = p.sync_counter.saturating_add(1);
+            if p.checksums.len() >= 512 {
+                p.checksums.pop_front();
+            }
+            p.checksums.push_back(checksum);
+        }
+        self.check_desync();
+    }
+
+    pub fn check_desync(&mut self) {
+        loop {
+            let mut active_pids: Vec<u8> = Vec::new();
+            let mut all_have_checksum = true;
+
+            for p in self.players.iter() {
+                if p.left.is_none() && !p.virtual_host && p.loaded {
+                    if p.checksums.is_empty() {
+                        all_have_checksum = false;
+                        break;
+                    }
+                    active_pids.push(p.pid);
+                }
+            }
+
+            if !all_have_checksum || active_pids.is_empty() {
+                break;
+            }
+
+            let first_pid = active_pids[0];
+            let first_checksum = *self.players.by_pid(first_pid).unwrap().checksums.front().unwrap();
+
+            let mut has_desync = false;
+            for &pid in &active_pids {
+                if let Some(p) = self.players.by_pid(pid) {
+                    if let Some(&cs) = p.checksums.front() {
+                        if cs != first_checksum {
+                            has_desync = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !has_desync {
+                for &pid in &active_pids {
+                    if let Some(p) = self.players.by_pid_mut(pid) {
+                        p.checksums.pop_front();
+                    }
+                }
+                continue;
+            }
+
+            let mut bins: std::collections::HashMap<u32, Vec<u8>> = std::collections::HashMap::new();
+            for &pid in &active_pids {
+                if let Some(p) = self.players.by_pid(pid) {
+                    if let Some(&cs) = p.checksums.front() {
+                        bins.entry(cs).or_default().push(pid);
+                    }
+                }
+            }
+
+            let mut max_count = 0;
+            let mut tied = false;
+            let mut largest_cs = 0;
+
+            for (&cs, pids) in &bins {
+                if pids.len() > max_count {
+                    max_count = pids.len();
+                    largest_cs = cs;
+                    tied = false;
+                } else if pids.len() == max_count {
+                    tied = true;
+                }
+            }
+
+            tracing::warn!(game = %self.cfg.name, "desync detected");
+            self.send_chat_all("Desync detected!");
+
+            if tied {
+                tracing::warn!(game = %self.cfg.name, "desync tie, dropping all players");
+                for &pid in &active_pids {
+                    self.kick_player(pid, "was dropped due to desync", ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST);
+                }
+            } else {
+                tracing::warn!(game = %self.cfg.name, "kicking desynced minority players");
+                for (&cs, pids) in &bins {
+                    if cs != largest_cs {
+                        for &pid in pids {
+                            self.kick_player(pid, "was dropped due to desync", ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST);
+                        }
+                    }
+                }
+            }
+
+
+            for &pid in &active_pids {
+                if let Some(p) = self.players.by_pid_mut(pid) {
+                    p.checksums.pop_front();
+                }
+            }
+
+            break;
         }
     }
+
 
     pub fn handle_loaded(&mut self, conn_id: u64) {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
@@ -40,7 +183,12 @@ impl GameState {
         };
         if let Some(p) = self.players.by_pid_mut(pid) {
             p.loaded = true;
+            p.finished_loading_at = Some(std::time::Instant::now());
             tracing::info!(game = %self.cfg.name, pid, name = %p.name, "player finished loading");
+            let queued = std::mem::take(&mut p.load_in_game_data);
+            for pkt in queued {
+                let _ = p.link.try_send(pkt);
+            }
         }
         self.broadcast(outgoing::game_loaded_others(pid));
 
@@ -57,22 +205,71 @@ impl GameState {
         );
         self.phase = GamePhase::Loading;
         self.started_loading_at = Some(std::time::Instant::now());
-        self.delete_virtual_host();
+        self.start_players = self.players.human_count();
+        if let Some(hcl) = &self.hcl {
+            if crate::hcl::Hcl::encode_hcl_into_slots(hcl, self.slots.as_wire_mut()) {
+                self.send_all_slot_info();
+            }
+        }
         self.broadcast(outgoing::countdown_start());
+        self.delete_virtual_host();
         self.broadcast(outgoing::countdown_end());
+        if let Some(fpid) = self.fake_player_pid {
+            self.broadcast(outgoing::game_loaded_others(fpid));
+        }
     }
 
     pub fn begin_playing(&mut self) {
         self.phase = GamePhase::Playing;
-        self.started_loading_at = None;
+        let started_at = self.started_loading_at.take();
         for p in self.players.iter_mut() {
             p.loaded = true;
             p.sync_counter = 0;
+            p.checksums.clear();
         }
         self.sync_counter = 0;
         self.game_ticks = 0;
 
+        if let Some(started) = started_at {
+            let mut shortest: Option<(String, f64)> = None;
+            let mut longest: Option<(String, f64)> = None;
+            let mut personal: Vec<(u8, f64)> = Vec::new();
+
+            for p in self.players.iter().filter(|p| !p.virtual_host) {
+                let load_time_sec = p
+                    .finished_loading_at
+                    .map(|t| t.duration_since(started).as_secs_f64())
+                    .unwrap_or(0.0);
+
+                if shortest.as_ref().map_or(true, |(_, t)| load_time_sec < *t) {
+                    shortest = Some((p.name.clone(), load_time_sec));
+                }
+                if longest.as_ref().map_or(true, |(_, t)| load_time_sec > *t) {
+                    longest = Some((p.name.clone(), load_time_sec));
+                }
+                personal.push((p.pid, load_time_sec));
+            }
+
+            if let (Some((s_name, s_time)), Some((l_name, l_time))) = (shortest, longest) {
+                self.send_chat_all(&lang::shortest_load_by_player(&s_name, s_time));
+                self.send_chat_all(&lang::longest_load_by_player(&l_name, l_time));
+            }
+
+            for (pid, time_sec) in personal {
+                self.send_chat_to(pid, &lang::your_loading_time_was(time_sec));
+            }
+        }
+
+        let host_pid = self.host_pid();
+        let host_name = if self.virtual_host_pid != 255 && host_pid == self.virtual_host_pid {
+            self.cfg.virtual_host_name.clone()
+        } else if let Some(p) = self.players.by_pid(host_pid) {
+            p.name.clone()
+        } else {
+            self.cfg.virtual_host_name.clone()
+        };
         if let Some(rep) = self.replay.as_mut() {
+            rep.set_host(host_pid, &host_name);
             for p in self.players.iter().filter(|p| !p.virtual_host) {
                 rep.add_player(p.pid, &p.name);
             }
@@ -84,12 +281,6 @@ impl GameState {
             );
         }
 
-        if let Some(hcl) = &self.hcl {
-            let host_pid = self.players.iter().next().map(|p| p.pid).unwrap_or(1);
-            let hcl_actions = crate::hcl::Hcl::encode_hcl_actions(hcl, host_pid);
-            self.actions.extend(hcl_actions);
-            tracing::info!(hcl = %hcl, "injected HCL game mode actions on match start");
-        }
 
         if let Some(r) = &self.relay {
             let mut raw =
@@ -138,8 +329,39 @@ impl GameState {
     pub fn on_tick(&mut self, skipped: u32) {
         self.pump_downloads();
         self.reap_gproxy_timeouts(self.cfg.reconnect_wait);
+        if matches!(
+            self.phase,
+            GamePhase::Lobby | GamePhase::Countdown { .. } | GamePhase::Loading
+        ) && self.last_ping_at.elapsed() >= std::time::Duration::from_secs(5)
+        {
+            let now = self.created_at.elapsed().as_millis() as u32;
+            self.broadcast(outgoing::ping_from_host(now));
+            self.last_ping_at = std::time::Instant::now();
+        }
         match self.phase {
-            GamePhase::Lobby => {}
+            GamePhase::Lobby => {
+                if let Some(msg) = self.announce_message.clone() {
+                    if self.announce_interval > std::time::Duration::ZERO {
+                        let should_send = match self.last_announce_time {
+                            Some(t) => t.elapsed() >= self.announce_interval,
+                            None => true,
+                        };
+                        if should_send {
+                            self.send_chat_all(&msg);
+                            self.last_announce_time = Some(std::time::Instant::now());
+                        }
+                    }
+                }
+                if self.autostart_players.unwrap_or(0) == 0 && self.cfg.lobby_time_limit > 0 {
+                    if self.players.iter().any(|p| !p.virtual_host && p.reserved && p.left.is_none()) {
+                        self.last_reserved_seen = std::time::Instant::now();
+                    }
+                    if self.last_reserved_seen.elapsed() >= std::time::Duration::from_secs(self.cfg.lobby_time_limit as u64 * 60) {
+                        tracing::info!(game = %self.cfg.name, "is over (lobby time limit hit)");
+                        self.phase = GamePhase::Over;
+                    }
+                }
+            }
             GamePhase::Countdown {
                 started_at,
                 total_duration,
@@ -168,12 +390,14 @@ impl GameState {
                     for p in self.players.iter_mut() {
                         if !p.loaded && p.left.is_none() && !p.virtual_host {
                             p.left = Some("loading timed out (60s)".into());
+                            p.left_code = ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT;
                         }
                     }
                     self.reap_left_players();
                 }
             }
             GamePhase::Playing => {
+                self.check_desync();
                 if self.check_lag() {
                     self.drop_lagging_players(std::time::Duration::from_secs(60));
                     return; // lag screen is up; no actions go out this tick
@@ -186,8 +410,8 @@ impl GameState {
                     .iter()
                     .filter(|p| !p.virtual_host && p.left.is_none())
                     .count();
-                if real_players_count <= 1 && self.game_over_time.is_none() {
-                    tracing::info!("gameover timer started (one or zero players left)");
+                if real_players_count == 1 && self.start_players > 1 && self.game_over_time.is_none() {
+                    tracing::info!("gameover timer started (one player left)");
                     self.game_over_time = Some(tokio::time::Instant::now());
                 }
 
@@ -198,6 +422,7 @@ impl GameState {
                     for p in self.players.iter_mut() {
                         if p.left.is_none() && !p.virtual_host {
                             p.left = Some("was disconnected (gameover timer finished)".into());
+                            p.left_code = ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT;
                         }
                     }
                 }
@@ -215,7 +440,68 @@ impl GameState {
         {
             tracing::info!(game = %self.cfg.name, "no players left, ending game");
             self.phase = GamePhase::Over;
+            if let Some(r) = &self.relay {
+                r.send_game_over();
+            }
             self.finished = true;
+            self.save_game_data();
+        }
+    }
+
+
+    pub fn save_game_data(&mut self) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let now_sec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let started_sec = now_sec.saturating_sub(self.created_at.elapsed().as_secs() as i64);
+        let player_names: Vec<String> = self
+            .players
+            .iter()
+            .filter(|p| !p.virtual_host)
+            .map(|p| p.name.clone())
+            .collect();
+
+        store.log_game(
+            &self.cfg.name,
+            &self.cfg.map.path,
+            started_sec,
+            now_sec,
+            player_names,
+        );
+
+        if let Some(dota) = &self.dota {
+            let duration_sec = dota.duration_min * 60 + dota.duration_sec;
+            let records: Vec<ghost_store::DotAPlayerRecord> = dota
+                .players
+                .values()
+                .map(|p| ghost_store::DotAPlayerRecord {
+                    colour: p.colour,
+                    name: p.name.clone(),
+                    hero: p.hero.clone(),
+                    kills: p.kills,
+                    deaths: p.deaths,
+                    assists: p.assists,
+                    creep_kills: p.creep_kills,
+                    creep_denies: p.creep_denies,
+                    neutral_kills: p.neutral_kills,
+                    tower_kills: p.tower_kills,
+                    rax_kills: p.rax_kills,
+                    courier_kills: p.courier_kills,
+                })
+                .collect();
+
+            store.log_dota_game(
+                &self.cfg.name,
+                dota.winner,
+                duration_sec,
+                dota.tree_hp,
+                dota.throne_hp,
+                records,
+            );
         }
     }
 
@@ -251,10 +537,9 @@ impl GameState {
                         if let Some(r) = &self.relay {
                             r.push(b.clone());
                         }
-                        if let Some(rep) = self.replay.as_mut()
-                            && b.len() >= 6
-                        {
-                            rep.add_timeslot(0, &b[6..]);
+                        if let Some(rep) = self.replay.as_mut() {
+                            let raw = ActionBlock::encode_actions_raw(&batch);
+                            rep.add_timeslot2(&raw);
                         }
                         self.broadcast(b);
                     }
@@ -284,10 +569,9 @@ impl GameState {
                 if let Some(r) = &self.relay {
                     r.push(b.clone());
                 }
-                if let Some(rep) = self.replay.as_mut()
-                    && b.len() >= 6
-                {
-                    rep.add_timeslot(send_interval, &b[6..]);
+                if let Some(rep) = self.replay.as_mut() {
+                    let raw = ActionBlock::encode_actions_raw(&batch);
+                    rep.add_timeslot(send_interval, &raw);
                 }
                 self.broadcast(b);
             }
@@ -348,7 +632,7 @@ mod tests {
         st.begin_playing();
         let _ = drain_ids(&mut rxs[0]);
 
-        // 20 x 100-byte actions = 2060 wire bytes, past the 1400-byte limit.
+        // 20 x 100-byte actions = 2060 wire bytes, past the 1452-byte limit.
         for _ in 0..20 {
             st.actions.push(ActionBlock {
                 pid: 1,
@@ -391,8 +675,8 @@ mod tests {
         st.actions.push(action2.clone());
 
         let expected_overflow =
-            outgoing::incoming_action2(&[action1]).expect("build overflow packet");
-        let expected_main = outgoing::incoming_action(&[action2], 100).expect("build main packet");
+            outgoing::incoming_action2(&[action1.clone()]).expect("build overflow packet");
+        let expected_main = outgoing::incoming_action(&[action2.clone()], 100).expect("build main packet");
 
         st.on_tick(0);
 
@@ -428,25 +712,28 @@ mod tests {
             vec![expected_overflow.clone(), expected_main.clone()]
         );
 
-        // 3. Verify replay body recorded timeslots in order with exact bytes and time increments
+        // 3. Verify replay body recorded timeslots in order with exact bytes and time increments without CRC
         let rep = st.replay.take().expect("replay must exist");
         let (body, duration_ms) = rep.finish().expect("replay finish must succeed");
         assert_eq!(duration_ms, 100);
 
-        let mut expected_timeslot_bytes = Vec::new();
-        // Overflow timeslot: record id 0x1E, length, time increment 0, payload after interval (&b[6..])
-        expected_timeslot_bytes.push(0x1E);
-        expected_timeslot_bytes
-            .extend_from_slice(&((2 + expected_overflow[6..].len()) as u16).to_le_bytes());
-        expected_timeslot_bytes.extend_from_slice(&0u16.to_le_bytes());
-        expected_timeslot_bytes.extend_from_slice(&expected_overflow[6..]);
+        let raw_actions1 = ActionBlock::encode_actions_raw(&[action1]);
+        let raw_actions2 = ActionBlock::encode_actions_raw(&[action2]);
 
-        // Main timeslot: record id 0x1E, length, time increment 100, payload after interval (&b[6..])
+        let mut expected_timeslot_bytes = Vec::new();
+        // Overflow timeslot: record id 0x1E, length, time increment 0, raw actions without CRC
         expected_timeslot_bytes.push(0x1E);
         expected_timeslot_bytes
-            .extend_from_slice(&((2 + expected_main[6..].len()) as u16).to_le_bytes());
+            .extend_from_slice(&((2 + raw_actions1.len()) as u16).to_le_bytes());
+        expected_timeslot_bytes.extend_from_slice(&0u16.to_le_bytes());
+        expected_timeslot_bytes.extend_from_slice(&raw_actions1);
+
+        // Main timeslot: record id 0x1F, length, time increment 100, raw actions without CRC
+        expected_timeslot_bytes.push(0x1F);
+        expected_timeslot_bytes
+            .extend_from_slice(&((2 + raw_actions2.len()) as u16).to_le_bytes());
         expected_timeslot_bytes.extend_from_slice(&100u16.to_le_bytes());
-        expected_timeslot_bytes.extend_from_slice(&expected_main[6..]);
+        expected_timeslot_bytes.extend_from_slice(&raw_actions2);
 
         let start_marker = &[0x1A, 1, 0, 0, 0, 0x1B, 1, 0, 0, 0, 0x1C, 1, 0, 0, 0];
         let start_idx = body
@@ -513,7 +800,7 @@ mod tests {
     fn countdown_progresses_by_wall_clock_time() {
         let (mut st, mut rxs) = seated_game(2);
         st.phase = GamePhase::Countdown {
-            started_at: std::time::Instant::now() - std::time::Duration::from_millis(2600),
+            started_at: std::time::Instant::now() - std::time::Duration::from_millis(5100),
             total_duration: crate::state::COUNTDOWN_TOTAL,
             last_announced_step: 1,
         };
@@ -680,4 +967,127 @@ mod tests {
             "replay duration must match total timeslots"
         );
     }
+
+    #[test]
+    fn desync_detection_drops_minority_player() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(3);
+        st.begin_playing();
+
+        let conn1 = st.players.by_pid(1).unwrap().conn_id;
+        let conn2 = st.players.by_pid(2).unwrap().conn_id;
+        let conn3 = st.players.by_pid(3).unwrap().conn_id;
+
+        // Players 1 and 2 send checksum 0x11112222
+        let mut p1 = bytes::BytesMut::new();
+        p1.extend_from_slice(&[0x00]);
+        p1.extend_from_slice(&0x11112222u32.to_le_bytes());
+        let payload1 = p1.freeze();
+
+        // Player 3 sends checksum 0x99998888 (desync)
+        let mut p3 = bytes::BytesMut::new();
+        p3.extend_from_slice(&[0x00]);
+        p3.extend_from_slice(&0x99998888u32.to_le_bytes());
+        let payload3 = p3.freeze();
+
+        st.handle_keepalive(conn1, &payload1);
+        st.handle_keepalive(conn2, &payload1);
+        st.handle_keepalive(conn3, &payload3);
+
+        st.check_desync();
+
+        assert!(st.players.by_pid(1).unwrap().left.is_none(), "player 1 should not be dropped");
+        assert!(st.players.by_pid(2).unwrap().left.is_none(), "player 2 should not be dropped");
+        assert!(st.players.by_pid(3).unwrap().left.is_some(), "player 3 should be dropped due to desync");
+    }
+
+    #[test]
+    fn desync_detection_tie_drops_all_players() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(2);
+        st.begin_playing();
+
+        let conn1 = st.players.by_pid(1).unwrap().conn_id;
+        let conn2 = st.players.by_pid(2).unwrap().conn_id;
+
+        let mut p1 = bytes::BytesMut::new();
+        p1.extend_from_slice(&[0x00]);
+        p1.extend_from_slice(&0x11112222u32.to_le_bytes());
+
+        let mut p2 = bytes::BytesMut::new();
+        p2.extend_from_slice(&[0x00]);
+        p2.extend_from_slice(&0x99998888u32.to_le_bytes());
+
+        st.handle_keepalive(conn1, &p1.freeze());
+        st.handle_keepalive(conn2, &p2.freeze());
+
+        st.check_desync();
+
+        assert!(st.players.by_pid(1).unwrap().left.is_some(), "player 1 should be dropped on tie");
+        assert!(st.players.by_pid(2).unwrap().left.is_some(), "player 2 should be dropped on tie");
+    }
+
+    #[test]
+    fn actions_sent_before_the_game_starts_kick_the_sender() {
+        // GHost++ EventPlayerAction (game_base.cpp:2724): an action packet in the
+        // lobby is invalid and gets the sender kicked with PLAYERLEAVE_LOST.
+        let (mut st, _rxs) = seated_game(1);
+        assert!(matches!(st.phase, GamePhase::Lobby));
+
+        st.handle_action(1, &Bytes::from_static(&[0u8; 8]));
+
+        let p = st.players.by_pid(1).unwrap();
+        assert_eq!(p.left.as_deref(), Some("Invalid action packet"));
+        assert_eq!(p.left_code, ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST);
+        assert!(st.actions.is_empty(), "the invalid action must not be queued");
+    }
+
+    #[test]
+    fn oversized_action_packets_kick_the_sender() {
+        // GHost++ caps GetLength() (action bytes + 3) at 1027, i.e. 1024 action
+        // bytes (game_base.cpp:2725).
+        let (mut st, _rxs) = seated_game(1);
+        st.begin_playing();
+
+        let mut payload = bytes::BytesMut::new();
+        payload.extend_from_slice(&0u32.to_le_bytes()); // crc
+        payload.extend_from_slice(&vec![7u8; 1025]); // 1025 action bytes
+        st.handle_action(1, &payload.freeze());
+
+        let p = st.players.by_pid(1).unwrap();
+        assert_eq!(p.left.as_deref(), Some("Invalid action packet"));
+        assert!(st.actions.is_empty());
+    }
+
+    #[test]
+    fn a_save_game_action_notifies_everyone() {
+        // GHost++ game_base.cpp:2737: action type 6 (save game) is announced.
+        let (mut st, mut rxs) = seated_game(1);
+        st.begin_playing();
+        let _ = drain_ids(&mut rxs[0]);
+
+        let mut payload = bytes::BytesMut::new();
+        payload.extend_from_slice(&0u32.to_le_bytes()); // crc
+        bytes::BufMut::put_u8(&mut payload, 6); // save game
+        payload.extend_from_slice(&[0, 0, 0]);
+        st.handle_action(1, &payload.freeze());
+
+        let sent = drain_ids(&mut rxs[0]);
+        assert!(sent.contains(&ids::CHAT_FROM_HOST), "save-game must be announced, got {sent:?}");
+    }
+
+    #[test]
+    fn keepalives_before_the_game_starts_are_ignored() {
+        // GHost++ EventPlayerKeepAlive (game_base.cpp:2751): `if (!m_GameLoaded)
+        // return;` — keepalives in the lobby must not feed the checksum queue.
+        let (mut st, _rxs) = seated_game(1);
+
+        let mut p = bytes::BytesMut::new();
+        bytes::BufMut::put_u8(&mut p, 0);
+        bytes::BufMut::put_u32_le(&mut p, 0xDEAD);
+        st.handle_keepalive(1, &p.freeze());
+
+        let player = st.players.by_pid(1).unwrap();
+        assert_eq!(player.sync_counter, 0);
+        assert!(player.checksums.is_empty());
+    }
 }
+

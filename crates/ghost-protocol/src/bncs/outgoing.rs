@@ -88,6 +88,11 @@ pub fn startadvex3(
     stat_string: &[u8],
     host_counter: u32,
 ) -> Result<Bytes, ProtoError> {
+    if stat_string.len() >= 128 {
+        return Err(ProtoError::BadValue(
+            "stat string size exceeds Battle.net limit (must be < 128 bytes)",
+        ));
+    }
     let host_counter_string = format!("{:08x}", host_counter);
     let host_counter_string: String = host_counter_string.chars().rev().collect();
 
@@ -100,9 +105,8 @@ pub fn startadvex3(
     p.put_slice(&[0, 0, 0, 0]); // custom game
     put_cstring(&mut p, game_name);
     p.put_u8(0);
-    // bnetprotocol.cpp:712-714 sends 110 when MAX_SLOTS > 12; gameslot.h:39 sets MAX_SLOTS = 24.
-    // The C++ comment warns this is the number of PIDs Warcraft III allocates.
-    p.put_u8(110);
+    // GHost++ uses 98 (char 'b') for 12-slot games (11 free slots) on Warcraft 1.26a
+    p.put_u8(98);
     p.put_slice(host_counter_string.as_bytes());
     p.put_slice(stat_string);
     p.put_u8(0);
@@ -255,6 +259,65 @@ pub fn account_logon_proof(client_password_proof: &[u8]) -> Result<Bytes, ProtoE
     .encode_with(BNCS_HEADER)
 }
 
+pub fn claninvitation(account_name: &str) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(5 + account_name.len());
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    put_cstring(&mut p, account_name);
+    Frame::new(ids::SID_CLANINVITATION, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn clanremovemember(account_name: &str) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(5 + account_name.len());
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    put_cstring(&mut p, account_name);
+    Frame::new(ids::SID_CLANREMOVEMEMBER, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn clanchangerank(account_name: &str, rank: u8) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(6 + account_name.len());
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    put_cstring(&mut p, account_name);
+    p.put_u8(rank);
+    Frame::new(ids::SID_CLANCHANGERANK, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn clansetmotd(motd: &str) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(5 + motd.len());
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    put_cstring(&mut p, motd);
+    Frame::new(ids::SID_CLANSETMOTD, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn clancreationinvitation(
+    tag: &[u8; 4],
+    inviter_name: &str,
+    accept: bool,
+) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(9 + inviter_name.len());
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(tag);
+    put_cstring(&mut p, inviter_name);
+    p.put_u8(if accept { 0x06 } else { 0x04 });
+    Frame::new(ids::SID_CLANCREATIONINVITATION, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn claninvitationresponse(
+    tag: &[u8; 4],
+    inviter_name: &str,
+    accept: bool,
+) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(9 + inviter_name.len());
+    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(tag);
+    put_cstring(&mut p, inviter_name);
+    p.put_u8(if accept { 0x06 } else { 0x04 });
+    Frame::new(ids::SID_CLANINVITATIONRESPONSE, p.freeze()).encode_with(BNCS_HEADER)
+}
+
+pub fn warden(response: &[u8]) -> Result<Bytes, ProtoError> {
+    Frame::new(ids::SID_WARDEN, Bytes::copy_from_slice(response)).encode_with(BNCS_HEADER)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,8 +348,8 @@ mod tests {
         let slots_free_offset = 4 + 4 + 4 + 4 + 4 + 4 + name_len + 1;
         // bnetprotocol.cpp:712-714 sends 110 when MAX_SLOTS > 12; gameslot.h:39 sets it to 24.
         assert_eq!(
-            pkt_pub[slots_free_offset], 110,
-            "slots_free must be 110 (char 'n', 23 slots free for MAX_SLOTS = 24)"
+            pkt_pub[slots_free_offset], 98,
+            "slots_free must be 98 (char 'b', 11 slots free for MAX_SLOTS = 12)"
         );
 
         let pkt_priv = startadvex3(
@@ -336,5 +399,71 @@ mod tests {
         assert_eq!(p[1], ids::SID_AUTH_INFO);
         // Product is "PX3W" (W3XP reversed) for The Frozen Throne.
         assert!(p.windows(4).any(|w| w == b"PX3W"));
+    }
+
+    #[test]
+    fn test_startadvex3_stat_string_size_validation() {
+        let valid_stat_string = vec![0x41; 127]; // 127 bytes < 128
+        let res_ok = startadvex3(
+            GameVisibility::Public,
+            [1, 0, 0, 0],
+            "Test Game",
+            "Host",
+            0,
+            &valid_stat_string,
+            1,
+        );
+        assert!(res_ok.is_ok(), "127-byte stat string must be accepted");
+
+        let invalid_stat_string = vec![0x41; 128]; // 128 bytes >= 128
+        let res_err = startadvex3(
+            GameVisibility::Public,
+            [1, 0, 0, 0],
+            "Test Game",
+            "Host",
+            0,
+            &invalid_stat_string,
+            1,
+        );
+        assert!(
+            matches!(res_err, Err(ProtoError::BadValue(_))),
+            "StatString >= 128 bytes must be rejected with BadValue per bnetprotocol.cpp:694"
+        );
+    }
+
+    #[test]
+    fn clan_packets_encoded_correctly() {
+        let p_inv = claninvitation("Newbie").unwrap();
+        assert_eq!(p_inv[0], 0xFF);
+        assert_eq!(p_inv[1], ids::SID_CLANINVITATION);
+        assert_eq!(&p_inv[4..8], &[0, 0, 0, 0]); // cookie
+        assert_eq!(&p_inv[8..15], b"Newbie\0");
+
+        let p_rem = clanremovemember("Oldie").unwrap();
+        assert_eq!(p_rem[1], ids::SID_CLANREMOVEMEMBER);
+        assert_eq!(&p_rem[8..14], b"Oldie\0");
+
+        let p_rank = clanchangerank("Worker", 2).unwrap();
+        assert_eq!(p_rank[1], ids::SID_CLANCHANGERANK);
+        assert_eq!(&p_rank[8..15], b"Worker\0");
+        assert_eq!(p_rank[15], 2);
+
+        let p_motd = clansetmotd("Welcome to clan").unwrap();
+        assert_eq!(p_motd[1], ids::SID_CLANSETMOTD);
+        assert_eq!(&p_motd[8..24], b"Welcome to clan\0");
+
+        let p_accept = clancreationinvitation(b"TAG1", "Chief", true).unwrap();
+        assert_eq!(p_accept[1], ids::SID_CLANCREATIONINVITATION);
+        assert_eq!(&p_accept[8..12], b"TAG1");
+        assert_eq!(&p_accept[12..18], b"Chief\0");
+        assert_eq!(p_accept[18], 0x06);
+
+        let p_reject = claninvitationresponse(b"TAG1", "Chief", false).unwrap();
+        assert_eq!(p_reject[1], ids::SID_CLANINVITATIONRESPONSE);
+        assert_eq!(p_reject[18], 0x04);
+
+        let p_warden = warden(b"warden response").unwrap();
+        assert_eq!(p_warden[1], ids::SID_WARDEN);
+        assert_eq!(&p_warden[4..], b"warden response");
     }
 }

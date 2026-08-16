@@ -440,6 +440,7 @@ dependencies = [
  "ghost-net",
  "ghost-protocol",
  "ghost-spectator",
+ "ghost-store",
  "mpq",
  "rand",
  "sha1",

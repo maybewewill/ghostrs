@@ -254,6 +254,154 @@ pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, Proto
     }))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendListEntry {
+    pub account: String,
+    pub status: u8,
+    pub area: u8,
+    pub location: String,
+}
+
+pub fn decode_friendslist(payload: &[u8]) -> Result<Vec<FriendListEntry>, ProtoError> {
+    if payload.is_empty() {
+        return Err(ProtoError::Truncated { need: 1, have: 0 });
+    }
+    let total = payload[0] as usize;
+    let mut friends = Vec::with_capacity(total);
+    let mut offset = 1;
+    for _ in 0..total {
+        if offset >= payload.len() {
+            break;
+        }
+        let nul_pos = payload[offset..]
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or(ProtoError::UnterminatedString)?;
+        let account = String::from_utf8_lossy(&payload[offset..offset + nul_pos]).into_owned();
+        offset += nul_pos + 1;
+        if offset + 6 > payload.len() {
+            break;
+        }
+        let status = payload[offset];
+        let area = payload[offset + 1];
+        offset += 6;
+        if offset > payload.len() {
+            break;
+        }
+        let loc_nul = payload[offset..]
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or(ProtoError::UnterminatedString)?;
+        let location = String::from_utf8_lossy(&payload[offset..offset + loc_nul]).into_owned();
+        offset += loc_nul + 1;
+        friends.push(FriendListEntry {
+            account,
+            status,
+            area,
+            location,
+        });
+    }
+    Ok(friends)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClanMemberEntry {
+    pub name: String,
+    pub rank: u8,
+    pub status: u8,
+    pub location: String,
+}
+
+pub fn decode_clanmemberlist(payload: &[u8]) -> Result<Vec<ClanMemberEntry>, ProtoError> {
+    if payload.len() < 5 {
+        return Err(ProtoError::Truncated {
+            need: 5,
+            have: payload.len(),
+        });
+    }
+    let total = payload[4] as usize;
+    let mut members = Vec::with_capacity(total);
+    let mut offset = 5;
+    for _ in 0..total {
+        if offset >= payload.len() {
+            break;
+        }
+        let nul_pos = payload[offset..]
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or(ProtoError::UnterminatedString)?;
+        let name = String::from_utf8_lossy(&payload[offset..offset + nul_pos]).into_owned();
+        offset += nul_pos + 1;
+        if offset + 2 > payload.len() {
+            break;
+        }
+        let rank = payload[offset];
+        let status = payload[offset + 1];
+        offset += 2;
+        let loc_nul = payload[offset..]
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or(ProtoError::UnterminatedString)?;
+        let location = String::from_utf8_lossy(&payload[offset..offset + loc_nul]).into_owned();
+        offset += loc_nul + 1;
+        members.push(ClanMemberEntry {
+            name,
+            rank,
+            status,
+            location,
+        });
+    }
+    Ok(members)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClanInvite {
+    pub tag: [u8; 4],
+    pub clan_name: String,
+    pub inviter_name: String,
+}
+
+pub fn decode_clancreationinvitation(payload: &[u8]) -> Result<ClanInvite, ProtoError> {
+    if payload.len() < 8 {
+        return Err(ProtoError::Truncated {
+            need: 8,
+            have: payload.len(),
+        });
+    }
+    let mut tag = [0u8; 4];
+    tag.copy_from_slice(&payload[4..8]);
+    let mut offset = 8;
+    let nul1 = payload[offset..]
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or(ProtoError::UnterminatedString)?;
+    let clan_name = String::from_utf8_lossy(&payload[offset..offset + nul1]).into_owned();
+    offset += nul1 + 1;
+    let nul2 = payload[offset..]
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or(ProtoError::UnterminatedString)?;
+    let inviter_name = String::from_utf8_lossy(&payload[offset..offset + nul2]).into_owned();
+    Ok(ClanInvite {
+        tag,
+        clan_name,
+        inviter_name,
+    })
+}
+
+pub fn decode_claninvitationresponse(payload: &[u8]) -> Result<ClanInvite, ProtoError> {
+    decode_clancreationinvitation(payload)
+}
+
+pub fn decode_warden(payload: &[u8]) -> Result<Bytes, ProtoError> {
+    Ok(Bytes::copy_from_slice(payload))
+}
+
+pub fn decode_checkad(payload: &[u8]) -> Result<(), ProtoError> {
+    let _ = payload;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +439,91 @@ mod tests {
         let payload = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // 12 bytes
         let result = decode_getadvlistex(&payload);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn friendslist_decodes_multiple_friends() {
+        let mut payload = Vec::new();
+        payload.push(2); // total = 2
+        // Friend 1
+        payload.extend_from_slice(b"Alice\0");
+        payload.push(1); // status (Mutual)
+        payload.push(3); // area (Public Game)
+        payload.extend_from_slice(&[0, 0, 0, 0]); // 4 bytes unknown
+        payload.extend_from_slice(b"PX3WDOTA\0");
+        // Friend 2
+        payload.extend_from_slice(b"Bob\0");
+        payload.push(0); // status
+        payload.push(0); // area (Offline)
+        payload.extend_from_slice(&[0, 0, 0, 0]); // 4 bytes unknown
+        payload.extend_from_slice(b".\0");
+
+        let friends = decode_friendslist(&payload).expect("friendslist decoding succeeds");
+        assert_eq!(friends.len(), 2);
+        assert_eq!(friends[0].account, "Alice");
+        assert_eq!(friends[0].status, 1);
+        assert_eq!(friends[0].area, 3);
+        assert_eq!(friends[0].location, "PX3WDOTA");
+
+        assert_eq!(friends[1].account, "Bob");
+        assert_eq!(friends[1].status, 0);
+        assert_eq!(friends[1].area, 0);
+        assert_eq!(friends[1].location, ".");
+    }
+
+    #[test]
+    fn clanmemberlist_decodes_members() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[0, 0, 0, 0]); // 4 unknown bytes
+        payload.push(2); // total = 2
+        // Member 1
+        payload.extend_from_slice(b"ChieftainUser\0");
+        payload.push(4); // rank (Leader)
+        payload.push(1); // status (Online)
+        payload.extend_from_slice(b"PX3WChannel\0");
+        // Member 2
+        payload.extend_from_slice(b"PeonUser\0");
+        payload.push(1); // rank (Peon)
+        payload.push(0); // status (Offline)
+        payload.extend_from_slice(b"\0");
+
+        let members = decode_clanmemberlist(&payload).expect("clanmemberlist decoding succeeds");
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].name, "ChieftainUser");
+        assert_eq!(members[0].rank, 4);
+        assert_eq!(members[0].status, 1);
+        assert_eq!(members[0].location, "PX3WChannel");
+
+        assert_eq!(members[1].name, "PeonUser");
+        assert_eq!(members[1].rank, 1);
+        assert_eq!(members[1].status, 0);
+    }
+
+    #[test]
+    fn clan_creation_and_invitation_decode() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[0, 0, 0, 0]); // cookie
+        payload.extend_from_slice(&[b'T', b'E', b'S', b'T']); // tag
+        payload.extend_from_slice(b"MyClan\0");
+        payload.extend_from_slice(b"InviterGuy\0");
+
+        let invite = decode_clancreationinvitation(&payload).expect("clan invite decode succeeds");
+        assert_eq!(&invite.tag, b"TEST");
+        assert_eq!(invite.clan_name, "MyClan");
+        assert_eq!(invite.inviter_name, "InviterGuy");
+
+        let resp_invite = decode_claninvitationresponse(&payload).expect("response decode succeeds");
+        assert_eq!(&resp_invite.tag, b"TEST");
+        assert_eq!(resp_invite.clan_name, "MyClan");
+        assert_eq!(resp_invite.inviter_name, "InviterGuy");
+    }
+
+    #[test]
+    fn warden_and_checkad_decode() {
+        let warden_data = b"warden challenge payload";
+        let res = decode_warden(warden_data).expect("warden decode succeeds");
+        assert_eq!(&res[..], warden_data);
+
+        assert!(decode_checkad(&[]).is_ok());
     }
 }

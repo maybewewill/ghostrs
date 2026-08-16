@@ -22,6 +22,9 @@ pub struct Player {
     pub link: PlayerLink,
     pub external_ip: [u8; 4],
     pub internal_ip: [u8; 4],
+    pub joined_realm: String,
+    pub spoofed: bool,
+    pub whois_sent: bool,
     /// How many action ticks this player has confirmed via keepalive.
     pub sync_counter: u32,
     pub lagging: bool,
@@ -36,10 +39,24 @@ pub struct Player {
     pub disconnected_since: Option<Instant>,
     pub muted: bool,
     pub reserved: bool,
+    pub total_packets_sent: u32,
+    pub total_packets_received: u32,
+    pub checksums: VecDeque<u32>,
+    pub consecutive_send_failures: u32,
+    /// Code indicating why player left (matches GHost++ gameprotocol.h:38-45).
+    pub left_code: u32,
     /// Set once the player is scheduled for removal; carries the reason.
     pub left: Option<String>,
     /// True for the socket-less bot player seated to fill the lobby headcount.
     pub virtual_host: bool,
+    pub finished_loading_at: Option<Instant>,
+    pub load_in_game_data: Vec<bytes::Bytes>,
+    pub download_allowed: bool,
+    pub score: f64,
+    pub stats_sent_time: Option<Instant>,
+    pub stats_dota_sent_time: Option<Instant>,
+    pub last_gproxy_wait_notice: Option<Instant>,
+    pub gproxy_disconnect_notice_sent: bool,
 }
 
 impl Player {
@@ -51,6 +68,9 @@ impl Player {
             link,
             external_ip: [0; 4],
             internal_ip: [0; 4],
+            joined_realm: String::new(),
+            spoofed: false,
+            whois_sent: false,
             sync_counter: 0,
             lagging: false,
             started_lagging: None,
@@ -63,8 +83,21 @@ impl Player {
             disconnected_since: None,
             muted: false,
             reserved: false,
+            total_packets_sent: 0,
+            total_packets_received: 0,
+            checksums: VecDeque::with_capacity(64),
+            consecutive_send_failures: 0,
+            left_code: ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
             left: None,
             virtual_host: false,
+            load_in_game_data: Vec::new(),
+            download_allowed: false,
+            score: 0.0,
+            finished_loading_at: None,
+            stats_sent_time: None,
+            stats_dota_sent_time: None,
+            last_gproxy_wait_notice: None,
+            gproxy_disconnect_notice_sent: false,
         }
     }
     pub fn record_ping(&mut self, ping_ms: u32) {
@@ -234,5 +267,17 @@ mod tests {
         assert!(t.remove_pid(1).is_some());
         assert_eq!(t.next_free_pid(), Some(1));
         assert!(t.remove_pid(1).is_none());
+    }
+
+    #[test]
+    fn next_free_colour_finds_first_unused_colour() {
+        let t = PlayerTable::new();
+        let mut slots = SlotTable::new(12);
+        // Default slots allocate colours 0..11
+        assert_eq!(t.next_free_colour(&slots), 0);
+        // If slot 0 is changed to colour 5
+        let _ = slots.set_colour(0, 5);
+        // Colour 0 is now free if no other slot has colour 0
+        assert_eq!(t.next_free_colour(&slots), 0);
     }
 }

@@ -3,7 +3,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use ghost_protocol::w3gs::{incoming, incoming::MapSizeReport, outgoing};
 
-use crate::state::GameState;
+use crate::state::{GamePhase, GameState};
 
 /// Wire chunk size used by Warcraft III map downloads.
 pub const MAP_CHUNK: usize = 1442;
@@ -49,27 +49,40 @@ impl GameState {
             }
             return;
         }
-        if self.cfg.map.data.is_none() {
+        if self.cfg.map.data.is_none() || self.cfg.allow_downloads == 0 {
             tracing::info!(
                 pid,
                 "player lacks the map and downloads are disabled, dropping"
             );
-            if let Some(p) = self.players.by_pid_mut(pid) {
-                p.left = Some("lacks map and downloads are disabled".into());
-            }
+            self.kick_player(
+                pid,
+                "lacks map and downloads are disabled",
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT,
+            );
             self.reap_left_players();
             return;
+        }
+        if self.cfg.allow_downloads == 2 {
+            let allowed = self.players.by_pid(pid).map(|p| p.download_allowed).unwrap_or(false);
+            if !allowed {
+                tracing::info!(
+                    pid,
+                    "player lacks map and conditional downloads (allow_downloads=2) requires permission"
+                );
+                return;
+            }
         }
         if self.downloads.iter().any(|d| d.pid == pid) {
             return;
         }
 
+        let host_pid = self.host_pid();
         let mut d = Download::new(pid);
         d.sent_upto = report.map_size;
         d.acked_upto = report.map_size;
         self.downloads.push(d);
-        self.send_to(pid, outgoing::start_download(255));
-        tracing::info!(game = %self.cfg.name, pid, "map download started");
+        self.send_to(pid, outgoing::start_download(host_pid));
+        tracing::info!(game = %self.cfg.name, pid, host_pid, "map download started");
     }
 
     pub fn handle_map_part_ok(&mut self, conn_id: u64, payload: &Bytes) {
@@ -88,13 +101,68 @@ impl GameState {
         }
     }
 
+    pub fn handle_map_part_not_ok(&mut self, conn_id: u64, payload: &Bytes) {
+        let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
+            return;
+        };
+        let Ok(nack_pos) = incoming::decode_map_part_not_ok(payload) else {
+            return;
+        };
+        let total = self.cfg.map.size.max(1);
+        if let Some(d) = self.downloads.iter_mut().find(|d| d.pid == pid) {
+            d.sent_upto = nack_pos;
+            d.acked_upto = nack_pos;
+            tracing::info!(
+                game = %self.cfg.name,
+                pid,
+                nack_pos,
+                "received MAP_PART_NOT_OK, rewound transfer position"
+            );
+        }
+        if let Some(p) = self.players.by_pid_mut(pid) {
+            p.download_status = ((nack_pos as u64 * 100) / total as u64).min(100) as u8;
+        }
+    }
+
     pub fn handle_pong(&mut self, conn_id: u64, payload: &Bytes) {
         let Ok(pong) = incoming::decode_pong_to_host(payload) else {
             return;
         };
-        let now = self.created_at.elapsed().as_millis() as u32;
-        if let Some(p) = self.players.by_conn_mut(conn_id) {
-            p.record_ping(now.saturating_sub(pong) / 2);
+        if pong != 1 {
+            let now = self.created_at.elapsed().as_millis() as u32;
+            let latency_raw = now.saturating_sub(pong);
+            let ping = if self.cfg.lc_pings {
+                latency_raw / 2
+            } else {
+                latency_raw
+            };
+            let mut kick_info: Option<(u8, String)> = None;
+            if let Some(p) = self.players.by_conn_mut(conn_id) {
+                p.record_ping(ping);
+                if matches!(self.phase, GamePhase::Lobby)
+                    && !p.reserved
+                    && self.cfg.autokick_ping > 0
+                    && p.ping_history.len() >= 3
+                {
+                    if let Some(avg) = p.average_ping() {
+                        if avg > self.cfg.autokick_ping {
+                            tracing::info!(
+                                name = %p.name,
+                                avg_ping = avg,
+                                limit = self.cfg.autokick_ping,
+                                "autokicking player due to high ping"
+                            );
+                            kick_info = Some((
+                                p.pid,
+                                format!("autokicked for high ping ({avg}ms > {}ms)", self.cfg.autokick_ping),
+                            ));
+                        }
+                    }
+                }
+            }
+            if let Some((kpid, reason)) = kick_info {
+                self.kick_player(kpid, &reason, ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT);
+            }
         }
     }
 
@@ -103,39 +171,57 @@ impl GameState {
             return;
         }
         tracing::info!(conn_id, "drop request while lagging, dropping laggers");
-        for p in self.players.iter_mut() {
-            if p.lagging && p.left.is_none() {
-                p.left = Some("was dropped by vote".into());
-            }
+        let lagger_pids: Vec<u8> = self.players.iter().filter(|p| p.lagging && p.left.is_none()).map(|p| p.pid).collect();
+        for lpid in lagger_pids {
+            self.kick_player(lpid, "was dropped by vote", ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT);
         }
     }
 
     /// Sends the next slice of every in-flight map download. Called once per tick.
     pub fn pump_downloads(&mut self) {
+        if !matches!(self.phase, GamePhase::Lobby) {
+            return;
+        }
         let Some(data) = self.cfg.map.data.clone() else {
             self.downloads.clear();
             return;
         };
         let total = data.len() as u32;
 
+        if self.last_download_counter_reset.elapsed() >= std::time::Duration::from_secs(1) {
+            self.download_counter = 0;
+            self.last_download_counter_reset = Instant::now();
+        }
+
+        let host_pid = self.host_pid();
+        let max_downloaders = self.cfg.max_downloaders as usize;
+        let max_speed_bytes = (self.cfg.max_download_speed as usize) * 1024;
+        let mut downloaders_count = 0usize;
         let mut packets: Vec<(u8, Bytes)> = Vec::new();
-        self.downloads.retain_mut(|d| {
+
+        for d in self.downloads.iter_mut() {
             if d.acked_upto >= total {
-                tracing::info!(
-                    pid = d.pid,
-                    secs = d.started.elapsed().as_secs(),
-                    "map download finished"
-                );
-                return false;
+                continue;
             }
-            for _ in 0..MAX_PARTS_PER_TICK {
-                if d.sent_upto >= total {
+            downloaders_count += 1;
+            if max_downloaders > 0 && downloaders_count > max_downloaders {
+                break;
+            }
+
+            // Up to 100 parts per 100ms cycle (matching GHost++ game_base.cpp:599-634)
+            let burst_limit = d.acked_upto.saturating_add((MAP_CHUNK * 100) as u32);
+            while d.sent_upto < burst_limit && d.sent_upto < total {
+                if max_speed_bytes > 0 && self.download_counter >= max_speed_bytes {
                     break;
                 }
+
                 let start = d.sent_upto as usize;
                 let end = (start + MAP_CHUNK).min(data.len());
-                match outgoing::map_part(255, d.pid, d.sent_upto, &data[start..end]) {
-                    Ok(b) => packets.push((d.pid, b)),
+                match outgoing::map_part(host_pid, d.pid, d.sent_upto, &data[start..end]) {
+                    Ok(b) => {
+                        packets.push((d.pid, b));
+                        self.download_counter += end - start;
+                    }
                     Err(e) => {
                         tracing::warn!(error = %e, "failed to build map part");
                         break;
@@ -143,7 +229,42 @@ impl GameState {
                 }
                 d.sent_upto = end as u32;
             }
-            true
+        }
+
+        let store = self.store.clone();
+        let map_path = self.cfg.map.path.clone();
+        let map_size = self.cfg.map.size as u64;
+        let players = &self.players;
+
+        self.downloads.retain(|d| {
+            if d.acked_upto >= total {
+                let elapsed_secs = d.started.elapsed().as_secs();
+                tracing::info!(
+                    pid = d.pid,
+                    secs = elapsed_secs,
+                    "map download finished"
+                );
+                if let Some(s) = &store {
+                    if let Some(p) = players.by_pid(d.pid) {
+                        let ip_str = format!(
+                            "{}.{}.{}.{}",
+                            p.external_ip[0], p.external_ip[1], p.external_ip[2], p.external_ip[3]
+                        );
+                        s.record_download(
+                            &map_path,
+                            map_size,
+                            &p.name,
+                            &ip_str,
+                            if p.spoofed { 1 } else { 0 },
+                            total as u64,
+                            elapsed_secs,
+                        );
+                    }
+                }
+                false
+            } else {
+                true
+            }
         });
 
         for (pid, b) in packets {
@@ -172,7 +293,27 @@ mod tests {
         st.handle_map_size(1, &p.freeze());
 
         assert_eq!(st.downloads.len(), 1);
-        assert!(drain_ids(&mut rxs[0]).contains(&ids::START_DOWNLOAD));
+        let first_pkt = rxs[0].try_recv().expect("must receive START_DOWNLOAD");
+        assert_eq!(first_pkt[1], ids::START_DOWNLOAD);
+        // Wire verification B1: fromPID is host PID (1), not 255
+        assert_eq!(first_pkt[4], 1, "START_DOWNLOAD fromPID must be host PID");
+    }
+
+    #[test]
+    fn map_part_packets_carry_host_pid() {
+        let (mut st, mut rxs) = seated_game(1);
+        st.cfg.map.size = 100_000;
+        st.cfg.map.data = Some(std::sync::Arc::new(vec![0xAA; 100_000]));
+        st.downloads.push(Download::new(1));
+        let _ = drain_ids(&mut rxs[0]);
+
+        st.pump_downloads();
+
+        let part_pkt = rxs[0].try_recv().expect("must receive MAP_PART");
+        assert_eq!(part_pkt[1], ids::MAP_PART);
+        // Wire verification B1: fromPID is host PID (1), toPID is 1
+        assert_eq!(part_pkt[4], 1, "MAP_PART fromPID must be host PID");
+        assert_eq!(part_pkt[5], 1, "MAP_PART toPID must be receiver PID");
     }
 
     #[test]
@@ -188,18 +329,19 @@ mod tests {
     }
 
     #[test]
-    fn each_tick_sends_a_bounded_number_of_map_parts() {
+    fn download_throttling_respects_max_download_speed() {
         let (mut st, mut rxs) = seated_game(1);
         st.cfg.map.size = 100_000;
         st.cfg.map.data = Some(std::sync::Arc::new(vec![0u8; 100_000]));
+        st.cfg.max_download_speed = 5; // 5 KB/s = 5120 bytes max in 1 sec window
         st.downloads.push(Download::new(1));
         let _ = drain_ids(&mut rxs[0]);
 
         st.pump_downloads();
 
         let sent = drain_ids(&mut rxs[0]);
-        assert_eq!(sent.len(), MAX_PARTS_PER_TICK);
-        assert!(sent.iter().all(|&id| id == ids::MAP_PART));
+        // 5120 bytes / 1442 bytes per part = at most 4 parts sent
+        assert!(sent.len() <= 4, "must throttle to max_download_speed");
     }
 
     #[test]
@@ -238,5 +380,37 @@ mod tests {
         let sent = drain_ids(&mut rxs[1]);
         assert!(sent.contains(&ids::PLAYER_LEAVE_OTHERS));
         assert!(sent.contains(&ids::SLOT_INFO));
+    }
+
+    #[test]
+    fn test_map_part_not_ok_rewinds_download_and_resends() {
+        let (mut st, mut rxs) = seated_game(1);
+        st.cfg.map.size = 10_000;
+        st.cfg.map.data = Some(std::sync::Arc::new(vec![0u8; 10_000]));
+        let mut d = Download::new(1);
+        d.sent_upto = 4000;
+        d.acked_upto = 2884;
+        st.downloads.push(d);
+
+        let _ = drain_ids(&mut rxs[0]);
+
+        // Client reports MAP_PART_NOT_OK at 1442 bytes (corrupted second part)
+        let mut p = bytes::BytesMut::new();
+        bytes::BufMut::put_u8(&mut p, 1); // to
+        bytes::BufMut::put_u8(&mut p, 1); // from
+        bytes::BufMut::put_u32_le(&mut p, 1442);
+        st.handle_map_part_not_ok(1, &p.freeze());
+
+        // Download state must be rewound to 1442
+        let d_now = st.downloads.iter().find(|d| d.pid == 1).unwrap();
+        assert_eq!(d_now.sent_upto, 1442);
+        assert_eq!(d_now.acked_upto, 1442);
+
+        // Next pump_downloads must send map part starting from 1442
+        st.pump_downloads();
+        let part_pkt = rxs[0].try_recv().expect("must receive MAP_PART after rewind");
+        assert_eq!(part_pkt[1], ids::MAP_PART);
+        let start_offset = u32::from_le_bytes([part_pkt[10], part_pkt[11], part_pkt[12], part_pkt[13]]);
+        assert_eq!(start_offset, 1442, "MAP_PART must be resent starting from rewound offset");
     }
 }

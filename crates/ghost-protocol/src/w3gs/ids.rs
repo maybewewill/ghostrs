@@ -33,5 +33,17 @@ pub const START_DOWNLOAD: u8 = 0x3F;
 pub const MAP_SIZE: u8 = 0x42;
 pub const MAP_PART: u8 = 0x43;
 pub const MAP_PART_OK: u8 = 0x44;
+pub const MAP_PART_NOT_OK: u8 = 0x45;
 pub const PONG_TO_HOST: u8 = 0x46;
 pub const INCOMING_ACTION2: u8 = 0x48;
+
+// PLAYERLEAVE_* constants matching GHost++ gameprotocol.h:38-45
+pub const PLAYERLEAVE_DISCONNECT: u32 = 1;
+pub const PLAYERLEAVE_LOST: u32 = 7;
+pub const PLAYERLEAVE_LOSTBUILDINGS: u32 = 8;
+pub const PLAYERLEAVE_WON: u32 = 9;
+pub const PLAYERLEAVE_DRAW: u32 = 10;
+pub const PLAYERLEAVE_OBSERVER: u32 = 11;
+pub const PLAYERLEAVE_LOBBY: u32 = 13;
+pub const PLAYERLEAVE_GPROXY: u32 = 100;
+

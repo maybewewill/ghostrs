@@ -1,11 +1,6 @@
 use std::path::Path;
 
-mod config;
-mod supervisor;
-mod telemetry;
-
-use config::Config;
-use supervisor::Supervisor;
+use ghostrs::{Config, Supervisor, telemetry};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -15,15 +10,18 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // `--host <game name>` creates a lobby at startup instead of waiting for a
-    // root admin's `!pub`. The advert is queued and goes out on the next refresh
-    // tick once battle.net login completes.
-    let mut host_on_start = None;
+    // root admin's `!pub`. Multiple `--host` flags can be passed to host multiple games.
+    let mut host_on_start = Vec::new();
     let mut start_after = None;
     let mut positional = Vec::new();
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--host" => host_on_start = it.next().cloned(),
+            "--host" => {
+                if let Some(h) = it.next() {
+                    host_on_start.push(h.clone());
+                }
+            }
             // Fires the same GameCmd::Start that the `!start` command sends, so the
             // start path can be exercised without an admin whispering the bot.
             "--start-after" => start_after = it.next().and_then(|s| s.parse::<u64>().ok()),
@@ -32,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let args = positional;
-    let cfg_path = if let Some(arg) = args.first() {
+    let cfg_path = if let Some(arg) = args.first().filter(|a| Path::new(a).exists()) {
         std::path::PathBuf::from(arg)
     } else if Path::new("ghost.toml").exists() {
         std::path::PathBuf::from("ghost.toml")

@@ -47,14 +47,139 @@ pub const MAPFILTER_TYPE_SCENARIO: u8 = 2;
 pub const MAPFILTER_SIZE_SMALL: u8 = 1;
 pub const MAPFILTER_SIZE_MEDIUM: u8 = 2;
 pub const MAPFILTER_SIZE_LARGE: u8 = 4;
+pub const MAPFILTER_OBS_FULL: u8 = 1;
+pub const MAPFILTER_OBS_ONDEATH: u8 = 2;
 pub const MAPFILTER_OBS_NONE: u8 = 4;
 
+pub const MAPGAMETYPE_MAKERUSER: u32 = 1 << 13;
+pub const MAPGAMETYPE_MAKERBLIZZARD: u32 = 1 << 14;
 pub const MAPGAMETYPE_TYPEMELEE: u32 = 1 << 15;
 pub const MAPGAMETYPE_TYPESCENARIO: u32 = 1 << 16;
 pub const MAPGAMETYPE_SIZESMALL: u32 = 1 << 17;
 pub const MAPGAMETYPE_SIZEMEDIUM: u32 = 1 << 18;
 pub const MAPGAMETYPE_SIZELARGE: u32 = 1 << 19;
+pub const MAPGAMETYPE_OBSFULL: u32 = 1 << 20;
+pub const MAPGAMETYPE_OBSONDEATH: u32 = 1 << 21;
 pub const MAPGAMETYPE_OBSNONE: u32 = 1 << 22;
+
+pub fn calculate_game_flags(speed: u8, visibility: u8, observers: u8, map_flags: u8) -> u32 {
+    let mut flags: u32 = match speed {
+        MAPSPEED_SLOW => 0x0000_0000,
+        MAPSPEED_NORMAL => 0x0000_0001,
+        _ => 0x0000_0002, // MAPSPEED_FAST
+    };
+    flags |= match visibility {
+        MAPVIS_HIDETERRAIN => 0x0000_0100,
+        MAPVIS_EXPLORED => 0x0000_0200,
+        MAPVIS_ALWAYSVISIBLE => 0x0000_0400,
+        _ => 0x0000_0800, // MAPVIS_DEFAULT
+    };
+    flags |= match observers {
+        MAPOBS_ONDEFEAT => 0x0000_2000,
+        MAPOBS_ALLOWED => 0x0000_3000,
+        MAPOBS_REFEREES => 0x4000_0000,
+        _ => 0x0000_0000, // MAPOBS_NONE
+    };
+    if map_flags & MAPFLAG_TEAMSTOGETHER != 0 {
+        flags |= 0x0000_4000;
+    }
+    if map_flags & MAPFLAG_FIXEDTEAMS != 0 {
+        flags |= 0x0006_0000;
+    }
+    if map_flags & MAPFLAG_UNITSHARE != 0 {
+        flags |= 0x0100_0000;
+    }
+    if map_flags & MAPFLAG_RANDOMHERO != 0 {
+        flags |= 0x0200_0000;
+    }
+    if map_flags & MAPFLAG_RANDOMRACES != 0 {
+        flags |= 0x0400_0000;
+    }
+    flags
+}
+
+pub fn calculate_game_type(
+    filter_maker: u8,
+    filter_type: u8,
+    filter_size: u8,
+    filter_obs: u8,
+) -> u32 {
+    let mut game_type = 0u32;
+    if filter_maker & MAPFILTER_MAKER_USER != 0 {
+        game_type |= MAPGAMETYPE_MAKERUSER;
+    }
+    if filter_maker & MAPFILTER_MAKER_BLIZZARD != 0 {
+        game_type |= MAPGAMETYPE_MAKERBLIZZARD;
+    }
+
+    if filter_type & MAPFILTER_TYPE_MELEE != 0 {
+        game_type |= MAPGAMETYPE_TYPEMELEE;
+    }
+    if filter_type & MAPFILTER_TYPE_SCENARIO != 0 {
+        game_type |= MAPGAMETYPE_TYPESCENARIO;
+    }
+
+    if filter_size & MAPFILTER_SIZE_SMALL != 0 {
+        game_type |= MAPGAMETYPE_SIZESMALL;
+    }
+    if filter_size & MAPFILTER_SIZE_MEDIUM != 0 {
+        game_type |= MAPGAMETYPE_SIZEMEDIUM;
+    }
+    if filter_size & MAPFILTER_SIZE_LARGE != 0 {
+        game_type |= MAPGAMETYPE_SIZELARGE;
+    }
+
+    if filter_obs & MAPFILTER_OBS_FULL != 0 {
+        game_type |= MAPGAMETYPE_OBSFULL;
+    }
+    if filter_obs & MAPFILTER_OBS_ONDEATH != 0 {
+        game_type |= MAPGAMETYPE_OBSONDEATH;
+    }
+    if filter_obs & MAPFILTER_OBS_NONE != 0 {
+        game_type |= MAPGAMETYPE_OBSNONE;
+    }
+    game_type
+}
+
+pub fn apply_melee_slot_init(slots: &mut [SlotInfo]) {
+    for (i, slot) in slots.iter_mut().enumerate() {
+        slot.team = i as u8;
+        slot.race = 0x20; // SLOTRACE_RANDOM
+    }
+}
+
+pub fn apply_random_races_force(slots: &mut [SlotInfo], map_flags: u8) {
+    if map_flags & MAPFLAG_RANDOMRACES != 0 {
+        for slot in slots.iter_mut() {
+            slot.race = 0x20;
+        }
+    }
+}
+
+pub fn add_observer_slots(
+    slots: &mut Vec<SlotInfo>,
+    observers: u8,
+    editor_version: u32,
+    custom_max_slots: Option<u32>,
+) {
+    if observers == MAPOBS_ALLOWED || observers == MAPOBS_REFEREES {
+        let default_max = if editor_version < 6060 { 12 } else { 24 };
+        let max_slots = custom_max_slots.unwrap_or(default_max) as usize;
+        while slots.len() < max_slots {
+            slots.push(SlotInfo {
+                pid: 0,
+                download_status: 255,
+                slot_status: SlotStatus::Open as u8,
+                computer: 0,
+                team: 24,
+                colour: 24,
+                race: 0x20,
+                computer_type: 1,
+                handicap: 100,
+            });
+        }
+    }
+}
 
 /// Standard Warcraft III polynomial checksum calculation.
 pub fn xor_rotate_left(data: &[u8]) -> u32 {
@@ -66,24 +191,22 @@ pub fn xor_rotate_left(data: &[u8]) -> u32 {
         i += 4;
     }
     while i < data.len() {
-        val = (val ^ u32::from(data[i])).rotate_left(3);
+        val = (val ^ (data[i] as u32)).rotate_left(3);
         i += 1;
     }
     val
 }
 
-fn read_cstring(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
+fn read_cstring(r: &mut Cursor<&[u8]>) -> io::Result<String> {
     let mut buf = Vec::new();
-    let mut b = [0u8; 1];
     loop {
-        if cursor.read_exact(&mut b).is_err() {
+        let mut byte = [0u8; 1];
+        r.read_exact(&mut byte)?;
+        if byte[0] == 0 {
             break;
         }
-        if b[0] == 0 {
-            break;
-        }
-        buf.push(b[0]);
-        if buf.len() > 512 {
+        buf.push(byte[0]);
+        if buf.len() > 1024 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "CString too long",
@@ -99,14 +222,51 @@ pub struct ParsedMap {
     pub layout_style: u8,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct MapOverride {
+    pub speed: Option<u8>,
+    pub visibility: Option<u8>,
+    pub observers: Option<u8>,
+    pub flags: Option<u8>,
+    pub game_type: Option<u32>,
+    pub filter_maker: Option<u8>,
+    pub filter_type: Option<u8>,
+    pub filter_size: Option<u8>,
+    pub filter_obs: Option<u8>,
+    pub options: Option<u32>,
+    pub width: Option<u16>,
+    pub height: Option<u16>,
+    pub num_players: Option<u8>,
+    pub num_teams: Option<u8>,
+    pub custom_slots: Option<Vec<SlotInfo>>,
+    pub map_type: Option<String>,
+    pub matchmaking_category: Option<String>,
+    pub stats_w3mmd_category: Option<String>,
+    pub default_hcl: Option<String>,
+    pub default_player_score: Option<u32>,
+    pub loading_in_game: Option<bool>,
+    pub local_path: Option<String>,
+    pub max_slots: Option<u32>,
+}
+
 impl ParsedMap {
     pub fn load_mpq(
         path: &Path,
         common_j: Option<&[u8]>,
         blizzard_j: Option<&[u8]>,
     ) -> io::Result<Self> {
+        Self::load_mpq_with_override(path, common_j, blizzard_j, None)
+    }
+
+    pub fn load_mpq_with_override(
+        path: &Path,
+        common_j: Option<&[u8]>,
+        blizzard_j: Option<&[u8]>,
+        ovr: Option<&MapOverride>,
+    ) -> io::Result<Self> {
         let map_data = fs::read(path)?;
         let map_size = map_data.len() as u32;
+
 
         let mut map_archive = Archive::open(path).map_err(|e| {
             io::Error::new(
@@ -194,14 +354,16 @@ impl ParsedMap {
         }
 
         let map_crc = val;
+        let map_info = crc32fast::hash(&map_data);
         let mut map_sha1 = [0u8; 20];
         map_sha1.copy_from_slice(&hasher.finalize());
 
         // 5. Parse war3map.w3i
         let mut width = 128u16;
         let mut height = 128u16;
-        let mut num_players = 12u8;
         let mut num_teams = 2u8;
+        let mut editor_version = 0u32;
+
         let mut slots = Vec::new();
         let mut map_options = 0u32;
 
@@ -216,7 +378,10 @@ impl ParsedMap {
                     if cursor.read_exact(&mut u32_buf).is_ok() {
                         let file_format = u32::from_le_bytes(u32_buf);
                         if file_format == 18 || file_format == 25 {
-                            let _ = cursor.seek(SeekFrom::Current(8)); // saves + editor version
+                            let _ = cursor.seek(SeekFrom::Current(4)); // number of saves
+                            if cursor.read_exact(&mut u32_buf).is_ok() {
+                                editor_version = u32::from_le_bytes(u32_buf);
+                            }
                             for _ in 0..4 {
                                 let _ = read_cstring(&mut cursor);
                             }
@@ -321,8 +486,6 @@ impl ParsedMap {
                                         let _ = read_cstring(&mut cursor); // team name
                                     }
                                 }
-
-                                num_players = slots.len() as u8;
                             }
                         }
                     }
@@ -344,8 +507,33 @@ impl ParsedMap {
                     handicap: 100,
                 })
                 .collect();
-            num_players = 12;
             num_teams = 2;
+        }
+
+        if map_options & MAPOPT_MELEE != 0 {
+            apply_melee_slot_init(&mut slots);
+        }
+
+        if map_options & MAPOPT_FIXEDPLAYERSETTINGS == 0 {
+            for slot in &mut slots {
+                slot.race |= 0x40; // SLOTRACE_SELECTABLE
+            }
+        }
+
+        if let Some(opts) = ovr.and_then(|o| o.options) {
+            map_options = opts;
+        }
+        if let Some(w) = ovr.and_then(|o| o.width) {
+            width = w;
+        }
+        if let Some(h) = ovr.and_then(|o| o.height) {
+            height = h;
+        }
+        if let Some(nt) = ovr.and_then(|o| o.num_teams) {
+            num_teams = nt;
+        }
+        if let Some(cs) = ovr.and_then(|o| o.custom_slots.clone()) {
+            slots = cs;
         }
 
         let layout_style = if (map_options & MAPOPT_CUSTOMFORCES) == 0 {
@@ -356,15 +544,65 @@ impl ParsedMap {
             3
         };
 
-        let mut game_type = MAPGAMETYPE_TYPESCENARIO | MAPGAMETYPE_SIZELARGE | MAPGAMETYPE_OBSNONE;
-        if map_options & MAPOPT_MELEE != 0 {
-            game_type = MAPGAMETYPE_TYPEMELEE | MAPGAMETYPE_SIZELARGE | MAPGAMETYPE_OBSNONE;
+        let speed = ovr.and_then(|o| o.speed).unwrap_or(MAPSPEED_FAST);
+        let visibility = ovr.and_then(|o| o.visibility).unwrap_or(MAPVIS_DEFAULT);
+        let observers = ovr.and_then(|o| o.observers).unwrap_or(MAPOBS_NONE);
+        let map_flags = ovr
+            .and_then(|o| o.flags)
+            .unwrap_or(MAPFLAG_TEAMSTOGETHER | MAPFLAG_FIXEDTEAMS);
+
+        apply_random_races_force(&mut slots, map_flags);
+        add_observer_slots(
+            &mut slots,
+            observers,
+            editor_version,
+            ovr.and_then(|o| o.max_slots),
+        );
+        let num_players = ovr
+            .and_then(|o| o.num_players)
+            .unwrap_or(slots.len() as u8);
+
+        let flags = calculate_game_flags(speed, visibility, observers, map_flags);
+
+        let default_filter_type = if map_options & MAPOPT_MELEE != 0 {
+            MAPFILTER_TYPE_MELEE
+        } else {
+            MAPFILTER_TYPE_SCENARIO
+        };
+        let filter_maker = ovr.and_then(|o| o.filter_maker).unwrap_or(MAPFILTER_MAKER_USER);
+        let filter_type = ovr.and_then(|o| o.filter_type).unwrap_or(default_filter_type);
+        let filter_size = ovr.and_then(|o| o.filter_size).unwrap_or(MAPFILTER_SIZE_LARGE);
+        let filter_obs = ovr.and_then(|o| o.filter_obs).unwrap_or(MAPFILTER_OBS_NONE);
+
+        let mut game_type = calculate_game_type(filter_maker, filter_type, filter_size, filter_obs);
+        if let Some(gt) = ovr.and_then(|o| o.game_type) {
+            game_type = gt;
         }
 
-        let mut flags: u32 = 0x0000_0002; // MAPSPEED_FAST
-        flags |= 0x0000_0800; // MAPVIS_DEFAULT
-        flags |= 0x0000_4000; // MAPFLAG_TEAMSTOGETHER
-        flags |= 0x0006_0000; // MAPFLAG_FIXEDTEAMS
+        let map_type = ovr
+            .and_then(|o| o.map_type.clone())
+            .unwrap_or_else(|| "dota".into());
+        let matchmaking_category = ovr
+            .and_then(|o| o.matchmaking_category.clone())
+            .unwrap_or_default();
+        let stats_w3mmd_category = ovr
+            .and_then(|o| o.stats_w3mmd_category.clone())
+            .unwrap_or_else(|| "default".into());
+        let default_hcl = ovr
+            .and_then(|o| o.default_hcl.clone())
+            .unwrap_or_default();
+        let default_player_score = ovr
+            .and_then(|o| o.default_player_score)
+            .unwrap_or(1000);
+        let loading_in_game = ovr
+            .and_then(|o| o.loading_in_game)
+            .unwrap_or(false);
+        let local_path = ovr
+            .and_then(|o| o.local_path.clone())
+            .unwrap_or_default();
+        let max_slots = ovr
+            .and_then(|o| o.max_slots)
+            .unwrap_or(24);
 
         let file_name = path
             .file_name()
@@ -375,7 +613,7 @@ impl ParsedMap {
         let info = MapInfo {
             path: wc3_map_path,
             size: map_size,
-            info: map_size,
+            info: map_info,
             crc: map_crc,
             sha1: map_sha1,
             num_players,
@@ -386,7 +624,18 @@ impl ParsedMap {
             flags,
             data: Some(Arc::new(map_data)),
             layout_style,
+            options: map_options,
+            map_type,
+            matchmaking_category,
+            stats_w3mmd_category,
+            default_hcl,
+            default_player_score,
+            loading_in_game,
+            local_path,
+            max_slots,
         };
+
+        info.check_valid().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         Ok(Self {
             info,
@@ -399,6 +648,7 @@ impl ParsedMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     #[test]
@@ -408,39 +658,26 @@ mod tests {
         let map_path = workspace_dir.join("maps").join("iCCup DotA 454.w3x");
 
         if !map_path.exists() {
-            eprintln!("Map file not found at {:?}", map_path);
+            println!("Map file not found at {:?}, skipping test", map_path);
             return;
         }
 
-        let common_j_path = workspace_dir.join("maps").join("common.j");
-        let blizzard_j_path = workspace_dir.join("maps").join("blizzard.j");
-
-        let common_j = fs::read(&common_j_path).ok();
-        let blizzard_j = fs::read(&blizzard_j_path).ok();
+        let common_j = fs::read(workspace_dir.join("maps").join("common.j")).ok();
+        let blizzard_j = fs::read(workspace_dir.join("maps").join("blizzard.j")).ok();
 
         let parsed = ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
-            .expect("Failed to parse iCCup DotA 454.w3x");
+            .expect("Failed to parse map");
 
-        println!("=== MAP INFO ===");
+        println!("--- Map Parsed Info ---");
         println!("Path: {}", parsed.info.path);
-        println!("Size: {} bytes", parsed.info.size);
+        println!("Size: {}", parsed.info.size);
         println!("CRC: 0x{:08X}", parsed.info.crc);
-        println!("SHA1: {:02x?}", parsed.info.sha1);
-        println!("Dimensions: {}x{}", parsed.info.width, parsed.info.height);
+        println!("Width: {}, Height: {}", parsed.info.width, parsed.info.height);
         println!(
             "Players: {}, Teams: {}",
             parsed.info.num_players, parsed.info.num_teams
         );
         println!("Layout Style: {}", parsed.layout_style);
-        println!("Game Type: 0x{:08X}", parsed.info.game_type);
-        println!("Flags: 0x{:08X}", parsed.info.flags);
-        println!("Slots count: {}", parsed.slots.len());
-        for (i, slot) in parsed.slots.iter().enumerate() {
-            println!(
-                "  Slot {}: team={}, colour={}, status={}, race=0x{:02X}, computer={}",
-                i, slot.team, slot.colour, slot.slot_status, slot.race, slot.computer
-            );
-        }
 
         assert_eq!(parsed.info.path, "Maps\\Download\\iCCup DotA 454.w3x");
         assert_eq!(parsed.info.size, 17020779);
@@ -503,7 +740,28 @@ mod tests {
             custom_slots: Some(parsed.slots.clone()),
             replay_path: PathBuf::from("replays/dota_test.w3g"),
             relay: None,
+            max_downloaders: 3,
+            max_download_speed: 100,
+            allow_downloads: 1,
+            autokick_ping: 400,
+            lc_pings: true,
+            spoof_checks: 0,
+            require_spoof_checks: false,
+            host_port: 6112,
+            gproxy_reconnect_port: 6114,
+            store: None,
+            stat_string: Vec::new(),
+            event_tx: None,
+            lobby_time_limit: 10,
+            load_in_game: false,
+            auto_save: false,
+            creator_name: String::new(),
+            creator_server: String::new(),
+            min_score: 0.0,
+            max_score: 0.0,
+            matchmaking: false,
         };
+
 
         let mut st = GameState::new(game_cfg);
 
@@ -562,7 +820,7 @@ mod tests {
             ref mut started_at, ..
         } = st.phase
         {
-            *started_at = std::time::Instant::now() - std::time::Duration::from_millis(2600);
+            *started_at = std::time::Instant::now() - std::time::Duration::from_millis(5100);
         }
         st.on_tick(0);
         assert_eq!(st.phase, GamePhase::Loading);
@@ -625,4 +883,44 @@ mod tests {
             "Simulation completed successfully: Map resolved, Lobby seated, Game started, Loading finished, Playing ticks & Actions streamed!"
         );
     }
+
+    #[test]
+    fn test_map_observers_and_config_override() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_dir = manifest_dir.parent().unwrap().parent().unwrap();
+        let map_path = workspace_dir.join("maps").join("iCCup DotA 454.w3x");
+
+        if !map_path.exists() {
+            return;
+        }
+
+        let common_j = fs::read(workspace_dir.join("maps").join("common.j")).ok();
+        let blizzard_j = fs::read(workspace_dir.join("maps").join("blizzard.j")).ok();
+
+        // 1. Default load has MAPOBS_NONE (bit 22 set in game_type, no 0x3000 in flags)
+        let default_map = ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
+            .expect("load default map");
+        assert_eq!(default_map.info.game_type & MAPGAMETYPE_OBSNONE, MAPGAMETYPE_OBSNONE);
+        assert_eq!(default_map.info.game_type & MAPGAMETYPE_OBSFULL, 0);
+
+        // 2. Load with override enabling observers (MAPOBS_ALLOWED = 3) and filter_obs = MAPFILTER_OBS_FULL
+        let ovr = MapOverride {
+            observers: Some(MAPOBS_ALLOWED),
+            filter_obs: Some(MAPFILTER_OBS_FULL),
+            speed: Some(MAPSPEED_NORMAL),
+            visibility: Some(MAPVIS_ALWAYSVISIBLE),
+            flags: Some(MAPFLAG_TEAMSTOGETHER),
+            ..Default::default()
+        };
+        let ovr_map = ParsedMap::load_mpq_with_override(&map_path, common_j.as_deref(), blizzard_j.as_deref(), Some(&ovr))
+            .expect("load map with override");
+
+        // Observers bit should be MAPGAMETYPE_OBSFULL (bit 20), not MAPGAMETYPE_OBSNONE
+        assert_eq!(ovr_map.info.game_type & MAPGAMETYPE_OBSFULL, MAPGAMETYPE_OBSFULL);
+        assert_eq!(ovr_map.info.game_type & MAPGAMETYPE_OBSNONE, 0);
+
+        // Flags should reflect speed=normal(1), vis=always(0x400), obs=allowed(0x3000), flags=0x4000 -> 0x00007401
+        assert_eq!(ovr_map.info.flags, 0x0000_0001 | 0x0000_0400 | 0x0000_3000 | 0x0000_4000);
+    }
 }
+

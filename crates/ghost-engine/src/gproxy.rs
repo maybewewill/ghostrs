@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use ghost_net::PlayerLink;
-use ghost_protocol::gps::{ReconnectReq, ack, reject, reject_reason};
+use ghost_protocol::gps::{ReconnectReq, reconnect_ok, reject, reject_reason};
 
 use crate::state::GameState;
 
@@ -51,6 +51,15 @@ impl GProxyBuffer {
 }
 
 impl GameState {
+    pub fn gproxy_empty_actions(&self) -> u8 {
+        let secs = self.cfg.reconnect_wait.as_secs();
+        if secs == 0 {
+            return 0;
+        }
+        let mins = if secs >= 60 { secs / 60 } else { secs };
+        (mins.saturating_sub(1)).min(9) as u8
+    }
+
     pub fn handle_gps_reconnect(
         &mut self,
         conn_id: u64,
@@ -84,7 +93,7 @@ impl GameState {
         p.disconnected_since = None;
         p.left = None;
 
-        let _ = p.link.try_send(ack(received));
+        let _ = p.link.try_send(reconnect_ok(received));
         for packet in replay {
             if p.link.try_send(packet).is_err() {
                 break;
@@ -94,13 +103,39 @@ impl GameState {
         true
     }
 
-    /// Removes GProxy players who never came back within the grace period.
+    /// Removes GProxy players who never came back within the grace period,
+    /// and periodically broadcasts wait notices every 20 seconds.
     pub fn reap_gproxy_timeouts(&mut self, grace: Duration) {
+        let mut notices: Vec<String> = Vec::new();
         for p in self.players.iter_mut() {
-            if p.disconnected_since.is_some_and(|t| t.elapsed() >= grace) {
-                p.left = Some("failed to reconnect in time".into());
-                p.disconnected_since = None;
+            if let Some(since) = p.disconnected_since {
+                let elapsed = since.elapsed();
+                if elapsed >= grace {
+                    p.left = Some("failed to reconnect in time".into());
+                    p.left_code = ghost_protocol::w3gs::ids::PLAYERLEAVE_GPROXY;
+                    p.disconnected_since = None;
+                } else if !p.gproxy_disconnect_notice_sent {
+                    p.gproxy_disconnect_notice_sent = true;
+                    p.last_gproxy_wait_notice = Some(Instant::now());
+                    notices.push(format!(
+                        "Player [{}] has lost connection but is using GProxy++ and may reconnect.",
+                        p.name
+                    ));
+                } else if p
+                    .last_gproxy_wait_notice
+                    .is_some_and(|t| t.elapsed() >= Duration::from_secs(20))
+                {
+                    let remaining = grace.saturating_sub(elapsed).as_secs();
+                    p.last_gproxy_wait_notice = Some(Instant::now());
+                    notices.push(format!(
+                        "Waiting for reconnect ({} seconds remain)...",
+                        remaining
+                    ));
+                }
             }
+        }
+        for notice in notices {
+            self.send_chat_all(&notice);
         }
     }
 }
@@ -175,6 +210,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn broadcast_buffers_packets_and_does_not_drop_gproxy_players_on_closed_links() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
+        st.begin_playing();
+        let p = st.players.by_pid_mut(1).unwrap();
+        p.gproxy = true;
+        p.gproxy_buffer = Some(GProxyBuffer::new(10));
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        drop(rx); // dead link
+        p.link = PlayerLink::for_test(tx);
+
+        st.broadcast(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]));
+        st.broadcast(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]));
+
+        let p = st.players.by_pid(1).unwrap();
+        assert!(
+            p.left.is_none(),
+            "gproxy player must not be dropped immediately on a closed link"
+        );
+        assert!(
+            p.disconnected_since.is_some(),
+            "gproxy player must enter the reconnect grace period"
+        );
+        assert_eq!(
+            p.gproxy_buffer.as_ref().unwrap().total_sent(),
+            2,
+            "packets must be buffered for replay on reconnect"
+        );
+    }
+
+    #[tokio::test]
     async fn a_wrong_reconnect_key_is_refused() {
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
         st.begin_playing();
@@ -192,4 +257,58 @@ mod tests {
         assert!(!ok);
         assert_ne!(st.players.by_pid(1).unwrap().conn_id, 99);
     }
+
+    #[test]
+    fn gproxy_empty_actions_formula_matches_ghostpp() {
+        let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
+        st.cfg.reconnect_wait = Duration::from_secs(180); // 3 minutes
+        assert_eq!(st.gproxy_empty_actions(), 2);
+
+        st.cfg.reconnect_wait = Duration::from_secs(600); // 10 minutes (clamped to 9)
+        assert_eq!(st.gproxy_empty_actions(), 9);
+
+        st.cfg.reconnect_wait = Duration::from_secs(3); // 3 raw minutes / units
+        assert_eq!(st.gproxy_empty_actions(), 2);
+
+        st.cfg.reconnect_wait = Duration::from_secs(60); // 1 minute -> 0 empty actions
+        assert_eq!(st.gproxy_empty_actions(), 0);
+
+        st.cfg.reconnect_wait = Duration::ZERO;
+        assert_eq!(st.gproxy_empty_actions(), 0);
+    }
+
+    #[test]
+    fn gproxy_init_sends_configured_port_and_computed_empty_actions() {
+        let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
+        st.cfg.reconnect_wait = Duration::from_secs(180);
+        st.cfg.gproxy_reconnect_port = 6114;
+
+        while rxs[0].try_recv().is_ok() {}
+
+        let conn_id = st.players.by_pid(1).unwrap().conn_id;
+        let init_frame = ghost_protocol::frame::Frame::new(
+            ghost_protocol::gps::ids::INIT,
+            bytes::Bytes::from_static(&[1, 0, 0, 0]),
+        );
+
+        st.on_gps_frame(conn_id, init_frame);
+
+        let p = st.players.by_pid(1).unwrap();
+        assert!(p.gproxy);
+
+        let sent = rxs[0].try_recv().expect("must receive GPS_INIT reply");
+        assert_eq!(sent[0], ghost_protocol::gps::GPS_HEADER);
+        assert_eq!(sent[1], ghost_protocol::gps::ids::INIT);
+
+        // Bytes 4..8: port (u32_le)
+        let port = u32::from_le_bytes([sent[4], sent[5], sent[6], sent[7]]);
+        assert_eq!(port, 6114);
+
+        // Byte 8: PID
+        assert_eq!(sent[8], 1);
+
+        // Byte 13: num_empty_actions
+        assert_eq!(sent[13], 2);
+    }
 }
+

@@ -1,0 +1,26 @@
+﻿version: 3.8
+
+services:
+  ghostrs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghostrs:latest
+    container_name: ghostrs
+    restart: unless-stopped
+    # host networking ensures direct high-performance socket access without Docker bridge/NAT overhead
+    network_mode: host
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    volumes:
+      - ./ghost.toml:/app/ghost.toml:ro
+      - ./maps:/app/maps:ro
+      - ./war3:/app/war3:ro
+      - ./replays:/app/replays:rw
+      - ./ghost.db:/app/ghost.db:rw
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 5

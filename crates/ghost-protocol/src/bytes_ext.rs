@@ -67,43 +67,50 @@ pub fn put_cstring(buf: &mut BytesMut, s: &str) {
 
 /// Battle.net statstring encoding: each group of 7 bytes is prefixed by a mask
 /// byte whose bit (i+1) is set when payload byte i was even; every payload byte
-/// then gets its low bit forced to 1 so no NUL can appear inside the string.
+/// Battle.net statstring encoding matching GHost++ UTIL_EncodeStatString and Warcraft III:
+/// Each group of 7 bytes is prefixed by a mask byte.
+/// When payload byte was even, it is incremented by 1 and the mask bit is 0.
+/// When payload byte was odd, it is kept as-is and the mask bit is set to 1.
 pub fn encode_statstring(raw: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(raw.len() + raw.len() / 7 + 1);
-    for chunk in raw.chunks(7) {
-        let mut mask: u8 = 1;
-        for (i, &b) in chunk.iter().enumerate() {
-            if b % 2 == 0 {
-                mask |= 1 << (i + 1);
-            }
+    let mut result = Vec::with_capacity(raw.len() + raw.len() / 7 + 1);
+    let mut mask = 1u8;
+
+    for i in 0..raw.len() {
+        let byte = raw[i];
+        if byte % 2 == 0 {
+            result.push(byte.wrapping_add(1));
+        } else {
+            result.push(byte);
+            mask |= 1 << ((i % 7) + 1);
         }
-        out.push(mask);
-        for &b in chunk {
-            out.push(b | 1);
+
+        if i % 7 == 6 || i == raw.len() - 1 {
+            let insert_pos = result.len() - 1 - (i % 7);
+            result.insert(insert_pos, mask);
+            mask = 1;
         }
     }
-    out
+
+    result
 }
 
 pub fn decode_statstring(enc: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(enc.len());
-    let mut i = 0usize;
-    while i < enc.len() {
-        let mask = enc[i];
-        i += 1;
-        for j in 0..7usize {
-            if i >= enc.len() {
-                break;
+    let mut result = Vec::with_capacity(enc.len());
+    let mut mask = 0u8;
+
+    for i in 0..enc.len() {
+        if i % 8 == 0 {
+            mask = enc[i];
+        } else {
+            if (mask & (1 << (i % 8))) == 0 {
+                result.push(enc[i].wrapping_sub(1));
+            } else {
+                result.push(enc[i]);
             }
-            let mut b = enc[i];
-            if mask & (1 << (j + 1)) != 0 {
-                b &= 0xFE;
-            }
-            out.push(b);
-            i += 1;
         }
     }
-    out
+
+    result
 }
 
 #[cfg(test)]

@@ -19,10 +19,19 @@ impl ActionBlock {
         self.data.len() + 3
     }
 
-    fn put(&self, buf: &mut BytesMut) {
+    pub fn put(&self, buf: &mut BytesMut) {
         buf.put_u8(self.pid);
         buf.put_u16_le(self.data.len() as u16);
         buf.put_slice(&self.data);
+    }
+
+    pub fn encode_actions_raw(actions: &[ActionBlock]) -> Vec<u8> {
+        let body_len: usize = actions.iter().map(ActionBlock::wire_len).sum();
+        let mut sub = BytesMut::with_capacity(body_len);
+        for a in actions {
+            a.put(&mut sub);
+        }
+        sub.to_vec()
     }
 }
 

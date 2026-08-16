@@ -6,5 +6,8 @@
 *.nam
 *.til
 *.db
+*.db-*
 *.dbs
 *.log
+*.icc
+replays/*.w3g
