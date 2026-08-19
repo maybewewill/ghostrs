@@ -222,8 +222,9 @@ async fn run_client(
                         let _ = framed_write.send(keepalive_bytes(checksum)).await;
                         if let Some(gst) = game_start_time {
                             let elapsed = gst.elapsed();
+                            let is_mode_picker = is_blue || player_name.ends_with("_P0") || pid == 2;
                             // Send -ap after 10 seconds minimum from Blue player
-                            if elapsed >= Duration::from_secs(10) && !ap_sent && is_blue {
+                            if elapsed >= Duration::from_secs(10) && !ap_sent && is_mode_picker {
                                 let _ = framed_write.send(chat_bytes(pid, "-ap")).await;
                                 ap_sent = true;
                             }
@@ -234,7 +235,7 @@ async fn run_client(
                                 last_random_sent = Instant::now();
                             }
                             // Send -random every 30 seconds thereafter from Blue player
-                            if initial_random_sent && is_blue && last_random_sent.elapsed() >= Duration::from_secs(30) {
+                            if initial_random_sent && is_mode_picker && last_random_sent.elapsed() >= Duration::from_secs(30) {
                                 let _ = framed_write.send(chat_bytes(pid, "-random")).await;
                                 last_random_sent = Instant::now();
                             }
