@@ -145,10 +145,8 @@ async fn run_client(
     let mut ap_sent = false;
     let mut initial_random_sent = false;
     let mut last_random_sent = Instant::now();
-    // The server-assigned PID arrives in the SLOT_INFO_JOIN packet; the
-    // name-derived fallback is wrong because connection order ≠ slot order.
     let mut pid: u8 = 0;
-    let mut is_slot0 = false;
+    let mut is_blue = false;
     while start.elapsed() < duration {
         tokio::select! {
             _ = action_interval.tick() => {
@@ -178,12 +176,15 @@ async fn run_client(
                             let pid_offset = 3 + num_slots * 9 + 6; // past slots + seed + layout + player_slots
                             if p.len() > pid_offset {
                                 pid = p[pid_offset];
-                                // Check if we're in slot 0 (Blue / Player 1 — the DotA mode picker)
-                                // Slot 0's pid field is at offset 3 (first byte of first slot)
-                                if num_slots > 0 && p.len() >= 12 {
-                                    is_slot0 = p[3] == pid;
+                                // Check if we are seated in the Blue slot (color == 1 or first sentinel slot)
+                                for s in 0..num_slots {
+                                    let soff = 3 + s * 9;
+                                    if p.len() >= soff + 9 && p[soff] == pid && p[soff + 5] == 1 {
+                                        is_blue = true;
+                                    }
                                 }
-                                tracing::info!(player = %player_name, pid, is_slot0, "seated (pid from server)");
+                                if pid == 2 { is_blue = true; }
+                                tracing::info!(player = %player_name, pid, is_blue, "seated (pid from server)");
                             }
                         }
                     }
@@ -205,8 +206,6 @@ async fn run_client(
                     }
                     ids::COUNTDOWN_END => {
                         tracing::debug!(player = %player_name, "loading started");
-                        // Simulate loading time then signal loaded
-                        tokio::time::sleep(Duration::from_millis(50)).await;
                         let _ = framed_write.send(gameloaded_bytes()).await;
                         in_game = true;
                         game_start_time = Some(Instant::now());
@@ -223,19 +222,19 @@ async fn run_client(
                         let _ = framed_write.send(keepalive_bytes(checksum)).await;
                         if let Some(gst) = game_start_time {
                             let elapsed = gst.elapsed();
-                            // Send -ap after 12 seconds minimum (DotA triggers fully ready) from Blue player
-                            if elapsed >= Duration::from_secs(12) && !ap_sent && pid == 2 {
+                            // Send -ap after 10 seconds minimum from Blue player
+                            if elapsed >= Duration::from_secs(10) && !ap_sent && is_blue {
                                 let _ = framed_write.send(chat_bytes(pid, "-ap")).await;
                                 ap_sent = true;
                             }
-                            // Send initial -random after 16 seconds (after -ap mode active)
-                            if elapsed >= Duration::from_secs(16) && !initial_random_sent {
+                            // Send initial -random after 15 seconds (after -ap mode active)
+                            if elapsed >= Duration::from_secs(15) && !initial_random_sent {
                                 let _ = framed_write.send(chat_bytes(pid, "-random")).await;
                                 initial_random_sent = true;
                                 last_random_sent = Instant::now();
                             }
                             // Send -random every 30 seconds thereafter from Blue player
-                            if initial_random_sent && pid == 2 && last_random_sent.elapsed() >= Duration::from_secs(30) {
+                            if initial_random_sent && is_blue && last_random_sent.elapsed() >= Duration::from_secs(30) {
                                 let _ = framed_write.send(chat_bytes(pid, "-random")).await;
                                 last_random_sent = Instant::now();
                             }
