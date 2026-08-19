@@ -63,14 +63,49 @@ fn gameloaded_bytes() -> Bytes {
         .unwrap()
 }
 
+/// One well-formed, side-effect-free action.
+///
+/// This must be a *valid* W3GS action, not filler. The host relays action bytes
+/// verbatim into the replay body, so whatever goes on the wire here is what a
+/// spectating Warcraft III client will execute. An earlier version sent
+/// `[0x10; 20]`, and 0x10 is the unit-ability order opcode — twenty of them in a
+/// row decodes as a garbage order batch, and the DotA map's script layer then
+/// resolves handles for it and crashes the viewer at Game.dll+0x473170.
+///
+/// 0x16 is ChangeSelection: `[0x16][mode][count u16][unit ids...]`. With
+/// `count = 0` there is nothing to select, so the engine parses a complete,
+/// legal action and does nothing with it — exactly what a throughput harness
+/// wants.
 fn action_bytes() -> Bytes {
+    const ACTION_CHANGE_SELECTION: u8 = 0x16;
+    const SELECT_MODE_ADD: u8 = 0x01;
+
+    let mut action = BytesMut::with_capacity(4);
+    action.put_u8(ACTION_CHANGE_SELECTION);
+    action.put_u8(SELECT_MODE_ADD);
+    action.put_u16_le(0); // no units
+
     let mut b = BytesMut::new();
     b.put_u32_le(0x1234_5678); // CRC
-    b.put_slice(&[0x10; 20]); // 20 bytes action payload
+    b.put_slice(&action);
     Frame::new(ids::OUTGOING_ACTION, b.freeze())
         .encode_with(0xF7)
         .unwrap()
 }
+fn chat_bytes(from_pid: u8, msg: &str) -> Bytes {
+    let mut b = BytesMut::new();
+    b.put_u8(1); // 1 recipient
+    b.put_u8(255); // to host
+    b.put_u8(from_pid);
+    b.put_u8(0x20); // in-game chat message flag
+    b.put_slice(&[0, 0, 0, 0]); // chat scope extra
+    b.put_slice(msg.as_bytes());
+    b.put_u8(0); // NUL terminator
+    Frame::new(ids::CHAT_TO_HOST, b.freeze())
+        .encode_with(0xF7)
+        .unwrap()
+}
+
 
 async fn run_client(
     addr: String,
@@ -105,11 +140,19 @@ async fn run_client(
     let mut checksum: u32 = 0;
     let mut local_intervals = Vec::new();
     let mut action_interval = tokio::time::interval(Duration::from_secs(1));
-
+    let mut in_game = false;
+    let mut incoming_action_count: u32 = 0;
+    let mut last_random_sent = Instant::now();
+    // The server-assigned PID arrives in the SLOT_INFO_JOIN packet; the
+    // name-derived fallback is wrong because connection order ≠ slot order.
+    let mut pid: u8 = 0;
+    let mut is_slot0 = false;
     while start.elapsed() < duration {
         tokio::select! {
             _ = action_interval.tick() => {
-                let _ = framed_write.send(action_bytes()).await;
+                if in_game {
+                    let _ = framed_write.send(action_bytes()).await;
+                }
             }
 
             frame = framed_read.next() => {
@@ -123,8 +166,24 @@ async fn run_client(
 
                 match frame.id {
                     ids::SLOT_INFO_JOIN => {
-                        // Confirmed seated
-                        tracing::debug!(player = %player_name, "seated in slot");
+                        // SLOT_INFO_JOIN payload:
+                        //   u16 block_len, u8 num_slots, [9B per slot...],
+                        //   u32 random_seed, u8 layout, u8 player_slots,
+                        //   u8 pid, ...
+                        let p = &frame.payload;
+                        if p.len() >= 3 {
+                            let num_slots = p[2] as usize;
+                            let pid_offset = 3 + num_slots * 9 + 6; // past slots + seed + layout + player_slots
+                            if p.len() > pid_offset {
+                                pid = p[pid_offset];
+                                // Check if we're in slot 0 (Blue / Player 1 — the DotA mode picker)
+                                // Slot 0's pid field is at offset 3 (first byte of first slot)
+                                if num_slots > 0 && p.len() >= 12 {
+                                    is_slot0 = p[3] == pid;
+                                }
+                                tracing::info!(player = %player_name, pid, is_slot0, "seated (pid from server)");
+                            }
+                        }
                     }
                     ids::MAP_CHECK => {
                         // Report back the size the host just advertised, so the host
@@ -147,6 +206,7 @@ async fn run_client(
                         // Simulate loading time then signal loaded
                         tokio::time::sleep(Duration::from_millis(50)).await;
                         let _ = framed_write.send(gameloaded_bytes()).await;
+                        in_game = true;
                     }
                     ids::INCOMING_ACTION => {
                         let now = Instant::now();
@@ -158,6 +218,23 @@ async fn run_client(
 
                         checksum = checksum.wrapping_add(1);
                         let _ = framed_write.send(keepalive_bytes(checksum)).await;
+
+                        incoming_action_count += 1;
+                        // Give the heavy DotA init triggers 5 seconds (50 ticks) before typing.
+                        // In GHost++, PID 1 is virtual host, PID 2 is Blue (first human player).
+                        if incoming_action_count == 50 && pid == 2 {
+                            let _ = framed_write.send(chat_bytes(pid, "-ap")).await;
+                        }
+                        if incoming_action_count == 100 {
+                            let _ = framed_write.send(chat_bytes(pid, "-random")).await;
+                            last_random_sent = Instant::now();
+                        }
+
+                        // Send -random message every 30 seconds from Player 1 (Blue)
+                        if incoming_action_count > 100 && pid == 2 && last_random_sent.elapsed() >= Duration::from_secs(30) {
+                            let _ = framed_write.send(chat_bytes(pid, "-random")).await;
+                            last_random_sent = Instant::now();
+                        }
                     }
                     ids::PING_FROM_HOST => {
                         let pong = Frame::new(ids::PONG_TO_HOST, frame.payload)
