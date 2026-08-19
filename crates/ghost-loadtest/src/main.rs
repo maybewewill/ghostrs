@@ -141,7 +141,9 @@ async fn run_client(
     let mut local_intervals = Vec::new();
     let mut action_interval = tokio::time::interval(Duration::from_secs(1));
     let mut in_game = false;
-    let mut incoming_action_count: u32 = 0;
+    let mut game_start_time: Option<Instant> = None;
+    let mut ap_sent = false;
+    let mut initial_random_sent = false;
     let mut last_random_sent = Instant::now();
     // The server-assigned PID arrives in the SLOT_INFO_JOIN packet; the
     // name-derived fallback is wrong because connection order ≠ slot order.
@@ -207,6 +209,7 @@ async fn run_client(
                         tokio::time::sleep(Duration::from_millis(50)).await;
                         let _ = framed_write.send(gameloaded_bytes()).await;
                         in_game = true;
+                        game_start_time = Some(Instant::now());
                     }
                     ids::INCOMING_ACTION => {
                         let now = Instant::now();
@@ -218,22 +221,24 @@ async fn run_client(
 
                         checksum = checksum.wrapping_add(1);
                         let _ = framed_write.send(keepalive_bytes(checksum)).await;
-
-                        incoming_action_count += 1;
-                        // Give the heavy DotA init triggers 5 seconds (50 ticks) before typing.
-                        // In GHost++, PID 1 is virtual host, PID 2 is Blue (first human player).
-                        if incoming_action_count == 50 && pid == 2 {
-                            let _ = framed_write.send(chat_bytes(pid, "-ap")).await;
-                        }
-                        if incoming_action_count == 100 {
-                            let _ = framed_write.send(chat_bytes(pid, "-random")).await;
-                            last_random_sent = Instant::now();
-                        }
-
-                        // Send -random message every 30 seconds from Player 1 (Blue)
-                        if incoming_action_count > 100 && pid == 2 && last_random_sent.elapsed() >= Duration::from_secs(30) {
-                            let _ = framed_write.send(chat_bytes(pid, "-random")).await;
-                            last_random_sent = Instant::now();
+                        if let Some(gst) = game_start_time {
+                            let elapsed = gst.elapsed();
+                            // Send -ap after 12 seconds minimum (DotA triggers fully ready) from Blue player
+                            if elapsed >= Duration::from_secs(12) && !ap_sent && pid == 2 {
+                                let _ = framed_write.send(chat_bytes(pid, "-ap")).await;
+                                ap_sent = true;
+                            }
+                            // Send initial -random after 16 seconds (after -ap mode active)
+                            if elapsed >= Duration::from_secs(16) && !initial_random_sent {
+                                let _ = framed_write.send(chat_bytes(pid, "-random")).await;
+                                initial_random_sent = true;
+                                last_random_sent = Instant::now();
+                            }
+                            // Send -random every 30 seconds thereafter from Blue player
+                            if initial_random_sent && pid == 2 && last_random_sent.elapsed() >= Duration::from_secs(30) {
+                                let _ = framed_write.send(chat_bytes(pid, "-random")).await;
+                                last_random_sent = Instant::now();
+                            }
                         }
                     }
                     ids::PING_FROM_HOST => {
