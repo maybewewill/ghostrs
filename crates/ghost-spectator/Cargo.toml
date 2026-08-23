@@ -16,3 +16,4 @@ crc32fast.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+socket2 = "0.5"

@@ -10,6 +10,10 @@ const REPLAY_TIMESLOT: u8 = 0x1F; // corresponds to W3GS_INCOMING_ACTION
 const REPLAY_CHATMESSAGE: u8 = 0x20;
 /// GHost++ hardcodes this language id (replay.cpp:143).
 const LANGUAGE_ID: u32 = 0x0012_F8B0;
+/// Replay "game type" u32 written after the player count. A custom game is
+/// 0x00000001 (matches a real ICCup DotA replay). Distinct from the map's W3I
+/// game-data flags; Game.dll's replay-body parser refuses the file otherwise.
+const REPLAY_GAME_TYPE: u32 = 0x0000_0001;
 
 /// Errors from building a [`ReplayBody`]. Both variants exist to make an
 /// invalid `.w3g` body impossible to produce silently: a body finished
@@ -56,6 +60,8 @@ pub struct ReplayBody {
     loading_blocks: Vec<Vec<u8>>,
     blocks: Vec<u8>,
     replay_length_ms: u32,
+    /// Cursor for [`ReplayBody::drain_new_blocks`].
+    published: usize,
 }
 
 fn put_cstr(out: &mut Vec<u8>, s: &str) {
@@ -81,6 +87,7 @@ impl ReplayBody {
             loading_blocks: Vec::new(),
             blocks: Vec::new(),
             replay_length_ms: 0,
+            published: 0,
         }
     }
 
@@ -169,6 +176,15 @@ impl ReplayBody {
         self.blocks.extend_from_slice(&1u32.to_le_bytes());
     }
 
+    /// A chat message spoken by the observer/DotaTV slot (flag 0x20, chat mode).
+    /// Rendered by the viewer in the in-game chat log exactly like a replayed
+    /// spectator message — used for server heartbeat markers ("[DTV] t=..").
+    /// Must never reference a PID that also acts in the timeslot stream unless
+    /// that PID is a real non-playing observer slot.
+    pub fn add_server_chat(&mut self, pid: u8, message: &str) {
+        self.add_chat(pid, 0x20, 0, message);
+    }
+
     pub fn add_leaver_loading(&mut self, pid: u8, reason: u32, result: u32) {
         let mut block = Vec::with_capacity(14);
         block.push(REPLAY_LEAVEGAME);
@@ -185,27 +201,51 @@ impl ReplayBody {
     /// `GameStartRecord` if `set_start()` was never called successfully —
     /// see [`ReplayBodyError::StartNeverSet`].
     pub fn finish(self) -> Result<(Vec<u8>, u32), ReplayBodyError> {
+        let mut r = self.prologue()?;
+        r.extend_from_slice(&self.blocks);
+        Ok((r, self.replay_length_ms))
+    }
+
+    /// Everything that precedes the record stream: host record, game info,
+    /// player records, `GameStartRecord`, and the three start blocks.
+    ///
+    /// A live stream sends this once and then follows it with
+    /// [`Self::drain_new_blocks`], which makes the streamed body byte-identical
+    /// to the one [`Self::finish`] would produce.
+    ///
+    /// Take it only after loading has finished. Loading leavers are emitted
+    /// inside the prologue, between the second and third start blocks, so a
+    /// prologue captured earlier would be invalidated by a later
+    /// [`Self::add_leaver_loading`].
+    pub fn prologue(&self) -> Result<Vec<u8>, ReplayBodyError> {
         if !self.start_set {
             return Err(ReplayBodyError::StartNeverSet);
         }
         let mut r = Vec::with_capacity(512 + self.blocks.len());
-        r.extend_from_slice(&[16, 1, 0, 0]); // unknown (4.0)
+        // Fixed prologue every 1.26a client expects ahead of the game info:
+        // the 0x00000110 marker, then the host as a PlayerRecord (RecordID
+        // 0x00, pid, name, one byte of additional data), then the game name
+        // followed by its own null byte. Dropping any of these shifts every
+        // later field and ParseReplay rejects the file.
+        r.extend_from_slice(&0x0000_0110u32.to_le_bytes());
         r.push(0); // host RecordID
         r.push(self.host_pid);
         put_cstr(&mut r, &self.host_name);
-        r.push(1); // host AdditionalSize
-        r.push(0); // host AdditionalData
+        r.push(1); // size of additional data
+        r.push(0); // additional data
         put_cstr(&mut r, &self.game_name);
-        r.push(0); // null (4.0)
+        r.push(0); // null byte between the game name and the stat string
         r.extend_from_slice(&self.stat_string);
-        // replay.cpp:157 appends the stat string via `UTIL_AppendByteArrayFast`
-        // with its default `terminator = true`, so a NUL follows the stat
-        // string itself (in addition to the "null (4.0)" byte above, which is
-        // a separate field). `UTIL_EncodeStatString` never emits a zero byte,
-        // so this terminator is what lets a reader find the field's end.
         r.push(0); // stat string terminator
         r.extend_from_slice(&(self.num_slots as u32).to_le_bytes());
-        r.extend_from_slice(&self.map_game_type.to_le_bytes());
+        // Replay "game type" u32. This is NOT the map's internal W3I game-data
+        // flags (self.map_game_type, e.g. 0x00492000): a real ICCup DotA replay
+        // carries 0x00000001 (custom game) here, and Game.dll's replay-body
+        // parser rejects the file (NETERROR_CANTLOADREPLAYDATA -> straight to the
+        // main menu) when the low byte is not a valid game type. Writing the map
+        // flags here was the conflation that made every generated replay refuse
+        // to load.
+        r.extend_from_slice(&REPLAY_GAME_TYPE.to_le_bytes());
         r.extend_from_slice(&LANGUAGE_ID.to_le_bytes());
 
         for (pid, name) in &self.players {
@@ -238,9 +278,21 @@ impl ReplayBody {
         r.push(REPLAY_THIRDSTARTBLOCK);
         r.extend_from_slice(&1u32.to_le_bytes());
 
-        r.extend_from_slice(&self.blocks);
-        let len = self.replay_length_ms;
-        Ok((r, len))
+        Ok(r)
+    }
+
+    /// Record bytes appended since the previous call.
+    ///
+    /// `blocks` is append-only, so a cursor is enough to hand a live stream
+    /// exactly the new records without re-encoding or copying history.
+    pub fn drain_new_blocks(&mut self) -> Vec<u8> {
+        let fresh = self.blocks[self.published..].to_vec();
+        self.published = self.blocks.len();
+        fresh
+    }
+
+    pub fn replay_length_ms(&self) -> u32 {
+        self.replay_length_ms
     }
 }
 

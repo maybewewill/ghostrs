@@ -1,10 +1,16 @@
 #![forbid(unsafe_code)]
 
 pub mod body;
+pub mod dotatv;
+pub mod dotatv_server;
 pub mod relay;
 pub mod w3g;
 
 pub use body::ReplayBody;
+pub use dotatv::{CHUNK_SIZE, Chunk, DotaTvError, DotaTvStream, GREETING};
+pub use dotatv_server::{
+    DotaTvShared, MODE_BOOTSTRAP, MODE_STREAM, publish_pending, serve as serve_dotatv,
+};
 pub use relay::{Relay, RelayCmd, RelayConfig, RelayError, RelayHandle, spawn_relay};
 pub use w3g::W3gWriter;
 

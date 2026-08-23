@@ -7,8 +7,25 @@ use flate2::write::ZlibEncoder;
 
 const HEADER_SIZE: u32 = 68;
 const BLOCK_SIZE: usize = 8192;
-/// GHost++ hardcodes this; the client validates it (replay.cpp:234).
-const FLAGS_MULTIPLAYER: u16 = 32768;
+/// Header word at 0x3A (the high u16 of the dword at 0x38, whose low u16 is the
+/// build number). This is the replay FLAGS word: 0x8000 = multiplayer replay,
+/// 0x0000 = single-player. Game.dll refuses a multiplayer-shaped replay body
+/// (multiple player records + GameStartRecord) that is flagged single-player and
+/// bounces straight back to the main menu with no loading screen. A real ICCup
+/// DotA replay (build 6059) carries 0xC000 here and plays; a bootstrap written
+/// with flags=0 does not. (An earlier theory held that the client validated the
+/// whole 0x38 dword as "build <= 6059" and required flags=0 - that is false: the
+/// working 0xC000 replay yields dword 0xC00017AB and loads fine.) Match that
+/// real replay exactly: 0x8000 alone made the client accept the file but then
+/// crash (0xC0000005) mid-load; the full 0xC000 (the extra 0x4000 bit a genuine
+/// ICCup DotA replay carries) is what loads and plays.
+const FLAGS_MULTIPLAYER: u16 = 0xC000;
+// Offset 0x28 is NOT a version id - it is the size of the decompressed body.
+// Game.dll's loader (Game.dll+0x535050) reads it as `declared`, sums the block
+// headers, and refuses the file with error 16 unless
+//     sum(compressed) - last_compressed  <=  declared  <=  sum(uncompressed)
+// A vanilla 1.26a LastReplay.w3g happens to carry 6029 there because that is
+// its own body length, which is what made the value look like a constant.
 
 pub struct W3gWriter {
     war3_version: u32,
@@ -34,10 +51,52 @@ impl W3gWriter {
     /// Packs an already-built replay body into a complete `.w3g` file.
     pub fn pack(&self, decompressed: &[u8]) -> Vec<u8> {
         // Every block must inflate to exactly BLOCK_SIZE, so the tail is padded.
+        // GHost++ pads unconditionally, appending a whole redundant block when
+        // the body is already aligned; kept as-is for byte-for-byte parity.
         let mut padded = decompressed.to_vec();
         let pad = BLOCK_SIZE - (padded.len() % BLOCK_SIZE);
         padded.resize(padded.len() + pad, 0);
 
+        self.emit(&padded, decompressed.len())
+    }
+
+    /// Packs a body that is already a whole number of blocks, skipping the
+    /// unconditional tail pad `pack` inherits from GHost++.
+    ///
+    /// Returns `None` for a ragged body. Live-streamed replays need this: the
+    /// header records the *unpadded* length, so a padded tail leaves the engine
+    /// with materialized bytes past the declared end. For a file that is only
+    /// ever played to completion that is harmless, but DotaTV appends more
+    /// blocks afterwards and they would land behind the padding, which the
+    /// replay parser would read as records first. See
+    /// `docs/REPLAY_STREAM_SPEC.md`.
+    pub fn pack_chunk_aligned(&self, decompressed: &[u8]) -> Option<Vec<u8>> {
+        self.pack_chunk_aligned_declaring(decompressed, decompressed.len())
+    }
+
+    /// Same as [`W3gWriter::pack_chunk_aligned`] but declares a body length shorter
+    /// than the materialized blocks.
+    ///
+    /// Live streaming zero-fills the tail of the last block to reach the block size the
+    /// engine requires. That filler is not records, so the header must declare only the
+    /// real length, otherwise the replay parser reads filler as record id 0x00.
+    pub fn pack_chunk_aligned_declaring(
+        &self,
+        decompressed: &[u8],
+        declared_len: usize,
+    ) -> Option<Vec<u8>> {
+        if !decompressed.len().is_multiple_of(BLOCK_SIZE) {
+            return None;
+        }
+        if declared_len > decompressed.len() {
+            return None;
+        }
+        Some(self.emit(decompressed, declared_len))
+    }
+
+    /// `padded` must be a whole number of blocks; `declared_len` is the
+    /// unpadded length written to the header.
+    fn emit(&self, padded: &[u8], declared_len: usize) -> Vec<u8> {
         let mut blocks: Vec<Vec<u8>> = Vec::with_capacity(padded.len() / BLOCK_SIZE);
         for chunk in padded.chunks_exact(BLOCK_SIZE) {
             let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -54,7 +113,7 @@ impl W3gWriter {
         header.extend_from_slice(&HEADER_SIZE.to_le_bytes());
         header.extend_from_slice(&(file_size as u32).to_le_bytes());
         header.extend_from_slice(&1u32.to_le_bytes()); // header version
-        header.extend_from_slice(&(decompressed.len() as u32).to_le_bytes());
+        header.extend_from_slice(&(declared_len as u32).to_le_bytes());
         header.extend_from_slice(&(blocks.len() as u32).to_le_bytes());
         // "W3XP"/"WAR3" stored reversed on the wire (packed.cpp:326-336).
         header.extend_from_slice(if self.tft { b"PX3W" } else { b"3RAW" });
@@ -120,8 +179,8 @@ mod tests {
         assert_eq!(u16::from_le_bytes([out[56], out[57]]), 6059, "build");
         assert_eq!(
             u16::from_le_bytes([out[58], out[59]]),
-            32768,
-            "flags must be 32768"
+            0xC000,
+            "header flags must match a real ICCup replay (0xC000) or the client bounces/crashes"
         );
         assert_eq!(read_u32(&out, 60), 123_456, "replay length ms");
 
@@ -143,9 +202,10 @@ mod tests {
         let n_blocks = read_u32(&out, 44) as usize;
         assert_eq!(n_blocks, 3);
         assert_eq!(
-            read_u32(&out, 40) as usize,
-            8192 * 2 + 7,
-            "decompressed size is the unpadded original length, used by reader to trim padding"
+            read_u32(&out, 40),
+            body.len() as u32,
+            "0x28 carries the unpadded body length, which is what the client's \
+             loader bounds-checks against the block table"
         );
 
         let mut pos = 68;
@@ -200,18 +260,11 @@ mod tests {
         let w = W3gWriter::new(26, 6059, true);
         let out = w.pack(&body);
 
-        let stored_decompressed_len = read_u32(&out, 40) as usize;
         let block_count = read_u32(&out, 44) as usize;
 
-        // For a non-aligned body, the decompressed size must be strictly less than block_count * 8192.
-        assert!(
-            stored_decompressed_len < block_count as usize * BLOCK_SIZE,
-            "decompressed size {} must be less than {} (blocks * 8192)",
-            stored_decompressed_len,
-            block_count * BLOCK_SIZE
-        );
-
-        // Decompress all blocks and truncate to the stored length to verify round-trip.
+        // The header no longer stores the body length (that dword is the
+        // game version id), so the round trip asserts the prefix instead:
+        // every original byte must survive in order, followed by padding.
         let mut decompressed = Vec::new();
         let mut pos = 68;
         for _ in 0..block_count {
@@ -223,11 +276,13 @@ mod tests {
             pos += 8 + c_len;
         }
 
-        // Truncate to the original unpadded length and verify exact match.
-        decompressed.truncate(stored_decompressed_len);
-        assert_eq!(
-            decompressed, body,
-            "decompressed and truncated must match original body"
+        assert!(
+            decompressed.len() >= body.len(),
+            "padded stream must cover the whole body"
+        );
+        assert!(
+            decompressed[..body.len()] == body[..],
+            "decompressed stream must start with the original body"
         );
     }
 }
