@@ -31,11 +31,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Notify, RwLock, broadcast};
 
 use crate::dotatv::{DotaTvError, DotaTvStream, GREETING};
 
@@ -47,6 +47,50 @@ pub const MODE_STREAM: u8 = 1;
 /// resuming at the live edge. The client drains it behind its loading screen so
 /// the spectator opens already at match-time. See [`DotaTvStream::bootstrap_full`].
 pub const MODE_BOOTSTRAP_FULL: u8 = 2;
+/// A viewer opening the per-game chat/ping side-channel. See [`serve_chat`].
+pub const MODE_CHAT: u8 = 3;
+
+/// Chat wire message kinds (both directions).
+const CHAT_KIND_CHAT: u8 = 0;
+const CHAT_KIND_PING: u8 = 1;
+/// Max UTF-8 bytes in one chat line; longer messages drop the connection.
+const CHAT_MAX_TEXT: usize = 255;
+/// Per-viewer send budget: at most CHAT_RATE_MAX messages per CHAT_RATE_WINDOW;
+/// excess is dropped (not disconnected) so a spammer only silences itself.
+const CHAT_RATE_WINDOW: Duration = Duration::from_secs(1);
+const CHAT_RATE_MAX: u32 = 5;
+
+/// Per-game fan-out for viewer chat and minimap pings. Independent of the replay
+/// stream: a dropped chat line is acceptable (unlike a dropped chunk), so a
+/// lagged receiver simply skips missed messages.
+pub struct ChatRelay {
+    tx: broadcast::Sender<Arc<Vec<u8>>>,
+    next_id: AtomicU32,
+}
+
+impl ChatRelay {
+    fn new() -> Self {
+        // Capacity bounds how far a slow viewer may lag before it skips; chat is
+        // low-rate so 256 buffered messages is generous.
+        let (tx, _rx) = broadcast::channel(256);
+        Self {
+            tx,
+            // Viewer ids start at 1; 0 is reserved for "server"/system lines.
+            next_id: AtomicU32::new(1),
+        }
+    }
+    fn alloc_id(&self) -> u32 {
+        self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
+    fn subscribe(&self) -> broadcast::Receiver<Arc<Vec<u8>>> {
+        self.tx.subscribe()
+    }
+    /// Fan a fully-framed server->client message out to every viewer. Errors only
+    /// when there are no receivers, which is not a failure.
+    fn publish(&self, msg: Arc<Vec<u8>>) {
+        let _ = self.tx.send(msg);
+    }
+}
 
 /// Shared publisher state: the stream plus a wakeup for viewers parked on it.
 ///
@@ -64,6 +108,8 @@ pub struct DotaTvShared {
     heartbeat_enabled: AtomicU32,
     /// PID that speaks the heartbeat (must be an observer slot).
     heartbeat_pid: AtomicU32,
+    /// Per-game viewer chat + ping fan-out (side-channel, not the replay stream).
+    chat: ChatRelay,
 }
 
 impl std::fmt::Debug for DotaTvShared {
@@ -83,6 +129,7 @@ impl DotaTvShared {
             last_marker_ms: AtomicU32::new(0),
             heartbeat_enabled: AtomicU32::new(0),
             heartbeat_pid: AtomicU32::new(0xFF),
+            chat: ChatRelay::new(),
         })
     }
 
@@ -292,6 +339,7 @@ async fn serve_viewer_with(
     match mode[0] {
         MODE_BOOTSTRAP => serve_bootstrap(sock, shared).await,
         MODE_BOOTSTRAP_FULL => serve_bootstrap_full(sock, shared).await,
+        MODE_CHAT => serve_chat(sock, shared).await,
         MODE_STREAM => serve_stream_with(sock, shared, write_timeout).await,
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -363,6 +411,112 @@ async fn serve_bootstrap_full(mut sock: TcpStream, shared: Arc<DotaTvShared>) ->
     sock.write_all(&file).await?;
     sock.flush().await?;
     Ok(())
+}
+
+/// Per-game viewer chat + ping relay. A viewer connects with `MODE_CHAT`, is
+/// assigned an anonymous `Viewer#N` id, then exchanges messages that the server
+/// fans out to every viewer of this game (including the sender, so ordering is
+/// identical everywhere).
+///
+/// Wire (little endian), after the greeting + mode byte:
+/// ```text
+/// server -> client   u32 viewerId
+/// client -> server   u8 kind, <payload>            (senderId omitted; server stamps)
+/// server -> client   u8 kind, u32 senderId, <payload>
+///   kind 0 chat: u16 len, utf8[len]   (len <= CHAT_MAX_TEXT)
+///   kind 1 ping: i16 x, i16 y
+/// ```
+async fn serve_chat(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
+    let id = shared.chat.alloc_id();
+    let mut rx = shared.chat.subscribe();
+    let (mut rd, mut wr) = sock.into_split();
+
+    wr.write_all(&id.to_le_bytes()).await?;
+    wr.flush().await?;
+
+    // Writer half: broadcast -> this viewer's socket. A lagged receiver skips the
+    // missed chat lines (acceptable) instead of stalling the game.
+    let writer = tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(bytes) => {
+                    if wr.write_all(&bytes).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // Reader half: this viewer's socket -> broadcast. The server stamps senderId
+    // from the connection so a viewer cannot forge another's id, and rate-limits.
+    let mut win_start = Instant::now();
+    let mut win_count = 0u32;
+    let result = loop {
+        let mut kind = [0u8; 1];
+        if rd.read_exact(&mut kind).await.is_err() {
+            break Ok(());
+        }
+        let payload = match kind[0] {
+            CHAT_KIND_CHAT => {
+                let mut lb = [0u8; 2];
+                if rd.read_exact(&mut lb).await.is_err() {
+                    break Ok(());
+                }
+                let len = u16::from_le_bytes(lb) as usize;
+                if len > CHAT_MAX_TEXT {
+                    break Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "chat text exceeds cap",
+                    ));
+                }
+                let mut text = vec![0u8; len];
+                if rd.read_exact(&mut text).await.is_err() {
+                    break Ok(());
+                }
+                let mut p = Vec::with_capacity(2 + len);
+                p.extend_from_slice(&lb);
+                p.extend_from_slice(&text);
+                p
+            }
+            CHAT_KIND_PING => {
+                let mut b = [0u8; 4]; // i16 x, i16 y
+                if rd.read_exact(&mut b).await.is_err() {
+                    break Ok(());
+                }
+                b.to_vec()
+            }
+            _ => {
+                break Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unknown chat kind",
+                ));
+            }
+        };
+
+        let now = Instant::now();
+        if now.duration_since(win_start) >= CHAT_RATE_WINDOW {
+            win_start = now;
+            win_count = 0;
+        }
+        win_count += 1;
+        if win_count > CHAT_RATE_MAX {
+            // Over budget: drop this message, keep the connection.
+            continue;
+        }
+
+        // Frame the server->client message: kind, senderId, payload.
+        let mut msg = Vec::with_capacity(1 + 4 + payload.len());
+        msg.push(kind[0]);
+        msg.extend_from_slice(&id.to_le_bytes());
+        msg.extend_from_slice(&payload);
+        shared.chat.publish(Arc::new(msg));
+    };
+
+    writer.abort();
+    result
 }
 
 async fn serve_stream(mut sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
@@ -521,6 +675,100 @@ mod tests {
             assert_eq!(valid, want_valid);
             assert_eq!(got, want, "frames must arrive in publication order");
         }
+    }
+
+    /// Connects a MODE_CHAT viewer and returns the socket plus its assigned id.
+    async fn connect_chat(addr: SocketAddr) -> (TcpStream, u32) {
+        let mut sock = TcpStream::connect(addr).await.unwrap();
+        assert_eq!(read_exact_n(&mut sock, 4).await, GREETING);
+        sock.write_all(&[MODE_CHAT]).await.unwrap();
+        let id = u32::from_le_bytes(read_exact_n(&mut sock, 4).await.try_into().unwrap());
+        (sock, id)
+    }
+
+    async fn read_chat_msg(sock: &mut TcpStream) -> (u8, u32, Vec<u8>) {
+        let kind = read_exact_n(sock, 1).await[0];
+        let sender = u32::from_le_bytes(read_exact_n(sock, 4).await.try_into().unwrap());
+        let payload = match kind {
+            CHAT_KIND_CHAT => {
+                let lb = read_exact_n(sock, 2).await;
+                let len = u16::from_le_bytes([lb[0], lb[1]]) as usize;
+                let mut p = lb;
+                p.extend_from_slice(&read_exact_n(sock, len).await);
+                p
+            }
+            CHAT_KIND_PING => read_exact_n(sock, 4).await,
+            _ => panic!("unknown kind {kind}"),
+        };
+        (kind, sender, payload)
+    }
+
+    #[tokio::test]
+    async fn chat_fans_out_to_all_viewers_with_stamped_sender_and_self_echo() {
+        let shared = DotaTvShared::new(DotaTvStream::for_126a());
+        let addr = start_server(Arc::clone(&shared)).await;
+
+        // Ids are assigned in join order, starting at 1.
+        let (mut a, id_a) = connect_chat(addr).await;
+        let (mut b, id_b) = connect_chat(addr).await;
+        assert_eq!(id_a, 1);
+        assert_eq!(id_b, 2);
+
+        // A sends a chat line (no senderId on the wire; the server stamps it).
+        let text = b"gg wp";
+        let mut out = vec![CHAT_KIND_CHAT];
+        out.extend_from_slice(&(text.len() as u16).to_le_bytes());
+        out.extend_from_slice(text);
+        a.write_all(&out).await.unwrap();
+
+        // Both A (self-echo) and B receive it, stamped with A's id.
+        for sock in [&mut a, &mut b] {
+            let (kind, sender, payload) = read_chat_msg(sock).await;
+            assert_eq!(kind, CHAT_KIND_CHAT);
+            assert_eq!(sender, id_a, "server stamps the true sender id");
+            let len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+            assert_eq!(&payload[2..2 + len], text);
+        }
+
+        // A ping from B reaches A with B's id and the raw coords.
+        let mut png = vec![CHAT_KIND_PING];
+        png.extend_from_slice(&(-1234i16).to_le_bytes());
+        png.extend_from_slice(&(5678i16).to_le_bytes());
+        b.write_all(&png).await.unwrap();
+        let (kind, sender, payload) = read_chat_msg(&mut a).await;
+        assert_eq!(kind, CHAT_KIND_PING);
+        assert_eq!(sender, id_b);
+        assert_eq!(i16::from_le_bytes([payload[0], payload[1]]), -1234);
+        assert_eq!(i16::from_le_bytes([payload[2], payload[3]]), 5678);
+    }
+
+    #[tokio::test]
+    async fn chat_rate_limit_drops_excess_but_keeps_connection() {
+        let shared = DotaTvShared::new(DotaTvStream::for_126a());
+        let addr = start_server(Arc::clone(&shared)).await;
+        let (mut a, _) = connect_chat(addr).await;
+        let (mut b, _) = connect_chat(addr).await;
+
+        // Blast well over the per-second budget in one window.
+        for i in 0..(CHAT_RATE_MAX + 20) {
+            let t = format!("m{i}");
+            let mut out = vec![CHAT_KIND_CHAT];
+            out.extend_from_slice(&(t.len() as u16).to_le_bytes());
+            out.extend_from_slice(t.as_bytes());
+            a.write_all(&out).await.unwrap();
+        }
+        // A stays connected; B receives at most the budget, and the survivors are
+        // a prefix of what A sent (no reordering).
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut got = 0u32;
+        while let Ok(msg) =
+            tokio::time::timeout(Duration::from_millis(100), read_chat_msg(&mut b)).await
+        {
+            let len = u16::from_le_bytes([msg.2[0], msg.2[1]]) as usize;
+            assert_eq!(&msg.2[2..2 + len][..1], b"m");
+            got += 1;
+        }
+        assert!(got >= 1 && got <= CHAT_RATE_MAX, "delivered {got}, budget {CHAT_RATE_MAX}");
     }
 
     #[tokio::test]
