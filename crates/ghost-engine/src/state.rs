@@ -199,6 +199,10 @@ pub struct GameState {
     pub last_download_tick: Instant,
     pub relay: Option<ghost_spectator::RelayHandle>,
     pub replay: Option<ghost_spectator::ReplayBody>,
+    /// Live DotaTV stream, when spectating is enabled for this game.
+    pub dotatv: Option<std::sync::Arc<ghost_spectator::DotaTvShared>>,
+    /// Whether the replay prologue has already been published to `dotatv`.
+    pub dotatv_prologue_sent: bool,
     pub store: Option<ghost_store::Store>,
     pub jitter_histogram: [u64; 5],
     pub last_jitter_report: Instant,
@@ -237,6 +241,22 @@ pub struct GameState {
 }
 
 impl GameState {
+    /// Encoded stat string as a replay carries it: map settings, map path and
+    /// host name, with a single terminator after the host name.
+    fn build_replay_stat_string(cfg: &GameConfig) -> Vec<u8> {
+        let mut raw = Vec::with_capacity(44 + cfg.map.path.len() + cfg.virtual_host_name.len());
+        raw.extend_from_slice(&cfg.map.flags.to_le_bytes());
+        raw.push(0);
+        raw.extend_from_slice(&cfg.map.width.to_le_bytes());
+        raw.extend_from_slice(&cfg.map.height.to_le_bytes());
+        raw.extend_from_slice(&cfg.map.crc.to_le_bytes());
+        raw.extend_from_slice(cfg.map.path.as_bytes());
+        raw.push(0);
+        raw.extend_from_slice(cfg.virtual_host_name.as_bytes());
+        raw.push(0);
+        ghost_protocol::encode_statstring(&raw)
+    }
+
     pub fn new(cfg: GameConfig) -> Self {
         let slots = if let Some(cs) = cfg.custom_slots.clone() {
             SlotTable::from_slots(cs)
@@ -248,21 +268,17 @@ impl GameState {
         let stat_string = if !cfg.stat_string.is_empty() {
             cfg.stat_string.clone()
         } else {
-            let mut raw = Vec::with_capacity(44 + cfg.map.path.len() + cfg.virtual_host_name.len());
-            raw.extend_from_slice(&cfg.map.flags.to_le_bytes());
-            raw.push(0);
-            raw.extend_from_slice(&cfg.map.width.to_le_bytes());
-            raw.extend_from_slice(&cfg.map.height.to_le_bytes());
-            raw.extend_from_slice(&cfg.map.crc.to_le_bytes());
-            raw.extend_from_slice(cfg.map.path.as_bytes());
-            raw.push(0);
-            raw.extend_from_slice(cfg.virtual_host_name.as_bytes());
-            raw.push(0);
-            raw.push(0);
-            ghost_protocol::encode_statstring(&raw)
+            Self::build_replay_stat_string(&cfg)
         };
+        // Built separately from the advertised one on purpose. The LAN and
+        // Battle.net advert forms end the host name with a second zero because
+        // a map SHA1 follows it there; a replay's stat string ends at the host
+        // name, and the client's reader (Game.dll+0x654510) only accepts the
+        // decoded stream if it is consumed to the byte, so reusing the advert
+        // form leaves one stray zero and the replay is rejected outright.
+        let replay_stat_string = Self::build_replay_stat_string(&cfg);
         let mut replay = ghost_spectator::ReplayBody::new(255, &cfg.virtual_host_name);
-        replay.set_game(&cfg.name, &stat_string, cfg.map.game_type);
+        replay.set_game(&cfg.name, &replay_stat_string, cfg.map.game_type);
         Self {
 
             phase: GamePhase::Lobby,
@@ -288,6 +304,8 @@ impl GameState {
             last_download_tick: Instant::now(),
             relay,
             replay: Some(replay),
+            dotatv: None,
+            dotatv_prologue_sent: false,
             store: cfg.store.clone(),
             jitter_histogram: [0; 5],
             last_jitter_report: Instant::now(),

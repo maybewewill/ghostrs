@@ -64,6 +64,10 @@ pub struct GameDefaults {
 pub struct SpectatorConfig {
     pub enabled: bool,
     pub port: u16,
+    /// Live replay-stream spectating (`-loadfile` bootstrap + chunk feed).
+    /// Independent of the W3GS relay above and needs its own port.
+    pub dotatv_enabled: bool,
+    pub dotatv_port: u16,
     pub delay: Duration,
     pub max_viewers: usize,
     pub history_max_mb: usize,
@@ -140,6 +144,9 @@ fn default_reconnect_wait_sec() -> u64 {
 }
 fn default_gproxy_reconnect_port() -> u16 {
     6114
+}
+fn default_dotatv_port() -> u16 {
+    6116
 }
 fn default_spectator_port() -> u16 {
     6115
@@ -331,6 +338,10 @@ pub struct TomlSpectator {
     pub enabled: bool,
     #[serde(default = "default_spectator_port")]
     pub port: u16,
+    #[serde(default)]
+    pub dotatv_enabled: bool,
+    #[serde(default = "default_dotatv_port")]
+    pub dotatv_port: u16,
     #[serde(default = "default_spectator_delay_sec")]
     pub delay_sec: u64,
     #[serde(default = "default_max_viewers")]
@@ -344,6 +355,8 @@ impl Default for TomlSpectator {
         Self {
             enabled: false,
             port: default_spectator_port(),
+            dotatv_enabled: false,
+            dotatv_port: default_dotatv_port(),
             delay_sec: default_spectator_delay_sec(),
             max_viewers: default_max_viewers(),
             history_max_mb: default_history_max_mb(),
@@ -515,6 +528,8 @@ impl Config {
             spectator: SpectatorConfig {
                 enabled: spectator.enabled,
                 port: spectator.port,
+                dotatv_enabled: spectator.dotatv_enabled,
+                dotatv_port: spectator.dotatv_port,
                 delay: Duration::from_secs(spectator.delay_sec),
                 max_viewers: spectator.max_viewers,
                 history_max_mb: spectator.history_max_mb,
@@ -587,6 +602,8 @@ impl Config {
 
         let spectator_enabled = parse_bool(&map, "spectator_enabled", false);
         let spectator_port = parse_int(&map, "spectator_port", 6115)?;
+        let spectator_dotatv_enabled = parse_bool(&map, "spectator_dotatv_enabled", false);
+        let spectator_dotatv_port = parse_int(&map, "spectator_dotatv_port", 6116)?;
         let spectator_delay_sec = parse_int(&map, "spectator_delay", 120)?;
         let spectator_max_viewers = parse_int(&map, "spectator_maxviewers", 32)?;
         let spectator_history_max_mb = parse_int(&map, "spectator_history_max_mb", 64)?;
@@ -669,6 +686,8 @@ impl Config {
             spectator: SpectatorConfig {
                 enabled: spectator_enabled,
                 port: spectator_port,
+                dotatv_enabled: spectator_dotatv_enabled,
+                dotatv_port: spectator_dotatv_port,
                 delay: Duration::from_secs(spectator_delay_sec),
                 max_viewers: spectator_max_viewers,
                 history_max_mb: spectator_history_max_mb,

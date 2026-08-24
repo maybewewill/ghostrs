@@ -49,6 +49,17 @@ pub const MODE_STREAM: u8 = 1;
 pub const MODE_BOOTSTRAP_FULL: u8 = 2;
 /// A viewer opening the per-game chat/ping side-channel. See [`serve_chat`].
 pub const MODE_CHAT: u8 = 3;
+/// Injected client asking for the ZERO-DELAY live chunk stream. Wire-identical to
+/// [`MODE_STREAM`]; the only difference is the server serves frames at the true
+/// live edge with no broadcast delay. Paired with the fog-locked live viewer
+/// (single-team vision) so a viewer at match-time cannot leak full-map info.
+/// [`MODE_STREAM`] itself is held [`STREAM_DELAY`] behind live for the default
+/// public feed, which is safe to show with full observer vision because it is stale.
+pub const MODE_STREAM_LIVE: u8 = 4;
+
+/// Broadcast delay for the default [`MODE_STREAM`] feed: viewers see frames only
+/// once they are this far behind the live edge, defeating stream-sniping.
+pub const STREAM_DELAY: Duration = Duration::from_secs(180);
 
 /// Chat wire message kinds (both directions).
 const CHAT_KIND_CHAT: u8 = 0;
@@ -57,8 +68,8 @@ const CHAT_KIND_PING: u8 = 1;
 const CHAT_MAX_TEXT: usize = 255;
 /// Per-viewer send budget: at most CHAT_RATE_MAX messages per CHAT_RATE_WINDOW;
 /// excess is dropped (not disconnected) so a spammer only silences itself.
-const CHAT_RATE_WINDOW: Duration = Duration::from_secs(1);
-const CHAT_RATE_MAX: u32 = 5;
+const CHAT_RATE_WINDOW: Duration = Duration::from_secs(5);
+const CHAT_RATE_MAX: u32 = 1;
 
 /// Per-game fan-out for viewer chat and minimap pings. Independent of the replay
 /// stream: a dropped chat line is acceptable (unlike a dropped chunk), so a
@@ -108,6 +119,10 @@ pub struct DotaTvShared {
     heartbeat_enabled: AtomicU32,
     /// PID that speaks the heartbeat (must be an observer slot).
     heartbeat_pid: AtomicU32,
+    /// Broadcast delay (ms) applied to the default [`MODE_STREAM`] feed. Runtime
+    /// tunable (a per-community delay slider); [`MODE_STREAM_LIVE`] ignores it and
+    /// always serves the true live edge. Defaults to [`STREAM_DELAY`].
+    stream_delay_ms: AtomicU32,
     /// Per-game viewer chat + ping fan-out (side-channel, not the replay stream).
     chat: ChatRelay,
 }
@@ -129,8 +144,23 @@ impl DotaTvShared {
             last_marker_ms: AtomicU32::new(0),
             heartbeat_enabled: AtomicU32::new(0),
             heartbeat_pid: AtomicU32::new(0xFF),
+            // Delay is opt-in at construction so the many unit tests exercise
+            // frame mechanics without a wall-clock wait; the production wiring in
+            // ghostrs supervisor sets STREAM_DELAY for the default public feed.
+            stream_delay_ms: AtomicU32::new(0),
             chat: ChatRelay::new(),
         })
+    }
+
+    /// Broadcast delay applied to the default [`MODE_STREAM`] feed.
+    pub fn stream_delay(&self) -> Duration {
+        Duration::from_millis(self.stream_delay_ms.load(Ordering::Relaxed) as u64)
+    }
+
+    /// Overrides the default-feed broadcast delay (per-community slider; tests set 0).
+    pub fn set_stream_delay(&self, delay: Duration) {
+        self.stream_delay_ms
+            .store(delay.as_millis() as u32, Ordering::Relaxed);
     }
 
     /// Game time (ms) of the last heartbeat marker injected into the stream.
@@ -200,6 +230,11 @@ impl DotaTvShared {
 
     pub async fn chunk_count(&self) -> usize {
         self.stream.read().await.chunk_count()
+    }
+
+    /// Frames published at least `delay` ago (see [`DotaTvStream::count_delayed`]).
+    pub async fn count_delayed(&self, delay: Duration) -> usize {
+        self.stream.read().await.count_delayed(delay)
     }
 
     /// Absolute offset of the framing frontier (decompressed bytes published).
@@ -340,7 +375,11 @@ async fn serve_viewer_with(
         MODE_BOOTSTRAP => serve_bootstrap(sock, shared).await,
         MODE_BOOTSTRAP_FULL => serve_bootstrap_full(sock, shared).await,
         MODE_CHAT => serve_chat(sock, shared).await,
-        MODE_STREAM => serve_stream_with(sock, shared, write_timeout).await,
+        MODE_STREAM => {
+            let delay = shared.stream_delay();
+            serve_stream_with(sock, shared, write_timeout, delay).await
+        }
+        MODE_STREAM_LIVE => serve_stream_with(sock, shared, write_timeout, Duration::ZERO).await,
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unknown mode byte {other}"),
@@ -519,14 +558,17 @@ async fn serve_chat(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()
     result
 }
 
-async fn serve_stream(mut sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
-    serve_stream_with(sock, shared, VIEWER_WRITE_TIMEOUT).await
+#[allow(dead_code)]
+async fn serve_stream(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
+    let delay = shared.stream_delay();
+    serve_stream_with(sock, shared, VIEWER_WRITE_TIMEOUT, delay).await
 }
 
 async fn serve_stream_with(
     mut sock: TcpStream,
     shared: Arc<DotaTvShared>,
     write_timeout: Duration,
+    delay: Duration,
 ) -> io::Result<()> {
     let mut idx = [0u8; 4];
     sock.read_exact(&mut idx).await?;
@@ -554,7 +596,11 @@ async fn serve_stream_with(
 
         let batch = {
             let stream = shared.stream.read().await;
-            let count = stream.chunk_count();
+            // Default feed: only frames aged past STREAM_DELAY are eligible, so a
+            // viewer stays a fixed wall-clock delay behind live. Live feed
+            // (delay == 0) sees the true edge. count_delayed is monotonic, so it
+            // never hands back a frame it withheld earlier.
+            let count = stream.count_delayed(delay);
             let mut batch = Vec::with_capacity(count.saturating_sub(cursor));
             for i in cursor..count {
                 if let Some(chunk) = stream.chunk(i) {

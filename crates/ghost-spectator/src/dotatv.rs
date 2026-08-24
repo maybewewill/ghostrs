@@ -17,6 +17,7 @@
 
 use std::io::Write;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
@@ -127,6 +128,12 @@ pub struct DotaTvStream {
     /// Absolute body offset of `raw[0]`.
     raw_base: usize,
     frames: Vec<Chunk>,
+    /// Wall-clock publish time of each frame, aligned 1:1 with `frames`. Frames
+    /// are never trimmed (only `raw` is), so this stays aligned for the life of
+    /// the stream. Populated in [`Self::flush`]; drives the broadcast delay the
+    /// default (non-live) feed applies via [`Self::count_published_before`].
+    /// Monotonic non-decreasing because frames are appended in order.
+    frame_times: Vec<Instant>,
     /// Bytes of `raw` already cut into frames.
     framed_len: usize,
     /// Copy of the body prefix that belongs to the prologue (player records,
@@ -157,6 +164,7 @@ impl DotaTvStream {
             raw: Vec::new(),
             raw_base: 0,
             frames: Vec::new(),
+            frame_times: Vec::new(),
             framed_len: 0,
             prologue: Vec::new(),
             prologue_end: 0,
@@ -231,6 +239,7 @@ impl DotaTvStream {
                 valid_bytes: slice.len() as u16,
                 crc: crc32(slice),
             });
+            self.frame_times.push(Instant::now());
             self.crc_reg = crc_push(self.crc_reg, slice, &self.crc_table);
             self.framed_len = end;
             cut += 1;
@@ -261,6 +270,25 @@ impl DotaTvStream {
 
     pub fn chunk_count(&self) -> usize {
         self.frames.len()
+    }
+
+    /// Number of frames published at least `delay` ago. Used by the default
+    /// (non-live) feed to hold viewers a fixed wall-clock delay behind the live
+    /// edge — a broadcast delay that defeats stream-sniping. `frame_times` is
+    /// monotonic, so the answer is the position of the first frame newer than the
+    /// cutoff. `delay == 0` yields the full count (live feed, no delay).
+    pub fn count_delayed(&self, delay: Duration) -> usize {
+        if delay.is_zero() {
+            return self.frames.len();
+        }
+        // checked_sub: early in the process Instant's epoch can be < delay, and
+        // bare subtraction panics on underflow. No cutoff means every frame is
+        // newer than the delay window, so none are eligible yet.
+        let Some(cutoff) = Instant::now().checked_sub(delay) else {
+            return 0;
+        };
+        // partition_point: first index whose time is strictly after cutoff.
+        self.frame_times.partition_point(|t| *t <= cutoff)
     }
 
     pub fn chunk(&self, index: usize) -> Option<Chunk> {
@@ -419,6 +447,42 @@ mod tests {
         assert_eq!(s.chunk_count(), 1);
         assert_eq!(s.published_len(), 100);
         assert_eq!(s.pending_len(), 0);
+    }
+
+    #[test]
+    fn count_delayed_withholds_frames_until_they_age_past_the_delay() {
+        let mut s = DotaTvStream::for_126a();
+        s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
+        s.flush().unwrap();
+        assert_eq!(s.chunk_count(), 1);
+
+        // Zero delay always exposes the live edge.
+        assert_eq!(s.count_delayed(Duration::ZERO), 1);
+        // A frame just published is younger than the delay window: withheld.
+        assert_eq!(s.count_delayed(Duration::from_secs(60)), 0);
+
+        // Once it ages past a short delay, it becomes eligible.
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(s.count_delayed(Duration::from_millis(20)), 1);
+    }
+
+    #[test]
+    fn count_delayed_boundary_is_monotonic_across_frames() {
+        let mut s = DotaTvStream::for_126a();
+        // First frame published now.
+        s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
+        s.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(40));
+        // Second frame published ~40ms later.
+        s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
+        s.flush().unwrap();
+        assert_eq!(s.chunk_count(), 2);
+
+        // With a 20ms delay only the older frame has aged past the cutoff.
+        assert_eq!(s.count_delayed(Duration::from_millis(20)), 1);
+        // After both age out, both are eligible.
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(s.count_delayed(Duration::from_millis(20)), 2);
     }
 
     #[test]

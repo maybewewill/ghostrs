@@ -51,6 +51,7 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
                     tracing::warn!(game = %state.cfg.name, skipped, "tick deadline missed");
                 }
                 state.on_tick(skipped);
+                state.publish_dotatv().await;
                 sleep.as_mut().reset(state.tick.deadline().into());
             }
         }
@@ -79,6 +80,9 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
         }
     }
 
+    // The replay body is saved to disk from `state.replay` below; flush its
+    // unpublished tail to viewers first, while it is still intact.
+    state.finish_dotatv().await;
 
     if let Some(rep) = state.replay.take() {
         let replay_path = state.cfg.replay_path.clone();
@@ -135,6 +139,15 @@ impl GameState {
             GameCmd::Unhost => {
                 if matches!(self.phase, GamePhase::Lobby) {
                     self.finished = true;
+                }
+            }
+            GameCmd::AttachDotaTv(shared) => {
+                tracing::info!(game = %self.cfg.name, "dotatv: live stream attached");
+                self.dotatv = Some(shared);
+            }
+            GameCmd::ToggleFakePlayer => {
+                if let Some(msg) = self.toggle_fake_player() {
+                    tracing::info!(game = %self.cfg.name, "{msg}");
                 }
             }
             GameCmd::Shutdown => self.finished = true,

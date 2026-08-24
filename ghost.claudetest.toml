@@ -1,15 +1,27 @@
 # =============================================================================
-# Ghost-RS Configuration (ghost.toml)
-# Converted from default.cfg with all original values preserved
+# Ghost-RS Configuration - isolated end-to-end test stand
+#
+# Copy of ghost.live.toml with every listening port moved out of the way so this
+# can run alongside the ghost.toml / ghost.live.toml instances that are already
+# up. Only the ports, the database path and spectator.delay_sec differ.
+#
+#   host_port       6123 -> 6133
+#   port pool      41000 -> 42000
+#   gproxy          6114 -> 6134
+#   spectator relay 6125 -> 6135
+#   dotatv          6126 -> 6136
+#
+# delay_sec is 15 instead of 120: with the stock two-minute delay a short
+# load-test match ends before a single live block is ever handed to a viewer.
 # =============================================================================
 
 [bot]
 # Bind address and port for player connections
 bind_address = "0.0.0.0"
-host_port = 6113
-port_pool_start = 40000
-port_pool_end = 40150
-gproxy_reconnect_port = 6114
+host_port = 6133
+port_pool_start = 42000
+port_pool_end = 42150
+gproxy_reconnect_port = 6134
 
 # Maximum concurrent games (pool supports up to 150 games)
 max_games = 100
@@ -18,7 +30,7 @@ max_games = 100
 tft = true
 
 # Default map (e.g. "iCCup DotA 454.w3x")
-default_map = "iCCup DotA 507.w3x"
+default_map = "iCCup DotA 454.w3x"
 
 # Directory where maps are stored
 map_path = "maps"
@@ -46,14 +58,14 @@ port = 6112
 
 # Bot account credentials
 username = "BOT"
-password = "18c79c7c686d%"
+password = "test"
 
 # CD Keys (ROC & TFT)
 cdkey_roc = "E2CDWX92HKY68XCFT2F9BJVZGK"
 cdkey_tft = "RTG4KBRCZB2PKPX8PKZVHM9ZK9"
 
 # Channel to join upon login
-first_channel = "The Void"
+first_channel = "iccup.pro"
 
 # Root administrators who have full control over the bot
 root_admins = ["slash", "bonjour", "animal", "fff"]
@@ -69,8 +81,8 @@ pvpgn_realm_name = "PvPGN Realm"
 reconnect_delay_sec = 5
 
 [game]
-# Latency in milliseconds (standard DotA tick rate: 100ms)
-latency_ms = 100
+# Latency in milliseconds (tick rate: 15ms as in default.cfg)
+latency_ms = 15
 
 # Sync limit in milliseconds before lag screen appears
 sync_limit = 500
@@ -94,17 +106,17 @@ lobby_time_limit = 10
 [spectator]
 # DotaTV / Spectator relay server
 enabled = true
-port = 6115
+port = 6135
 # Live replay-stream spectating: viewers boot straight into replay playback via
 # war3.exe -loadfile and are fed the match as it happens. Separate from the W3GS
 # relay above; each game gets its own port, offset from this base by the game's
 # host-port offset.
 dotatv_enabled = true
-dotatv_port = 6116
-delay_sec = 0
+dotatv_port = 6136
+delay_sec = 15
 max_viewers = 32
 history_max_mb = 64
 
 [database]
 # SQLite database file path
-path = "data/ghost.db"
+path = "data/ghost-claudetest.db"

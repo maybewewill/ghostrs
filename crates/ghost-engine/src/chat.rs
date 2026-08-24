@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use ghost_protocol::w3gs::{incoming::ChatToHost, outgoing};
+use ghost_protocol::w3gs::incoming::ChatToHost;
 
 use crate::lang;
 use crate::lobby::MAX_SLOTS;
@@ -973,39 +973,8 @@ impl GameState {
                 self.send_chat_to(pid, "DB STATUS --- OK");
             }
             ChatCommand::FakePlayer => {
-                if matches!(self.phase, GamePhase::Lobby) {
-                    if let Some(fpid) = self.fake_player_pid.take() {
-                        self.players.remove_pid(fpid);
-                        self.slots.release(fpid);
-                        self.broadcast(outgoing::player_leave_others(
-                            fpid,
-                            ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
-                        ));
-                        self.send_all_slot_info();
-                        self.send_chat_to(pid, "Fake player removed.");
-                    } else if let Some(fpid) = self.players.next_free_pid() {
-                        if let Some(slot_idx) = self.slots.first_open() {
-                            let (tx, _rx) = tokio::sync::mpsc::channel(1);
-                            let mut p = crate::players::Player::new(
-                                fpid,
-                                "FakePlayer".to_string(),
-                                0,
-                                ghost_net::PlayerLink::for_test(tx),
-                            );
-                            p.virtual_host = true;
-                            p.loaded = true;
-                            self.players.insert(p);
-                            self.slots.occupy_slot(slot_idx, fpid);
-                            self.fake_player_pid = Some(fpid);
-                            if let Ok(b) =
-                                outgoing::player_info(fpid, "FakePlayer", [0; 4], [0; 4])
-                            {
-                                self.broadcast(b);
-                            }
-                            self.send_all_slot_info();
-                            self.send_chat_to(pid, "Fake player added.");
-                        }
-                    }
+                if let Some(msg) = self.toggle_fake_player() {
+                    self.send_chat_to(pid, msg);
                 }
             }
             ChatCommand::FpPause => {

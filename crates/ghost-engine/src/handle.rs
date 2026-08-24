@@ -3,6 +3,11 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum GameCmd {
+    /// Same as the `!fakeplayer` chat command, reachable without Battle.net.
+    ToggleFakePlayer,
+    /// Attaches a live DotaTV stream to this game. Sent by the supervisor after
+    /// it has bound the spectator port, so `GameConfig` stays unchanged.
+    AttachDotaTv(std::sync::Arc<ghost_spectator::DotaTvShared>),
     NewConn {
         conn_id: u64,
         link: PlayerLink,

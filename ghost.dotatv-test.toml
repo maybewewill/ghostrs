@@ -18,7 +18,7 @@ max_games = 100
 tft = true
 
 # Default map (e.g. "iCCup DotA 454.w3x")
-default_map = "iCCup DotA 507.w3x"
+default_map = "iCCup DotA 454.w3x"
 
 # Directory where maps are stored
 map_path = "maps"
@@ -46,14 +46,14 @@ port = 6112
 
 # Bot account credentials
 username = "BOT"
-password = "18c79c7c686d%"
+password = "test"
 
 # CD Keys (ROC & TFT)
 cdkey_roc = "E2CDWX92HKY68XCFT2F9BJVZGK"
 cdkey_tft = "RTG4KBRCZB2PKPX8PKZVHM9ZK9"
 
 # Channel to join upon login
-first_channel = "The Void"
+first_channel = "iccup.pro"
 
 # Root administrators who have full control over the bot
 root_admins = ["slash", "bonjour", "animal", "fff"]
@@ -69,8 +69,8 @@ pvpgn_realm_name = "PvPGN Realm"
 reconnect_delay_sec = 5
 
 [game]
-# Latency in milliseconds (standard DotA tick rate: 100ms)
-latency_ms = 100
+# Latency in milliseconds (tick rate: 15ms as in default.cfg)
+latency_ms = 15
 
 # Sync limit in milliseconds before lag screen appears
 sync_limit = 500
@@ -101,10 +101,10 @@ port = 6115
 # host-port offset.
 dotatv_enabled = true
 dotatv_port = 6116
-delay_sec = 0
+delay_sec = 120
 max_viewers = 32
 history_max_mb = 64
 
 [database]
 # SQLite database file path
-path = "data/ghost.db"
+path = "data/ghost-dotatv-test.db"

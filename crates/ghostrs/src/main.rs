@@ -13,6 +13,7 @@ async fn main() -> anyhow::Result<()> {
     // root admin's `!pub`. Multiple `--host` flags can be passed to host multiple games.
     let mut host_on_start = Vec::new();
     let mut start_after = None;
+    let mut fake_player = false;
     let mut positional = Vec::new();
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
@@ -25,6 +26,10 @@ async fn main() -> anyhow::Result<()> {
             // Fires the same GameCmd::Start that the `!start` command sends, so the
             // start path can be exercised without an admin whispering the bot.
             "--start-after" => start_after = it.next().and_then(|s| s.parse::<u64>().ok()),
+            // Seats a fake player in the lobby at startup, the same way
+            // `!fakeplayer` would, so a game can reach the playing phase
+            // without a human client.
+            "--fake-player" => fake_player = true,
             _ => positional.push(a.clone()),
         }
     }
@@ -46,5 +51,5 @@ async fn main() -> anyhow::Result<()> {
         Config::from_toml("")?
     };
 
-    Supervisor::run(cfg, host_on_start, start_after).await
+    Supervisor::run(cfg, host_on_start, start_after, fake_player).await
 }

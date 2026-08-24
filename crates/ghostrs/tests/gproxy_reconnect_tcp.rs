@@ -44,7 +44,7 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     cfg.db_path = format!("reconnect_test_{}.db", host_port).into();
 
     let sup_handle = tokio::spawn(async move {
-        let _ = Supervisor::run(cfg, vec!["ReconnectMatch".into()], None).await;
+        let _ = Supervisor::run(cfg, vec!["ReconnectMatch".into()], None, false).await;
     });
 
     tokio::time::sleep(Duration::from_millis(150)).await;

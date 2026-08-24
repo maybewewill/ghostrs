@@ -5,6 +5,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use ghost_protocol::frame::Frame;
 use ghost_protocol::w3gs::{W3gsCodec, ids};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
@@ -258,6 +259,130 @@ async fn run_client(
     m.intervals_ms.extend(local_intervals);
 }
 
+// ---------------------------------------------------------------------------
+// DotaTV viewer: bootstrap fetch + live chunk stream, the exact wire protocol
+// the injected WC3 client speaks (DTV1 greeting, mode byte, chunk frames).
+// ---------------------------------------------------------------------------
+
+struct TvMetrics {
+    viewers: u64,
+    failed_viewers: u64,
+    frames: u64,
+    stream_bytes: u64,
+    gaps_ms: Vec<f64>,
+    bootstrap_ms: Vec<f64>,
+}
+
+async fn read_n(sock: &mut TcpStream, n: usize) -> std::io::Result<Vec<u8>> {
+    let mut out = vec![0u8; n];
+    sock.read_exact(&mut out).await?;
+    Ok(out)
+}
+
+async fn run_viewer(tv_addr: String, delay: Duration, duration: Duration, m: Arc<Mutex<TvMetrics>>) {
+    tokio::time::sleep(delay).await;
+
+    // 1. Bootstrap: mode 0 + start index 0 -> u32 resume index, u32 file len, file.
+    let t0 = Instant::now();
+    let mut sock = match TcpStream::connect(&tv_addr).await {
+        Ok(s) => s,
+        Err(_) => {
+            m.lock().await.failed_viewers += 1;
+            return;
+        }
+    };
+    if read_n(&mut sock, 4).await.unwrap_or_default() != b"DTV1" {
+        m.lock().await.failed_viewers += 1;
+        return;
+    }
+    let _ = sock.write_all(&[0u8, 0, 0, 0, 0]).await; // MODE_BOOTSTRAP, index 0
+    let Ok(idx_bytes) = read_n(&mut sock, 4).await else {
+        m.lock().await.failed_viewers += 1;
+        return;
+    };
+    let start_index = u32::from_le_bytes(idx_bytes.try_into().unwrap());
+    let Ok(len_bytes) = read_n(&mut sock, 4).await else {
+        m.lock().await.failed_viewers += 1;
+        return;
+    };
+    let file_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
+    let Ok(file) = read_n(&mut sock, file_len).await else {
+        m.lock().await.failed_viewers += 1;
+        return;
+    };
+    let boot_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    drop(sock);
+
+    // Validate every block inflates to exactly 8192 (what the WC3 loader requires).
+    let n_blocks = u32::from_le_bytes(file[44..48].try_into().unwrap()) as usize;
+    let mut off = 68usize;
+    for _ in 0..n_blocks {
+        if off + 8 > file.len() {
+            m.lock().await.failed_viewers += 1;
+            return;
+        }
+        let comp_len = u16::from_le_bytes(file[off..off + 2].try_into().unwrap()) as usize;
+        off += 8 + comp_len;
+    }
+    if off != file.len() {
+        m.lock().await.failed_viewers += 1;
+        return;
+    }
+
+    // 2. Live stream from the resume index.
+    let mut sock = match TcpStream::connect(&tv_addr).await {
+        Ok(s) => s,
+        Err(_) => {
+            m.lock().await.failed_viewers += 1;
+            return;
+        }
+    };
+    if read_n(&mut sock, 4).await.unwrap_or_default() != b"DTV1" {
+        m.lock().await.failed_viewers += 1;
+        return;
+    }
+    let mut req = vec![1u8]; // MODE_STREAM
+    req.extend_from_slice(&start_index.to_le_bytes());
+    let _ = sock.write_all(&req).await;
+
+    let deadline = Instant::now() + duration;
+    let mut last_frame = Instant::now();
+    let mut local_gaps = Vec::new();
+    let mut frames = 0u64;
+    let mut bytes = 0u64;
+    loop {
+        let gap = tokio::time::timeout(Duration::from_secs(10), async {
+            // Wire frame: u16 compressedSize, u16 validBytes, u32 crc32, u8 data[] (LE).
+            // The header is 8 bytes, not 4 — the u32 CRC must be consumed or every
+            // following frame desyncs and the metrics measure garbage.
+            let hdr = read_n(&mut sock, 8).await.ok()?;
+            let comp_len = u16::from_le_bytes(hdr[..2].try_into().unwrap()) as usize;
+            let _valid_bytes = u16::from_le_bytes(hdr[2..4].try_into().unwrap());
+            let _crc = u32::from_le_bytes(hdr[4..8].try_into().unwrap());
+            let payload = read_n(&mut sock, comp_len).await.ok()?;
+            Some(payload)
+        }).await;
+        match gap {
+            Ok(Some(payload)) => {
+                let now = Instant::now();
+                local_gaps.push(now.duration_since(last_frame).as_secs_f64() * 1000.0);
+                last_frame = now;
+                frames += 1;
+                bytes += (8 + payload.len()) as u64;
+                if now >= deadline { break; }
+            }
+            Ok(None) | Err(_) => break, // timeout or clean close
+        }
+    }
+
+    let mut m = m.lock().await;
+    m.viewers += 1;
+    m.frames += frames;
+    m.stream_bytes += bytes;
+    m.gaps_ms.extend(local_gaps);
+    m.bootstrap_ms.push(boot_ms);
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -267,6 +392,9 @@ async fn main() -> anyhow::Result<()> {
     let mut players_per_game = 10usize;
     let mut duration_secs = 10u64;
     let mut addr = "127.0.0.1:6112".to_string();
+    let mut tv_addr = "127.0.0.1:6116".to_string();
+    let mut viewers = 0usize;
+    let mut viewer_delay_secs = 0u64;
 
     let mut i = 1;
     while i < args.len() {
@@ -285,6 +413,18 @@ async fn main() -> anyhow::Result<()> {
             }
             "--addr" => {
                 addr = args[i + 1].clone();
+                i += 2;
+            }
+            "--tv-addr" => {
+                tv_addr = args[i + 1].clone();
+                i += 2;
+            }
+            "--viewers" => {
+                viewers = args[i + 1].parse()?;
+                i += 2;
+            }
+            "--viewer-delay" => {
+                viewer_delay_secs = args[i + 1].parse()?;
                 i += 2;
             }
             _ => i += 1,
@@ -313,6 +453,24 @@ async fn main() -> anyhow::Result<()> {
                 run_client(a, name, d, m).await;
             }));
         }
+    }
+
+    let tv_metrics = Arc::new(Mutex::new(TvMetrics {
+        viewers: 0,
+        failed_viewers: 0,
+        frames: 0,
+        stream_bytes: 0,
+        gaps_ms: Vec::new(),
+        bootstrap_ms: Vec::new(),
+    }));
+    for v in 0..viewers {
+        let a = tv_addr.clone();
+        let m = tv_metrics.clone();
+        let delay = Duration::from_secs(viewer_delay_secs + v as u64);
+        let d = Duration::from_secs(duration_secs);
+        tasks.push(tokio::spawn(async move {
+            run_viewer(a, delay, d, m).await;
+        }));
     }
 
     for task in tasks {
@@ -349,9 +507,34 @@ async fn main() -> anyhow::Result<()> {
         println!("Tick interval Max : {:.2} ms", max);
     }
     println!("============================================================");
-
+    if viewers > 0 {
+        let mut tv = tv_metrics.lock().await;
+        println!("============================================================");
+        println!("                   DOTATV VIEWER REPORT                     ");
+        println!("============================================================");
+        println!("Viewers attached : {}", tv.viewers);
+        println!("Failed viewers   : {}", tv.failed_viewers);
+        println!("Total frames     : {}", tv.frames);
+        println!("Stream bytes     : {}", tv.stream_bytes);
+        if !tv.bootstrap_ms.is_empty() {
+            let avg = tv.bootstrap_ms.iter().sum::<f64>() / tv.bootstrap_ms.len() as f64;
+            println!("Bootstrap ms avg : {:.1}", avg);
+        }
+        if !tv.gaps_ms.is_empty() {
+            tv.gaps_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let n = tv.gaps_ms.len();
+            println!(
+                "Frame gap p50 / p95 / max : {:.1} / {:.1} / {:.1} ms",
+                tv.gaps_ms[n * 50 / 100],
+                tv.gaps_ms[n * 95 / 100],
+                tv.gaps_ms[n - 1]
+            );
+        }
+        println!("============================================================");
+    }
     Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {

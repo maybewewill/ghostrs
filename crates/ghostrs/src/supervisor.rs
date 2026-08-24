@@ -85,6 +85,7 @@ impl Supervisor {
         cfg: Config,
         host_on_start: Vec<String>,
         start_after: Option<u64>,
+        fake_player: bool,
     ) -> anyhow::Result<()> {
         let (store, _store_task) =
             Store::open(&cfg.db_path).context("failed to open SQLite database")?;
@@ -178,6 +179,9 @@ impl Supervisor {
         for name in host_on_start {
             let owner = sup.cfg.bnet.username.clone();
             sup.create_game(&name, &owner, ghost_protocol::GameVisibility::Public);
+            if fake_player && let Some(g) = &sup.current_game {
+                g.send(GameCmd::ToggleFakePlayer);
+            }
         }
 
         sup.event_loop(start_after).await
@@ -188,28 +192,19 @@ impl Supervisor {
 
         let mut lan_timer = tokio::time::interval(Duration::from_secs(3));
         let mut cleanup_timer = tokio::time::interval(Duration::from_secs(1));
-        let auto_start = start_after.map(|s| {
-            Box::pin(tokio::time::sleep(Duration::from_secs(s)))
-                as std::pin::Pin<Box<tokio::time::Sleep>>
-        });
-        let mut auto_start = auto_start;
+        if let Some(s) = start_after {
+            if let Some(g) = self.current_game.clone() {
+                let username = self.cfg.bnet.username.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(s)).await;
+                    tracing::info!("--start-after elapsed ({s}s), starting the game");
+                    g.send(GameCmd::Start { by: username });
+                });
+            }
+        }
 
         loop {
             tokio::select! {
-                () = async {
-                    match auto_start.as_mut() {
-                        Some(s) => s.await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    auto_start = None;
-                    if let Some(g) = &self.current_game {
-                        tracing::info!("--start-after elapsed, starting the game");
-                        g.send(GameCmd::Start { by: self.cfg.bnet.username.clone() });
-                    } else {
-                        tracing::warn!("--start-after elapsed but there is no lobby to start");
-                    }
-                }
 
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down gracefully");
@@ -334,23 +329,12 @@ impl Supervisor {
                 "{}.{}.{}.{}",
                 external_ip[0], external_ip[1], external_ip[2], external_ip[3]
             );
-            let store = self.store.clone();
-            let game_handle = game.clone();
-            let conn_tx = self.conn_event_tx.clone();
-
-            tokio::spawn(async move {
-                if let Some(ban) = store.is_banned("", &ip_str).await {
-                    tracing::info!(%ip_str, reason = %ban.reason, "rejected banned IP");
-                    return;
-                }
-                let link = spawn_conn(conn_id, stream, conn_tx, 1024);
-                game_handle.send(GameCmd::NewConn {
-                    conn_id,
-                    link,
-                    external_ip,
-                });
+            let link = spawn_conn(conn_id, stream, self.conn_event_tx.clone(), 1024);
+            game.send(GameCmd::NewConn {
+                conn_id,
+                link,
+                external_ip,
             });
-
             self.conn_to_game.insert(conn_id, game.clone());
         } else {
             tracing::debug!(conn_id, %peer, local_port, "connection dropped: no active lobby for port");
@@ -1148,6 +1132,33 @@ impl Supervisor {
 
         let (handle, join) = spawn_game(game_cfg);
         handle.send(GameCmd::CreateVirtualHost);
+
+        if self.cfg.spectator.dotatv_enabled {
+            // One listener per game: viewers are pointed at a specific match, so
+            // the port has to be distinct. Derived from the game's own host port
+            // offset to stay stable and collision-free across concurrent games.
+            let tv_port = self
+                .cfg
+                .spectator
+                .dotatv_port
+                .wrapping_add(port.wrapping_sub(self.cfg.bot.port_pool_range().0));
+            let tv_addr = SocketAddr::from(([0, 0, 0, 0], tv_port));
+
+            let shared =
+                ghost_spectator::DotaTvShared::new(ghost_spectator::DotaTvStream::for_126a());
+            // Default public feed runs 180s behind live (anti stream-snipe); the
+            // zero-delay live feed is the separate fog-locked MODE_STREAM_LIVE path.
+            shared.set_stream_delay(ghost_spectator::STREAM_DELAY);
+            handle.send(GameCmd::AttachDotaTv(shared.clone()));
+
+            tokio::spawn(async move {
+                if let Err(err) = ghost_spectator::serve_dotatv(tv_addr, shared).await {
+                    tracing::error!(%tv_addr, error = %err, "dotatv: listener stopped");
+                }
+            });
+
+            tracing::info!(game = %name, %tv_addr, "dotatv: live spectating available");
+        }
 
         let advert = ActiveLobbyAdvert {
             game_name: name.to_string(),

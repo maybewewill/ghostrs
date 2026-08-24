@@ -451,10 +451,10 @@ impl ParsedMap {
                                     let _ = cursor.read_exact(&mut u32_buf); // race
                                     let race = u32::from_le_bytes(u32_buf);
                                     slot.race = match race {
-                                        1 => 0x01, // Human
-                                        2 => 0x02, // Orc
-                                        3 => 0x04, // Undead
-                                        4 => 0x08, // NightElf
+                                        1 => 0x01, // Human (SLOTRACE_HUMAN)
+                                        2 => 0x02, // Orc (SLOTRACE_ORC)
+                                        3 => 0x08, // Undead (SLOTRACE_UNDEAD)
+                                        4 => 0x04, // NightElf (SLOTRACE_NIGHTELF)
                                         _ => 0x20, // Random
                                     };
 
@@ -692,12 +692,12 @@ mod tests {
         // Sentinel team 0 (slots 0..5), colours 1..5
         for s in &parsed.slots[0..5] {
             assert_eq!(s.team, 0);
-            assert_eq!(s.race, 0x08); // NightElf
+            assert_eq!(s.race, 0x04); // NightElf (SLOTRACE_NIGHTELF)
         }
         // Scourge team 1 (slots 5..10), colours 7..11
         for s in &parsed.slots[5..10] {
             assert_eq!(s.team, 1);
-            assert_eq!(s.race, 0x04); // Undead
+            assert_eq!(s.race, 0x08); // Undead (SLOTRACE_UNDEAD)
         }
     }
 

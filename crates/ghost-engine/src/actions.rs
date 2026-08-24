@@ -215,7 +215,15 @@ impl GameState {
         self.delete_virtual_host();
         self.broadcast(outgoing::countdown_end());
         if let Some(fpid) = self.fake_player_pid {
+            if let Some(p) = self.players.by_pid_mut(fpid) {
+                p.loaded = true;
+            }
             self.broadcast(outgoing::game_loaded_others(fpid));
+        }
+
+        if self.players.iter().all(|p| p.loaded) {
+            tracing::info!(game = %self.cfg.name, "all players loaded, game is live");
+            self.begin_playing();
         }
     }
 
@@ -326,6 +334,101 @@ impl GameState {
     }
 
     /// One scheduled tick. `skipped` counts periods lost to a stall.
+    /// Adds a fake player, or removes the existing one. Lobby only.
+    ///
+    /// Extracted from the `!fakeplayer` chat handler so the same path can be
+    /// driven without an admin on Battle.net - see ghostrs' `--fake-player`.
+    /// Returns the message to report, or `None` if the call was a no-op.
+    pub fn toggle_fake_player(&mut self) -> Option<&'static str> {
+        if !matches!(self.phase, GamePhase::Lobby) {
+            return None;
+        }
+
+        if let Some(fpid) = self.fake_player_pid.take() {
+            self.players.remove_pid(fpid);
+            self.slots.release(fpid);
+            self.broadcast(outgoing::player_leave_others(
+                fpid,
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
+            ));
+            self.send_all_slot_info();
+            return Some("Fake player removed.");
+        }
+
+        let fpid = self.players.next_free_pid()?;
+        let slot_idx = self.slots.first_open()?;
+
+        // The fake player has no socket, so nothing ever drains its queue. Keeping the
+        // receiver alive is enough for sends to succeed; spawning a drain task would
+        // panic here because this is reachable from sync callers with no tokio runtime.
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
+        std::mem::forget(rx);
+        let mut p = crate::players::Player::new(
+            fpid,
+            "FakePlayer".to_string(),
+            0,
+            ghost_net::PlayerLink::for_test(tx),
+        );
+        p.virtual_host = false;
+        p.loaded = true;
+        self.players.insert(p);
+        self.slots.occupy_slot(slot_idx, fpid);
+        self.fake_player_pid = Some(fpid);
+
+        if let Ok(b) = outgoing::player_info(fpid, "FakePlayer", [0; 4], [0; 4]) {
+            self.broadcast(b);
+        }
+        self.send_all_slot_info();
+        Some("Fake player added.")
+    }
+
+    /// Hands everything produced this tick to the DotaTV stream.
+    ///
+    /// Separate from `on_tick` because publishing is async: it takes the stream
+    /// lock shared with connected viewers. No-op unless spectating is enabled.
+    pub async fn publish_dotatv(&mut self) {
+        let Some(shared) = self.dotatv.clone() else {
+            return;
+        };
+        let Some(replay) = self.replay.as_mut() else {
+            return;
+        };
+
+        if let Err(err) =
+            ghost_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent).await
+        {
+            // A rejected chunk means viewers can no longer be kept in sync, but
+            // the game itself is unaffected, so drop the stream rather than the
+            // match.
+            tracing::warn!(error = %err, "dotatv: publish failed, disabling live stream");
+            self.dotatv = None;
+        }
+    }
+
+    /// Publishes the final tail of the body once the match is over.
+    ///
+    /// There is no next tick after the game loop breaks, so without this the last
+    /// records — leaver records and final timeslots — never reach viewers and their
+    /// playback stalls just short of the end.
+    pub async fn finish_dotatv(&mut self) {
+        let Some(shared) = self.dotatv.clone() else {
+            return;
+        };
+        let Some(replay) = self.replay.as_mut() else {
+            return;
+        };
+
+        if let Err(err) =
+            ghost_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent).await
+        {
+            tracing::warn!(error = %err, "dotatv: final publish failed");
+            return;
+        }
+        if let Err(err) = shared.flush().await {
+            tracing::warn!(error = %err, "dotatv: final flush failed");
+        }
+    }
+
     pub fn on_tick(&mut self, skipped: u32) {
         self.pump_downloads();
         self.reap_gproxy_timeouts(self.cfg.reconnect_wait);
@@ -397,6 +500,11 @@ impl GameState {
                 }
             }
             GamePhase::Playing => {
+                if let Some(fpid) = self.fake_player_pid {
+                    if let Some(p) = self.players.by_pid_mut(fpid) {
+                        p.sync_counter = self.sync_counter;
+                    }
+                }
                 self.check_desync();
                 if self.check_lag() {
                     self.drop_lagging_players(std::time::Duration::from_secs(60));
