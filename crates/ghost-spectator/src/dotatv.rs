@@ -291,6 +291,23 @@ impl DotaTvStream {
         self.frame_times.partition_point(|t| *t <= cutoff)
     }
 
+    /// Readiness of the delayed feed for a viewer resuming at `start_index`.
+    /// Returns `(ready, secs_until_ready)`. Ready when at least one frame past
+    /// `start_index` has aged beyond `delay`, so playback can actually advance.
+    /// Otherwise the viewer joined before the broadcast delay elapsed and the
+    /// second value is the seconds until the frame at `start_index` becomes
+    /// releasable — enough for the client to show a buffering countdown.
+    pub fn status(&self, start_index: usize, delay: Duration) -> (bool, u64) {
+        if delay.is_zero() || start_index >= self.frames.len() {
+            return (true, 0);
+        }
+        if self.count_delayed(delay) > start_index {
+            return (true, 0);
+        }
+        let age = Instant::now().saturating_duration_since(self.frame_times[start_index]);
+        (false, delay.saturating_sub(age).as_secs())
+    }
+
     pub fn chunk(&self, index: usize) -> Option<Chunk> {
         self.frames.get(index).cloned()
     }

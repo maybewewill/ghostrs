@@ -57,6 +57,14 @@ pub const MODE_CHAT: u8 = 3;
 /// public feed, which is safe to show with full observer vision because it is stale.
 pub const MODE_STREAM_LIVE: u8 = 4;
 
+/// Injected client asking whether the delayed feed is ready before it commits to
+/// entering the world. Sends `{u32 start_index}`; the server replies
+/// `{u8 ready, u32 secs_remaining}` and closes. While `ready == 0` the client
+/// holds on the loading screen showing a buffering countdown; once the broadcast
+/// delay has elapsed for its resume point the server answers ready and the client
+/// proceeds into [`MODE_STREAM`]. A read-only status ping — never feeds the engine.
+pub const MODE_STREAM_STATUS: u8 = 5;
+
 /// Broadcast delay for the default [`MODE_STREAM`] feed: viewers see frames only
 /// once they are this far behind the live edge, defeating stream-sniping.
 pub const STREAM_DELAY: Duration = Duration::from_secs(180);
@@ -235,6 +243,12 @@ impl DotaTvShared {
     /// Frames published at least `delay` ago (see [`DotaTvStream::count_delayed`]).
     pub async fn count_delayed(&self, delay: Duration) -> usize {
         self.stream.read().await.count_delayed(delay)
+    }
+
+    /// Delayed-feed readiness for a viewer resuming at `start_index`
+    /// (see [`DotaTvStream::status`]).
+    pub async fn stream_status(&self, start_index: usize, delay: Duration) -> (bool, u64) {
+        self.stream.read().await.status(start_index, delay)
     }
 
     /// Absolute offset of the framing frontier (decompressed bytes published).
@@ -417,11 +431,36 @@ async fn serve_viewer_with(
             serve_stream_with(sock, shared, write_timeout, delay).await
         }
         MODE_STREAM_LIVE => serve_stream_with(sock, shared, write_timeout, Duration::ZERO).await,
+        MODE_STREAM_STATUS => serve_status(sock, shared, force_live).await,
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unknown mode byte {other}"),
         )),
     }
+}
+
+/// [`MODE_STREAM_STATUS`]: read the viewer's resume index, answer whether the
+/// delayed feed can play yet and, if not, how many seconds until it can. One
+/// request/response, then close — the client polls this from the loading screen.
+async fn serve_status(
+    mut sock: TcpStream,
+    shared: Arc<DotaTvShared>,
+    force_live: bool,
+) -> io::Result<()> {
+    let mut idx = [0u8; 4];
+    sock.read_exact(&mut idx).await?;
+    let start_index = u32::from_le_bytes(idx) as usize;
+    let delay = if force_live {
+        Duration::ZERO
+    } else {
+        shared.stream_delay()
+    };
+    let (ready, secs) = shared.stream_status(start_index, delay).await;
+    let mut out = [0u8; 5];
+    out[0] = ready as u8;
+    out[1..5].copy_from_slice(&(secs.min(u32::MAX as u64) as u32).to_le_bytes());
+    sock.write_all(&out).await?;
+    Ok(())
 }
 
 /// Hands the launcher a `.w3g` covering everything published so far, plus the

@@ -9,8 +9,8 @@ pub mod w3g;
 pub use body::ReplayBody;
 pub use dotatv::{CHUNK_SIZE, Chunk, DotaTvError, DotaTvStream, GREETING};
 pub use dotatv_server::{
-    DotaTvShared, MODE_BOOTSTRAP, MODE_STREAM, MODE_STREAM_LIVE, STREAM_DELAY, publish_pending,
-    serve as serve_dotatv, serve_admin as serve_dotatv_admin,
+    DotaTvShared, MODE_BOOTSTRAP, MODE_STREAM, MODE_STREAM_LIVE, MODE_STREAM_STATUS, STREAM_DELAY,
+    publish_pending, serve as serve_dotatv, serve_admin as serve_dotatv_admin,
 };
 pub use relay::{Relay, RelayCmd, RelayConfig, RelayError, RelayHandle, spawn_relay};
 pub use w3g::W3gWriter;
