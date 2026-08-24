@@ -356,14 +356,45 @@ pub async fn serve(addr: SocketAddr, shared: Arc<DotaTvShared>) -> io::Result<()
     }
 }
 
-async fn serve_viewer(mut sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
-    serve_viewer_with(sock, shared, VIEWER_WRITE_TIMEOUT).await
+/// Admin/caster listener. Identical to [`serve`] except the default
+/// [`MODE_STREAM`] feed is served at the live edge (zero broadcast delay) rather
+/// than [`stream_delay`](DotaTvShared::stream_delay). Bind this on a separate,
+/// access-controlled port so casters watch in real time while the public port
+/// stays [`STREAM_DELAY`] behind live. Shares the same frame buffer as the
+/// public listener (`shared`), so it is a second view onto one game, not a copy.
+pub async fn serve_admin(addr: SocketAddr, shared: Arc<DotaTvShared>) -> io::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    tracing::info!(%addr, "dotatv: admin (zero-delay) listening");
+
+    loop {
+        let (sock, peer) = match listener.accept().await {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::warn!(%err, "dotatv: admin accept failed; retrying");
+                tokio::time::sleep(IDLE_TICK).await;
+                continue;
+            }
+        };
+        let shared = Arc::clone(&shared);
+        tokio::spawn(async move {
+            if let Err(err) =
+                serve_viewer_with(sock, shared, VIEWER_WRITE_TIMEOUT, true).await
+            {
+                tracing::debug!(%peer, %err, "dotatv: admin viewer disconnected");
+            }
+        });
+    }
+}
+
+async fn serve_viewer(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
+    serve_viewer_with(sock, shared, VIEWER_WRITE_TIMEOUT, false).await
 }
 
 async fn serve_viewer_with(
     mut sock: TcpStream,
     shared: Arc<DotaTvShared>,
     write_timeout: Duration,
+    force_live: bool,
 ) -> io::Result<()> {
     sock.set_nodelay(true)?;
     sock.write_all(&GREETING).await?;
@@ -376,7 +407,13 @@ async fn serve_viewer_with(
         MODE_BOOTSTRAP_FULL => serve_bootstrap_full(sock, shared).await,
         MODE_CHAT => serve_chat(sock, shared).await,
         MODE_STREAM => {
-            let delay = shared.stream_delay();
+            // Admin/caster listener serves the default feed at the live edge; the
+            // public listener holds it `stream_delay` behind (anti stream-snipe).
+            let delay = if force_live {
+                Duration::ZERO
+            } else {
+                shared.stream_delay()
+            };
             serve_stream_with(sock, shared, write_timeout, delay).await
         }
         MODE_STREAM_LIVE => serve_stream_with(sock, shared, write_timeout, Duration::ZERO).await,
@@ -1121,7 +1158,7 @@ mod tests {
             while let Ok((sock, _)) = listener.accept().await {
                 let shared = Arc::clone(&shared);
                 tokio::spawn(async move {
-                    let _ = serve_viewer_with(sock, shared, Duration::from_millis(200)).await;
+                    let _ = serve_viewer_with(sock, shared, Duration::from_millis(200), false).await;
                 });
             }
         });

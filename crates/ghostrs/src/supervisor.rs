@@ -1151,13 +1151,25 @@ impl Supervisor {
             shared.set_stream_delay(ghost_spectator::STREAM_DELAY);
             handle.send(GameCmd::AttachDotaTv(shared.clone()));
 
+            // Admin/caster port = public port + 1, served at the live edge (0ms).
+            // Access-control this port at the firewall: it bypasses the 180s delay.
+            let admin_addr = SocketAddr::from(([0, 0, 0, 0], tv_port.wrapping_add(1)));
+            let admin_shared = shared.clone();
+
             tokio::spawn(async move {
                 if let Err(err) = ghost_spectator::serve_dotatv(tv_addr, shared).await {
                     tracing::error!(%tv_addr, error = %err, "dotatv: listener stopped");
                 }
             });
+            tokio::spawn(async move {
+                if let Err(err) =
+                    ghost_spectator::serve_dotatv_admin(admin_addr, admin_shared).await
+                {
+                    tracing::error!(%admin_addr, error = %err, "dotatv: admin listener stopped");
+                }
+            });
 
-            tracing::info!(game = %name, %tv_addr, "dotatv: live spectating available");
+            tracing::info!(game = %name, %tv_addr, %admin_addr, "dotatv: live spectating available");
         }
 
         let advert = ActiveLobbyAdvert {
