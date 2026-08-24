@@ -338,7 +338,7 @@ pub struct TomlSpectator {
     pub enabled: bool,
     #[serde(default = "default_spectator_port")]
     pub port: u16,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub dotatv_enabled: bool,
     #[serde(default = "default_dotatv_port")]
     pub dotatv_port: u16,
@@ -355,7 +355,7 @@ impl Default for TomlSpectator {
         Self {
             enabled: false,
             port: default_spectator_port(),
-            dotatv_enabled: false,
+            dotatv_enabled: true,
             dotatv_port: default_dotatv_port(),
             delay_sec: default_spectator_delay_sec(),
             max_viewers: default_max_viewers(),
@@ -602,7 +602,7 @@ impl Config {
 
         let spectator_enabled = parse_bool(&map, "spectator_enabled", false);
         let spectator_port = parse_int(&map, "spectator_port", 6115)?;
-        let spectator_dotatv_enabled = parse_bool(&map, "spectator_dotatv_enabled", false);
+        let spectator_dotatv_enabled = parse_bool(&map, "spectator_dotatv_enabled", true);
         let spectator_dotatv_port = parse_int(&map, "spectator_dotatv_port", 6116)?;
         let spectator_delay_sec = parse_int(&map, "spectator_delay", 120)?;
         let spectator_max_viewers = parse_int(&map, "spectator_maxviewers", 32)?;
