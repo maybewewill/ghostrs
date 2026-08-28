@@ -47,7 +47,7 @@ Spectre completely reimagines Warcraft III 1.26a hosting in pure Rust with an as
 - **Zero-Copy Lockless Packet Distribution** — Game frames and W3GS action blocks are constructed once into reference-counted `bytes::Bytes` and distributed lock-free (**5.42 ns** per 10-player broadcast).
 - **100% Pure-Rust BNCS & Crypto** — Native PvPGN password hashing, CD-key validation, and SRP/NLS handshake without `bncsutil.dll` or C-FFI dependencies.
 - **GProxy++ Reconnect Protocol** — A sliding 500-packet ring buffer replay (`GPS_RECONNECT`) transparently restores disconnected players without causing match desyncs.
-- **Live DotaTV Spectator Relay** — Built-in spectator streaming server on port 6114 with configurable delay (e.g. 120s), viewer chat, and automated `.w3g` match replay writer.
+- **Live DotaTV Spectator Relay** — Built-in spectator streaming server on port 6115 with configurable delay (e.g. 120s), viewer chat, and automated `.w3g` match replay writer.
 - **In-Engine DotA & MPQ Map Parser** — Built-in MPQ extractor parsing slot layouts (Sentinel vs Scourge 5v5), CRC32/SHA-1 checks, and real-time DotA tracker for hero picks, KDA, CS, and throne destruction.
 - **Asynchronous SQLite WAL Storage** — Dedicated storage actor operating in WAL mode for non-blocking persistence of bans, administrative access, and game statistics.
 
@@ -290,7 +290,7 @@ Spectre was benchmarked using **Criterion** on an **Intel Core i9-14900HX** (Win
 
 ## Development & Verification
 
-Run the full workspace test suite (102 automated unit and integration tests):
+Run the full workspace test suite (140+ automated unit and integration tests):
 
 ```bash
 # Run all workspace tests
