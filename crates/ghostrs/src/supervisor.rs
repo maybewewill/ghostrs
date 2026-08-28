@@ -54,7 +54,6 @@ pub struct Supervisor {
     current_game: Option<GameHandle>,
     current_game_name: Option<String>,
     current_game_advert: Option<ActiveLobbyAdvert>,
-    running_games: Vec<(String, GameHandle, JoinHandle<()>)>,
     games: Vec<ActiveGameInfo>,
     allocated_ports: HashSet<u16>,
     port_to_game: HashMap<u16, GameHandle>,
@@ -70,7 +69,6 @@ pub struct Supervisor {
     game_event_tx: mpsc::Sender<GameEvent>,
     game_event_rx: mpsc::Receiver<GameEvent>,
     udp_broadcaster: Option<UdpBroadcaster>,
-    #[allow(dead_code)]
     spectator_relay: Option<RelayHandle>,
     selected_map_file: Option<String>,
     autohost: Option<AutohostConfig>,
@@ -151,7 +149,6 @@ impl Supervisor {
             current_game: None,
             current_game_name: None,
             current_game_advert: None,
-            running_games: Vec::new(),
             games: Vec::new(),
             allocated_ports: HashSet::new(),
             port_to_game: HashMap::new(),
@@ -325,10 +322,6 @@ impl Supervisor {
                 _ => [127, 0, 0, 1],
             };
 
-            let ip_str = format!(
-                "{}.{}.{}.{}",
-                external_ip[0], external_ip[1], external_ip[2], external_ip[3]
-            );
             let link = spawn_conn(conn_id, stream, self.conn_event_tx.clone(), 1024);
             game.send(GameCmd::NewConn {
                 conn_id,
@@ -346,11 +339,10 @@ impl Supervisor {
         for g in &self.games {
             candidate_games.push(g.handle.clone());
         }
-        for (_, g, _) in &self.running_games {
-            candidate_games.push(g.clone());
-        }
-        if let Some(ref g) = self.current_game {
-            candidate_games.push(g.clone());
+        if candidate_games.is_empty() {
+            if let Some(ref g) = self.current_game {
+                candidate_games.push(g.clone());
+            }
         }
 
         if candidate_games.is_empty() {
@@ -505,7 +497,7 @@ impl Supervisor {
                     )));
                     return;
                 }
-                if self.running_games.len() >= self.cfg.bot.max_games {
+                if self.games.len() >= self.cfg.bot.max_games {
                     self.bnet.send(BnetCmd::SendChat(format!(
                         "/w {user} Error: maximum games reached"
                     )));
@@ -718,11 +710,6 @@ impl Supervisor {
                     list.push(format!("{} [port:{}, {}]", g.name, g.port, status));
                 }
                 if list.is_empty() {
-                    for (name, _, _) in &self.running_games {
-                        list.push(name.clone());
-                    }
-                }
-                if list.is_empty() {
                     self.bnet.send(BnetCmd::SendChat(format!(
                         "/w {user} No active games."
                     )));
@@ -739,11 +726,6 @@ impl Supervisor {
                 for g in &self.games {
                     let status = if g.in_lobby { "Lobby" } else { "Playing" };
                     list.push(format!("{} [port:{}, {}]", g.name, g.port, status));
-                }
-                if list.is_empty() {
-                    for (name, _, _) in &self.running_games {
-                        list.push(name.clone());
-                    }
                 }
                 if list.is_empty() {
                     self.bnet.send(BnetCmd::SendChat("No active games.".into()));
@@ -1053,9 +1035,7 @@ impl Supervisor {
         visibility: ghost_protocol::GameVisibility,
     ) {
         let (map_info, map_game_type, custom_slots) = self.resolve_map_info(name);
-        // `bnet.cpp:2247` splits the host counter: the low 28 bits identify the game and
-        // the top nibble identifies which battle.net connection hosts it. We advertise on a
-        // single connection, so that nibble is 0.
+        // Low 28 bits identify the game counter; top nibble identifies the battle.net connection.
         const HOST_COUNTER_ID: u32 = 0;
         let host_counter: u32 = (self.host_counter & 0x0FFF_FFFF) | (HOST_COUNTER_ID << 28);
         self.host_counter = self.host_counter.wrapping_add(1);
@@ -1189,13 +1169,12 @@ impl Supervisor {
         self.current_game_advert = Some(advert.clone());
         self.current_game_created_at = Some(std::time::Instant::now());
 
-        self.running_games.push((name.to_string(), handle.clone(), join));
         self.games.push(ActiveGameInfo {
             name: name.to_string(),
             port,
             host_counter,
             handle,
-            join: tokio::spawn(async {}),
+            join,
             advert: Some(advert),
             created_at: std::time::Instant::now(),
             in_lobby: true,
@@ -1228,14 +1207,6 @@ impl Supervisor {
             self.release_port(p);
             self.port_to_game.remove(&p);
         }
-        self.running_games.retain(|(name, h, _)| {
-            if h.is_closed() {
-                tracing::info!(game = %name, "game actor closed; cleaned up game handle");
-                false
-            } else {
-                true
-            }
-        });
         self.conn_to_game.retain(|_, h| !h.is_closed());
         if let Some(h) = &self.current_game
             && h.is_closed()
@@ -1252,7 +1223,7 @@ impl Supervisor {
 
     fn check_autohost(&mut self) {
         let Some(auto) = &self.autohost else { return };
-        if self.current_game.is_some() || self.running_games.len() >= auto.max_games {
+        if self.current_game.is_some() || self.games.len() >= auto.max_games {
             return;
         }
         let name = format!("{} #{}", auto.game_prefix, self.autohost_counter);
@@ -1265,8 +1236,8 @@ impl Supervisor {
 
     async fn shutdown(&mut self) {
         self.bnet.send(BnetCmd::Shutdown);
-        for (_, h, _) in &self.running_games {
-            h.send(GameCmd::Shutdown);
+        for g in &self.games {
+            g.handle.send(GameCmd::Shutdown);
         }
     }
 
@@ -1291,7 +1262,6 @@ impl Supervisor {
             current_game: None,
             current_game_name: None,
             current_game_advert: None,
-            running_games: Vec::new(),
             games: Vec::new(),
             allocated_ports: HashSet::new(),
             port_to_game: HashMap::new(),

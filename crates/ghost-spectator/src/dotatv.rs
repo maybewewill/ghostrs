@@ -1,19 +1,4 @@
-//! DotaTV live replay stream.
-//!
-//! Viewers do not join the game. They are booted straight into replay playback
-//! with `war3.exe -loadfile <bootstrap.w3g>` and then fed the rest of the match
-//! as compressed `.w3g` data blocks, which `dotatv_client.dll` appends directly
-//! into the replay stream Game.dll holds in memory.
-//!
-//! The protocol constraints all come from `game.dll` 1.26a and are documented in
-//! `docs/REPLAY_STREAM_SPEC.md`. The two that shape this module:
-//!
-//! * A block is only accepted if it inflates to **exactly** [`CHUNK_SIZE`], and
-//!   its compressed form must not exceed [`CHUNK_SIZE`] either.
-//! * The bootstrap body must be a whole number of chunks. `W3gWriter::pack`
-//!   zero-pads a ragged tail while recording the unpadded length, which would
-//!   leave the engine parsing padding zeros as records before it reached the
-//!   first live block.
+//! DotaTV live replay streaming for spectator clients.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -33,20 +18,12 @@ pub const CHUNK_SIZE: usize = 8192;
 pub const GREETING: [u8; 4] = *b"DTV1";
 
 /// Largest live frame put on the wire.
-///
-/// Frames are cut so they never cross a [`CHUNK_SIZE`] boundary of the body, which is
-/// what keeps every bootstrap split point (always a block boundary) also a frame
-/// boundary, so a resuming viewer never needs a partial frame.
 const MAX_FRAME: usize = CHUNK_SIZE;
+
 /// Empty TimeSlot record: id 0x1F, zero action bytes, zero ms increment.
-/// A no-op tick the 1.26a parser accepts; used as bootstrap padding so the
-/// file carries valid post-start-block data without any real actions.
 const EMPTY_TIMESLOT: [u8; 5] = [0x1F, 0x02, 0x00, 0x00, 0x00];
 
-/// Wire CRC32 (IEEE, reflected, poly 0xEDB88320) over the decompressed payload
-/// bytes. The injected client recomputes it after inflating and drops the
-/// connection if it disagrees — a corrupted or truncated stream must never
-/// reach Game.dll's replay parser, where a torn record means a desync or crash.
+/// Wire CRC32 (IEEE, reflected, poly 0xEDB88320) lookup table.
 fn crc_table() -> [u32; 256] {
     let mut table = [0u32; 256];
     for i in 0..256u32 {

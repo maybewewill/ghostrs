@@ -391,9 +391,6 @@ pub fn create_key_info(
 mod tests {
     use super::*;
 
-    // Ground truth captured from bncsutil `kd_quick` on 2026-08-15 with the two
-    // keys in ghost.toml and the fixed tokens 0x11223344 / 0x55667788. These are
-    // the values the live iCCup server accepted, so they are authoritative.
     #[test]
     fn decodes_the_tft_key_to_the_same_values_as_bncsutil() {
         let info = decode_cd_key("TAKLIBFWQWJRVGPSO68MUTV5D0", 0x1122_3344, 0x5566_7788)

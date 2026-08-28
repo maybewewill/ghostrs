@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use ghost_protocol::ProtoError;
 use ghost_protocol::frame::{Frame, HeaderCodec};
@@ -27,20 +27,6 @@ impl Decoder for DotaTvConnCodec {
     type Error = ProtoError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
-        // Resync past any byte that is not DotaTV (0xFD).
-        while !src.is_empty() && src[0] != 0xFD {
-            match src.iter().position(|&b| b == 0xFD) {
-                Some(pos) => src.advance(pos),
-                None => {
-                    src.clear();
-                    return Ok(None);
-                }
-            }
-        }
-        if src.is_empty() {
-            return Ok(None);
-        }
-
         self.codec.decode(src).map(|opt| opt.map(AnyFrame::DotaTv))
     }
 }
@@ -160,13 +146,19 @@ impl PlayerLink {
     }
 }
 
-/// Spawns the reader and writer tasks for one connection.
-pub fn spawn_conn(
+fn spawn_conn_with_codec<C>(
     conn_id: u64,
     stream: TcpStream,
     events: mpsc::Sender<ConnEvent>,
     write_capacity: usize,
-) -> PlayerLink {
+) -> PlayerLink
+where
+    C: Decoder<Item = AnyFrame, Error = ProtoError>
+        + Encoder<Bytes, Error = ProtoError>
+        + Default
+        + Send
+        + 'static,
+{
     if let Err(e) = stream.set_nodelay(true) {
         tracing::warn!(conn_id, error = %e, "failed to set TCP_NODELAY");
     }
@@ -177,10 +169,10 @@ pub fn spawn_conn(
     let cancel = CancellationToken::new();
     let cancel_writer = cancel.clone();
 
-    // Reader: socket -> engine
+    // Reader: socket -> channel
     let reader_events = events.clone();
     tokio::spawn(async move {
-        let mut framed = FramedRead::new(read_half, DualCodec::default());
+        let mut framed = FramedRead::new(read_half, C::default());
         let reason = loop {
             match framed.next().await {
                 Some(Ok(frame)) => {
@@ -213,9 +205,9 @@ pub fn spawn_conn(
             .await;
     });
 
-    // Writer: engine -> socket
+    // Writer: channel -> socket
     tokio::spawn(async move {
-        let mut framed = FramedWrite::new(write_half, DualCodec::default());
+        let mut framed = FramedWrite::new(write_half, C::default());
         loop {
             tokio::select! {
                 _ = cancel_writer.cancelled() => break,
@@ -238,6 +230,16 @@ pub fn spawn_conn(
     PlayerLink { tx: out_tx }
 }
 
+/// Spawns the reader and writer tasks for one connection.
+pub fn spawn_conn(
+    conn_id: u64,
+    stream: TcpStream,
+    events: mpsc::Sender<ConnEvent>,
+    write_capacity: usize,
+) -> PlayerLink {
+    spawn_conn_with_codec::<DualCodec>(conn_id, stream, events, write_capacity)
+}
+
 /// Spawns the reader and writer tasks for a DotaTV spectator connection.
 pub fn spawn_dtv_conn(
     conn_id: u64,
@@ -245,75 +247,7 @@ pub fn spawn_dtv_conn(
     events: mpsc::Sender<ConnEvent>,
     write_capacity: usize,
 ) -> PlayerLink {
-    if let Err(e) = stream.set_nodelay(true) {
-        tracing::warn!(conn_id, error = %e, "failed to set TCP_NODELAY");
-    }
-
-    let (read_half, write_half) = stream.into_split();
-    let (out_tx, mut out_rx) = mpsc::channel::<Bytes>(write_capacity);
-
-    let cancel = CancellationToken::new();
-    let cancel_writer = cancel.clone();
-
-    // Reader: socket -> relay
-    let reader_events = events.clone();
-    tokio::spawn(async move {
-        let mut framed = FramedRead::new(read_half, DotaTvConnCodec::default());
-        let reason = loop {
-            match framed.next().await {
-                Some(Ok(frame)) => {
-                    if reader_events
-                        .send(ConnEvent {
-                            conn_id,
-                            kind: ConnEventKind::Frame(frame),
-                        })
-                        .await
-                        .is_err()
-                    {
-                        cancel.cancel();
-                        return;
-                    }
-                }
-                Some(Err(ProtoError::BadValue(e))) => {
-                    tracing::info!(conn_id, error = %e, "codec dropped a frame");
-                    continue;
-                }
-                Some(Err(e)) => break CloseReason::Protocol(e),
-                None => break CloseReason::PeerClosed,
-            }
-        };
-        cancel.cancel();
-        let _ = reader_events
-            .send(ConnEvent {
-                conn_id,
-                kind: ConnEventKind::Closed(reason),
-            })
-            .await;
-    });
-
-    // Writer: relay -> socket
-    tokio::spawn(async move {
-        let mut framed = FramedWrite::new(write_half, DotaTvConnCodec::default());
-        loop {
-            tokio::select! {
-                _ = cancel_writer.cancelled() => break,
-                maybe_bytes = out_rx.recv() => {
-                    match maybe_bytes {
-                        Some(bytes) => {
-                            if let Err(e) = framed.send(bytes).await {
-                                tracing::debug!(conn_id, error = %e, "write failed, closing connection");
-                                break;
-                            }
-                        }
-                        None => break,
-                    }
-                }
-            }
-        }
-        let _ = framed.close().await;
-    });
-
-    PlayerLink { tx: out_tx }
+    spawn_conn_with_codec::<DotaTvConnCodec>(conn_id, stream, events, write_capacity)
 }
 
 #[cfg(test)]

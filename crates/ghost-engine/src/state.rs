@@ -265,17 +265,7 @@ impl GameState {
         };
         let tick = TickScheduler::new(cfg.latency);
         let relay = cfg.relay.clone();
-        let stat_string = if !cfg.stat_string.is_empty() {
-            cfg.stat_string.clone()
-        } else {
-            Self::build_replay_stat_string(&cfg)
-        };
-        // Built separately from the advertised one on purpose. The LAN and
-        // Battle.net advert forms end the host name with a second zero because
-        // a map SHA1 follows it there; a replay's stat string ends at the host
-        // name, and the client's reader (Game.dll+0x654510) only accepts the
-        // decoded stream if it is consumed to the byte, so reusing the advert
-        // form leaves one stray zero and the replay is rejected outright.
+        // Replay statstrings omit the trailing SHA1 delimiter present in network adverts.
         let replay_stat_string = Self::build_replay_stat_string(&cfg);
         let mut replay = ghost_spectator::ReplayBody::new(255, &cfg.virtual_host_name);
         replay.set_game(&cfg.name, &replay_stat_string, cfg.map.game_type);

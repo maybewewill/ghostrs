@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::advert::{MapAdvert, encode_game_statstring};
+use crate::advert::{MapAdvert, encode_bnet_statstring};
 use crate::auth::create_key_info;
 use crate::bncsutil::NlsSession;
 
@@ -163,7 +163,6 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
             }
         };
 
-        // 1. Send protocol selector byte 0x01 for BNCS
         if let Err(e) = stream.write_all(&[0x01]).await {
             let msg = format!("failed to send protocol selector: {e}");
             let _ = events.send(BnetEvent::Disconnected(msg)).await;
@@ -177,7 +176,6 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
 
         let _ = events.send(BnetEvent::Connected).await;
 
-        // 2. Send SID_AUTH_INFO
         let auth_info_pkt =
             match outgoing::auth_info(cfg.war3_version, true, 1033, "USA", "United States") {
                 Ok(p) => p,
@@ -276,7 +274,7 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                         }
                         Some(BnetCmd::CreateGame { name, map, host_counter, visibility, host_name, port }) => {
                             let host_user = host_name.unwrap_or_else(|| cfg.username.clone());
-                            let stat_string = encode_game_statstring(&map, &name, &host_user);
+                            let stat_string = encode_bnet_statstring(&map, &name, &host_user);
                             if stage == Stage::InChat {
                                 if let Some(p) = port {
                                     let _ = framed_write.send(outgoing::netgameport(p)).await;
@@ -537,13 +535,6 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                                 );
                                 if check.key_state == 0 {
                                     tracing::info!("cd keys accepted");
-                                    // Both logon types go through SID_AUTH_ACCOUNTLOGON here, exactly
-                                    // as `bnet.cpp:845-846` does. They diverge only at the proof
-                                    // (`bnet.cpp:883-897`): pvpgn proves with the password hash,
-                                    // battle.net with the SRP M1. Sending the old SID_LOGONRESPONSE
-                                    // (0x29) instead makes PvPGN answer status=0 and then ignore
-                                    // SID_ENTERCHAT forever, because the connection never leaves the
-                                    // new-auth state machine it entered at SID_AUTH_INFO.
                                     let nls = NlsSession::new(&cfg.username, &cfg.password);
                                     let client_key = nls.client_public_key();
                                     cur_nls = Some(nls);
@@ -577,9 +568,6 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                                 );
                                 if acc.status == 0 {
                                     tracing::info!("username {} accepted", cfg.username);
-                                    // `bnet.cpp:883-897`: pvpgn proves with the raw password hash,
-                                    // battle.net with the SRP-6a M1 derived from the server's salt
-                                    // and public key.
                                     let proof_bytes: Vec<u8> = if cfg.password_hash_type.eq_ignore_ascii_case("pvpgn") {
                                         crate::auth::hash_password_pvpgn(&cfg.password).to_vec()
                                     } else if let Some(ref nls) = cur_nls {
@@ -726,9 +714,6 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
                         }
 
                         (Stage::InChat, ids::SID_STARTADVEX3) => {
-                            // `bnetprotocol.cpp:174-191`: a u32 status of 0 means the
-                            // game is listed. Anything else means it is not — most often
-                            // a duplicate game name already on the server.
                             let status = if frame.payload.len() >= 4 {
                                 u32::from_le_bytes([
                                     frame.payload[0],

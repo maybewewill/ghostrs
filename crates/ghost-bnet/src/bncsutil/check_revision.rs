@@ -141,17 +141,14 @@ fn hash_file(
         let full_blocks = n / 1024;
         let remainder = n % 1024;
 
-        // Process all full 1024-byte blocks in this chunk
         for block in chunk_buf[..full_blocks * 1024].chunks_exact(4) {
             let s = u32::from_le_bytes([block[0], block[1], block[2], block[3]]);
             execute_ops(ops, a, b, c, s);
         }
 
         if remainder > 0 {
-            // Check if this is the end of the file or if more bytes follow
             let next_n = f.read(&mut rem_buf[remainder..])?;
             if next_n > 0 {
-                // Not EOF; copy leftover plus new bytes into rem_buf
                 rem_buf[..remainder].copy_from_slice(&chunk_buf[full_blocks * 1024..n]);
                 let total = remainder + next_n;
                 if total == 1024 {
@@ -160,12 +157,10 @@ fn hash_file(
                         execute_ops(ops, a, b, c, s);
                     }
                 } else {
-                    // Reached end of file with partial 1024 block: pad with 0xFF, 0xFE, ...
                     pad_and_execute(ops, a, b, c, &rem_buf[..total]);
                     break;
                 }
             } else {
-                // Reached end of file with partial 1024 block: pad with 0xFF, 0xFE, ...
                 pad_and_execute(ops, a, b, c, &chunk_buf[full_blocks * 1024..n]);
                 break;
             }
@@ -229,19 +224,6 @@ fn get_reg(reg: char, a: u32, b: u32, c: u32, s: u32) -> u32 {
 mod tests {
     use super::*;
     use std::io::Write;
-
-    // Scope note:
-    // CheckRevision does not have a static offline fixture because the formula
-    // string (containing server-selected seeds A, B, C and operation ordering)
-    // arrives dynamically from the Battle.net server in SID_AUTH_INFO (0x50).
-    //
-    // End-to-end correctness is proven by a successful SID_AUTH_CHECK exchange
-    // against the live server. What we verify here unit-test wise is:
-    // 1. Formula parsing correctly extracts initial seed values and operations.
-    // 2. The MPQ seed XOR and operations are applied sequentially per 4-byte word.
-    // 3. File streaming and 1024-byte descending pad logic (0xFF, 0xFE, ...) match
-    //    the reference bncsutil implementation.
-    // 4. Bit-for-bit equivalence against native bncsutil when present.
 
     #[test]
     fn parses_formula_and_extracts_tokens() {
@@ -311,13 +293,9 @@ mod tests {
 
         let formula = "A=3845581634 B=880823580 C=1363937103 4 A=A-S B=B-C C=C-A A=A-B";
         let checksum = check_revision_flat(formula, &f1, &f2, &f3, 1).expect("checksum computed");
-
-        // Pinned value the native library produced for exactly these three files
-        // and this formula, captured 2026-08-15 with the library present and
-        // verified equal to the pure-Rust result.
         assert_eq!(
             checksum, 2_297_190_262,
-            "checksum drifted from the value the native bncsutil produced"
+            "checksum drifted from reference"
         );
 
         let _ = std::fs::remove_file(&f1);

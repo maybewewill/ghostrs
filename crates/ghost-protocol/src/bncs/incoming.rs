@@ -198,7 +198,6 @@ pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, Proto
         });
     }
 
-    // bnetprotocol.cpp:74: Port is 2 bytes big-endian (network byte order).
     let port_bytes = payload.get(14..16).ok_or(ProtoError::Truncated {
         need: 16,
         have: payload.len(),
@@ -208,7 +207,6 @@ pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, Proto
         have: payload.len(),
     })?);
 
-    // bnetprotocol.cpp:75: IP is 4 bytes in network order.
     let ip_bytes = payload.get(16..20).ok_or(ProtoError::Truncated {
         need: 20,
         have: payload.len(),
@@ -218,7 +216,6 @@ pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, Proto
         have: payload.len(),
     })?;
 
-    // bnetprotocol.cpp:76: GameName is a NUL-terminated string starting at offset 20 (C++ offset 24).
     let name_slice = payload.get(20..).ok_or(ProtoError::Truncated {
         need: 21,
         have: payload.len(),
@@ -232,8 +229,6 @@ pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, Proto
         .ok_or(ProtoError::UnterminatedString)?;
     let game_name = String::from_utf8_lossy(name_bytes).into_owned();
 
-    // bnetprotocol.cpp:78-84: HostCounter is 8 ASCII hex characters starting after
-    // GameName (len + NUL + 2 reserved bytes = name_len + 23 relative to payload).
     let hc_start = nul_pos + 23;
     let hc_end = hc_start + 8;
     let hc_bytes = payload.get(hc_start..hc_end).ok_or(ProtoError::Truncated {

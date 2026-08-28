@@ -9,8 +9,6 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
 
-    // `--host <game name>` creates a lobby at startup instead of waiting for a
-    // root admin's `!pub`. Multiple `--host` flags can be passed to host multiple games.
     let mut host_on_start = Vec::new();
     let mut start_after = None;
     let mut fake_player = false;
@@ -23,12 +21,7 @@ async fn main() -> anyhow::Result<()> {
                     host_on_start.push(h.clone());
                 }
             }
-            // Fires the same GameCmd::Start that the `!start` command sends, so the
-            // start path can be exercised without an admin whispering the bot.
             "--start-after" => start_after = it.next().and_then(|s| s.parse::<u64>().ok()),
-            // Seats a fake player in the lobby at startup, the same way
-            // `!fakeplayer` would, so a game can reach the playing phase
-            // without a human client.
             "--fake-player" => fake_player = true,
             _ => positional.push(a.clone()),
         }

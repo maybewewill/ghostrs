@@ -634,12 +634,6 @@ async fn serve_chat(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()
     result
 }
 
-#[allow(dead_code)]
-async fn serve_stream(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
-    let delay = shared.stream_delay();
-    serve_stream_with(sock, shared, VIEWER_WRITE_TIMEOUT, delay).await
-}
-
 async fn serve_stream_with(
     mut sock: TcpStream,
     shared: Arc<DotaTvShared>,

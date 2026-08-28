@@ -7,7 +7,6 @@ use ghost_bnet::BnetConfig;
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct BotConfig {
     pub war3_path: String,
     pub map_path: String,
@@ -60,7 +59,6 @@ pub struct GameDefaults {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct SpectatorConfig {
     pub enabled: bool,
     pub port: u16,
@@ -74,7 +72,6 @@ pub struct SpectatorConfig {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Config {
     pub bot: BotConfig,
     pub bnet: BnetConfig,

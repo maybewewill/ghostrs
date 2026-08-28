@@ -259,11 +259,8 @@ async fn run_client(
     m.intervals_ms.extend(local_intervals);
 }
 
-// ---------------------------------------------------------------------------
-// DotaTV viewer: bootstrap fetch + live chunk stream, the exact wire protocol
-// the injected WC3 client speaks (DTV1 greeting, mode byte, chunk frames).
-// ---------------------------------------------------------------------------
-
+/// DotaTV viewer: bootstrap fetch + live chunk stream, the exact wire protocol
+/// the injected WC3 client speaks (DTV1 greeting, mode byte, chunk frames).
 struct TvMetrics {
     viewers: u64,
     failed_viewers: u64,

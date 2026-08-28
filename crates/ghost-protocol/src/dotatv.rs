@@ -9,16 +9,6 @@ pub const DOTATV_HEADER: u8 = 0xFD;
 pub type DotaTvCodec = HeaderCodec<DOTATV_HEADER>;
 pub type Frame = RawFrame;
 
-pub trait DotaTvFrameExt {
-    fn encode(&self) -> Result<Bytes, ProtoError>;
-}
-
-impl DotaTvFrameExt for Frame {
-    fn encode(&self) -> Result<Bytes, ProtoError> {
-        self.encode_with(DOTATV_HEADER)
-    }
-}
-
 pub mod ids {
     pub const HELLO: u8 = 0x01;
     pub const GAME_START_SNAPSHOT: u8 = 0x02;

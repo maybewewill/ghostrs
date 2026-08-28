@@ -48,10 +48,6 @@ pub fn encode_lan_statstring(map: &MapAdvert, _game_name: &str, host_name: &str)
     encode_statstring(&raw)
 }
 
-pub fn encode_game_statstring(map: &MapAdvert, game_name: &str, host_name: &str) -> Vec<u8> {
-    encode_bnet_statstring(map, game_name, host_name)
-}
-
 
 #[cfg(test)]
 mod tests {

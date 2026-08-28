@@ -1,25 +1,16 @@
-//! The decompressed replay body. Mirrors GHost++ `CReplay::BuildReplay`
-//! (ref/ghostpp/ghost/replay.cpp:135-212) and `CReplay::AddTimeSlot`/`AddChatMessage`.
+//! Decompressed replay body construction.
 
 const REPLAY_LEAVEGAME: u8 = 0x17;
 const REPLAY_FIRSTSTARTBLOCK: u8 = 0x1A;
 const REPLAY_SECONDSTARTBLOCK: u8 = 0x1B;
 const REPLAY_THIRDSTARTBLOCK: u8 = 0x1C;
-const REPLAY_TIMESLOT2: u8 = 0x1E; // corresponds to W3GS_INCOMING_ACTION2
-const REPLAY_TIMESLOT: u8 = 0x1F; // corresponds to W3GS_INCOMING_ACTION
+const REPLAY_TIMESLOT2: u8 = 0x1E;
+const REPLAY_TIMESLOT: u8 = 0x1F;
 const REPLAY_CHATMESSAGE: u8 = 0x20;
-/// GHost++ hardcodes this language id (replay.cpp:143).
 const LANGUAGE_ID: u32 = 0x0012_F8B0;
-/// Replay "game type" u32 written after the player count. A custom game is
-/// 0x00000001 (matches a real ICCup DotA replay). Distinct from the map's W3I
-/// game-data flags; Game.dll's replay-body parser refuses the file otherwise.
 const REPLAY_GAME_TYPE: u32 = 0x0000_0001;
 
-/// Errors from building a [`ReplayBody`]. Both variants exist to make an
-/// invalid `.w3g` body impossible to produce silently: a body finished
-/// without slot data, or slot data that doesn't decode to a whole number of
-/// 9-byte slot records, would otherwise corrupt every field that follows the
-/// `GameStartRecord` in the byte stream without any error at build time.
+/// Errors from building a [`ReplayBody`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReplayBodyError {
     /// `finish()` was called without a prior successful `set_start()`.
@@ -152,12 +143,7 @@ impl ReplayBody {
         self.blocks.extend_from_slice(actions);
     }
 
-    /// Length field matches `CReplay::AddChatMessage` (replay.cpp:112-128): the
-    /// C++ block is `[RecordID][PID][u16 len placeholder][flags][u32 chatMode][message + NUL]`
-    /// and the length written back is `Block.size() - 4`, i.e. flags + chatMode
-    /// + message bytes including the string's own null terminator (GHost++'s
-    ///   `UTIL_AppendByteArrayFast` appends one by default), but not the RecordID,
-    ///   PID, or the length field itself.
+    /// Appends a replay chat message block.
     pub fn add_chat(&mut self, pid: u8, flag: u8, extra: u32, message: &str) {
         self.blocks.push(REPLAY_CHATMESSAGE);
         self.blocks.push(pid);
