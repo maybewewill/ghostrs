@@ -1,5 +1,3 @@
-﻿
-
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -54,10 +52,7 @@ pub fn get_exe_info(file_path: &Path, platform: u32) -> Result<ExeInfo, std::io:
                 0x011a0001
             }
         }
-        _ => {
-
-            crate::bncsutil::pe::extract_pe_version_from_file(file_path).unwrap_or(0x011a0001)
-        }
+        _ => crate::bncsutil::pe::extract_pe_version_from_file(file_path).unwrap_or(0x011a0001),
     };
 
     Ok(ExeInfo {

@@ -1,4 +1,4 @@
-﻿use bytes::Bytes;
+use bytes::Bytes;
 
 use crate::bytes_ext::BufExt;
 use crate::error::ProtoError;
@@ -157,7 +157,6 @@ pub fn decode_ping(payload: &Bytes) -> Result<[u8; 4], ProtoError> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvListEntry {
-
     pub ip: [u8; 4],
 
     pub port: u16,

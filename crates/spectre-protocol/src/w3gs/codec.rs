@@ -1,4 +1,4 @@
-﻿use bytes::Bytes;
+use bytes::Bytes;
 
 use super::ids;
 use crate::error::ProtoError;
@@ -66,7 +66,6 @@ mod tests {
 
     #[test]
     fn unknown_packet_id_is_consumed_not_desynced() {
-
         let mut buf = BytesMut::new();
         buf.extend_from_slice(&[0xF7, 0xEE, 0x05, 0x00, 0x99]);
         buf.extend_from_slice(&[0xF7, 0x27, 0x04, 0x00]);
@@ -97,7 +96,6 @@ mod tests {
 
     #[test]
     fn oversized_payload_errors_instead_of_truncating() {
-
         let payload = Bytes::from(vec![0u8; 70_000]);
         let frame = Frame::new(ids::MAP_PART, payload);
         assert!(matches!(frame.encode(), Err(ProtoError::TooLarge(70_004))));

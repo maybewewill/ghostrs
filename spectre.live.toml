@@ -1,47 +1,32 @@
-
 [bot]
 bind_address = "0.0.0.0"
 host_port = 6123
 port_pool_start = 41000
 port_pool_end = 41150
 gproxy_reconnect_port = 6114
-
 max_games = 100
-
 tft = true
-
 default_map = "iCCup DotA 454.w3x"
-
 map_path = "maps"
-
 war3_path = "war3"
-
 allow_downloads = true
 max_downloaders = 3
 max_download_speed = 1000000
-
 autokick_ping = 400
 lc_pings = true
-
 udp_broadcast_target = "192.168.100.184"
 
 [bnet]
 server = "127.0.0.1"
 server_alias = "iCCup"
 port = 6112
-
 username = "BOT"
 password = "test"
-
 cdkey_roc = "E2CDWX92HKY68XCFT2F9BJVZGK"
 cdkey_tft = "RTG4KBRCZB2PKPX8PKZVHM9ZK9"
-
 first_channel = "iccup.pro"
-
 root_admins = ["slash", "bonjour", "animal", "fff"]
-
 command_trigger = "!"
-
 war3_version = 26
 exe_version = [1, 0, 26, 1]
 password_hash_type = "pvpgn"
@@ -50,18 +35,12 @@ reconnect_delay_sec = 5
 
 [game]
 latency_ms = 15
-
 sync_limit = 500
-
 virtual_host_name = "|cFFEB0000iCCup"
-
 reconnect_wait_sec = 180
-
 hcl_from_game_name = true
-
 votekick_allowed = true
 votekick_percentage = 100
-
 lobby_time_limit = 10
 
 [spectator]

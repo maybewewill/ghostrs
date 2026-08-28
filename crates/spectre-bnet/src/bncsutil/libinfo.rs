@@ -1,5 +1,3 @@
-﻿
-
 pub const BNCSUTIL_VERSION: u32 = 10405;
 
 pub const BNCSUTIL_VERSION_STRING: &str = "1.4.5";

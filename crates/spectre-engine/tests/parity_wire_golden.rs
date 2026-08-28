@@ -1,4 +1,4 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use spectre_engine::actions::MAX_ACTION_PAYLOAD;
 use spectre_engine::actor::tests_support::{drain_ids, seated_game};
 use spectre_engine::state::{COUNTDOWN_STEPS, COUNTDOWN_TOTAL, GamePhase};
@@ -260,7 +260,6 @@ fn parity_wire_p1_2_replay_contains_real_statstring() {
 
 #[test]
 fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
-
     let (mut st, mut rxs) = seated_game(2);
     for rx in &mut rxs {
         let _ = drain_ids(rx);

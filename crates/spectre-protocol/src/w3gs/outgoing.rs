@@ -1,4 +1,4 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 use super::codec::{Frame, W3gsFrameExt};
 use super::ids;
@@ -49,7 +49,6 @@ fn action_payload(actions: &[ActionBlock], send_interval: u16) -> Result<Bytes, 
     let mut payload = BytesMut::with_capacity(4 + body_len);
     payload.put_u16_le(send_interval);
     if actions.is_empty() {
-
         return Ok(payload.freeze());
     }
     let crc = crc32fast::hash(&sub);

@@ -1,4 +1,3 @@
-﻿
 pub const PING_FROM_HOST: u8 = 0x01;
 pub const SLOT_INFO_JOIN: u8 = 0x04;
 pub const REJECT_JOIN: u8 = 0x05;

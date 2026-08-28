@@ -1,5 +1,3 @@
-﻿
-
 use sha1::{Digest, Sha1};
 use thiserror::Error;
 
@@ -39,7 +37,6 @@ pub struct CdKeyDecoder {
 }
 
 impl CdKeyDecoder {
-
     pub fn new(cdkey: &str) -> Result<Self, CdKeyError> {
         let (key_type, product, public_value, val2, long_val2) = decode_key_components(cdkey)?;
         Ok(Self {
@@ -576,7 +573,6 @@ mod tests {
 
     #[test]
     fn decodes_starcraft_key_with_decoder() {
-
         assert!(CdKeyDecoder::new("1234567890120").is_err());
     }
 

@@ -1,10 +1,9 @@
-﻿use bytes::{Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use spectre_protocol::w3gs::SlotInfo;
 
 pub struct Hcl;
 
 impl Hcl {
-
     pub fn parse_from_gamename(game_name: &str) -> Option<String> {
         for word in game_name.split_whitespace() {
             if let Some(mode) = word.strip_prefix('-')
@@ -30,7 +29,6 @@ impl Hcl {
         let mut encoding_map = [0u8; 256];
         let mut j: u8 = 0;
         for slot in &mut encoding_map {
-
             if j == 0 || j == 50 || j == 60 || j == 70 || j == 80 || j == 90 || j == 100 {
                 j = j.wrapping_add(1);
             }

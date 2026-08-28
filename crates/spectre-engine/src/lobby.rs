@@ -1,4 +1,4 @@
-﻿use bytes::Bytes;
+use bytes::Bytes;
 use spectre_protocol::w3gs::{incoming::ReqJoin, outgoing};
 
 use crate::players::Player;
@@ -233,13 +233,16 @@ mod tests {
 
     #[tokio::test]
     async fn a_normal_lobby_filling_up_keeps_the_virtual_host_until_loading_starts() {
-
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
         st.create_virtual_host();
         let vh = st.virtual_host_pid;
         for i in 0..(st.cfg.num_slots - 1) {
             let (tx, _rx) = tokio::sync::mpsc::channel(64);
-            st.add_conn(100 + i as u64, spectre_net::PlayerLink::for_test(tx), [0; 4]);
+            st.add_conn(
+                100 + i as u64,
+                spectre_net::PlayerLink::for_test(tx),
+                [0; 4],
+            );
             st.handle_req_join(
                 100 + i as u64,
                 &crate::actor::tests_support::reqjoin_bytes(&format!("p{i}")),

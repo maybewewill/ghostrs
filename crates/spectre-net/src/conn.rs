@@ -1,4 +1,4 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use spectre_protocol::ProtoError;
 use spectre_protocol::frame::{Frame, HeaderCodec};
@@ -52,7 +52,6 @@ impl Decoder for DualCodec {
     type Error = ProtoError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
-
         while !src.is_empty() && src[0] != W3GS_HEADER && src[0] != GPS_HEADER {
             match src
                 .iter()

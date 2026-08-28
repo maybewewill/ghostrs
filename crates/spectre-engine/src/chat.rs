@@ -1,4 +1,4 @@
-﻿use bytes::Bytes;
+use bytes::Bytes;
 use spectre_protocol::w3gs::incoming::ChatToHost;
 
 use crate::lobby::MAX_SLOTS;
@@ -325,7 +325,6 @@ impl GameState {
             if matches!(self.phase, GamePhase::Lobby)
                 && self.apply_slot_request(pid, chat.flag, chat.byte)
             {
-
                 self.send_all_slot_info();
             }
             return;
@@ -337,7 +336,6 @@ impl GameState {
 
         match parse_command(trigger, &chat.message) {
             Some(cmd) => {
-
                 let public_cmd = matches!(
                     cmd,
                     ChatCommand::Ping
@@ -360,7 +358,6 @@ impl GameState {
                 self.run_command(pid, &name, cmd);
             }
             None => {
-
                 if (is_muted || self.muted_all) && !is_owner {
                     return;
                 }
@@ -1150,7 +1147,6 @@ impl GameState {
             0x11 => {
                 let target_team = value;
                 if custom_forces {
-
                     if let Some(target_sid) = self.slots.first_open_in_team_from(sid, target_team) {
                         self.slots
                             .swap_slots(sid, target_sid, fixed_settings, custom_forces);
@@ -1163,7 +1159,6 @@ impl GameState {
                     return false;
                 }
                 if target_team == MAX_SLOTS as u8 {
-
                     let obs = self.cfg.map.observers();
                     if obs != crate::map::MAPOBS_ALLOWED && obs != crate::map::MAPOBS_REFEREES {
                         return false;
@@ -1192,10 +1187,8 @@ impl GameState {
                 };
                 updated.team = target_team;
                 if target_team == MAX_SLOTS as u8 {
-
                     updated.colour = MAX_SLOTS as u8;
                 } else if updated.colour == MAX_SLOTS as u8 {
-
                     updated.colour = self.slots.unused_colour();
                 }
                 self.slots.replace(sid, updated);
@@ -1213,7 +1206,6 @@ impl GameState {
                     return false;
                 };
                 if slot.team == MAX_SLOTS as u8 {
-
                     return false;
                 }
                 self.colour_slot(sid, colour)
@@ -1223,11 +1215,9 @@ impl GameState {
                     return false;
                 }
                 if self.cfg.map.has_random_races() {
-
                     return false;
                 }
                 if !matches!(value, 1 | 2 | 4 | 8 | 32) {
-
                     return false;
                 }
                 let Some(slot) = self.slots.as_wire().get(sid as usize).copied() else {
@@ -1398,7 +1388,6 @@ mod tests {
 
     #[tokio::test]
     async fn chat_from_a_mismatched_pid_is_ignored() {
-
         let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
         crate::actor::tests_support::drain_ids(&mut rxs[0]);
 
@@ -1418,7 +1407,6 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_question_mark_gets_the_command_trigger_reply() {
-
         let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
         crate::actor::tests_support::drain_ids(&mut rxs[0]);
 
@@ -1439,7 +1427,6 @@ mod tests {
 
     #[test]
     fn team_change_on_a_custom_forces_map_moves_the_player_slot() {
-
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
         st.cfg.map.options = crate::map::MAPOPT_CUSTOMFORCES;
         st.cfg.map.layout_style = 1;
@@ -1456,7 +1443,6 @@ mod tests {
 
     #[test]
     fn direct_team_change_is_rejected_when_the_map_is_full() {
-
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(3);
         st.cfg.map.num_players = 2;
 
@@ -1469,7 +1455,6 @@ mod tests {
 
     #[test]
     fn observer_team_change_requires_a_map_that_allows_observers() {
-
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
         st.cfg.map.num_players = 12;
 
@@ -1484,7 +1469,6 @@ mod tests {
 
     #[test]
     fn colour_change_swaps_with_an_unoccupied_slot_instead_of_duplicating() {
-
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
 
         assert!(st.apply_slot_request(1, 0x12, 1));
@@ -1503,7 +1487,6 @@ mod tests {
 
     #[test]
     fn race_change_rejects_invalid_races_and_random_races_maps() {
-
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
 
         assert!(!st.apply_slot_request(1, 0x13, 3));

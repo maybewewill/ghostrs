@@ -1,10 +1,10 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
-use spectre_bnet::BnetConfig;
 use serde::Deserialize;
+use spectre_bnet::BnetConfig;
 
 #[derive(Debug, Clone)]
 pub struct BotConfig {

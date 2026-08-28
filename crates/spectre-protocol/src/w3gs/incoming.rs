@@ -1,4 +1,4 @@
-﻿use bytes::Bytes;
+use bytes::Bytes;
 
 use crate::bytes_ext::BufExt;
 use crate::error::ProtoError;
@@ -263,7 +263,6 @@ mod tests {
 
     #[test]
     fn test_decode_map_part_not_ok() {
-
         let payload_6b = Bytes::from_static(&[0x01, 0x02, 0x01, 0x00, 0x00, 0x00]);
         assert_eq!(decode_map_part_not_ok(&payload_6b).unwrap(), 1);
 

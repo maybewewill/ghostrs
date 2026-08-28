@@ -1,4 +1,4 @@
-﻿use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -990,7 +990,12 @@ impl Supervisor {
         self.allocated_ports.remove(&port);
     }
 
-    fn create_game(&mut self, name: &str, owner: &str, visibility: spectre_protocol::GameVisibility) {
+    fn create_game(
+        &mut self,
+        name: &str,
+        owner: &str,
+        visibility: spectre_protocol::GameVisibility,
+    ) {
         let server = self.cfg.bnet.server.clone();
         self.create_game_with_creator(name, owner, &server, visibility);
     }
@@ -1041,8 +1046,11 @@ impl Supervisor {
             flags: map_info.flags,
         };
 
-        let stat_string =
-            spectre_bnet::encode_lan_statstring(&advert_map, name, &self.cfg.game.virtual_host_name);
+        let stat_string = spectre_bnet::encode_lan_statstring(
+            &advert_map,
+            name,
+            &self.cfg.game.virtual_host_name,
+        );
 
         let game_cfg = GameConfig {
             name: name.to_string(),
@@ -1081,7 +1089,6 @@ impl Supervisor {
         handle.send(GameCmd::CreateVirtualHost);
 
         if self.cfg.spectator.dotatv_enabled {
-
             let tv_port = self
                 .cfg
                 .spectator
@@ -1329,7 +1336,9 @@ mod tests {
 
         sup.handle_chat_command("admin", "!motd Welcome to the clan!");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
-        assert!(matches!(cmd, spectre_bnet::BnetCmd::ClanSetMotd(m) if m == "Welcome to the clan!"));
+        assert!(
+            matches!(cmd, spectre_bnet::BnetCmd::ClanSetMotd(m) if m == "Welcome to the clan!")
+        );
         let _ = bnet_cmd_rx.try_recv();
 
         sup.handle_chat_command("admin", "!accept");

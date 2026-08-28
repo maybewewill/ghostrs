@@ -1,4 +1,4 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use spectre_engine::actor::tests_support::{drain_ids, reqjoin_bytes, seated_game, test_cfg};
 use spectre_engine::chat::ChatCommand;
 use spectre_engine::mapxfer::Download;
@@ -192,7 +192,6 @@ fn parity_c8_in_game_commands_openall_closeall_votekick_lock() {
 
 #[test]
 fn test_p2_1_kick_marks_player_left_without_sending_0x1c() {
-
     let kick_id = spectre_protocol::w3gs::ids::HOST_KICK_PLAYER;
 
     let (mut st, mut rxs) = seated_game(2);
@@ -345,7 +344,6 @@ async fn parity_d1_game_and_download_logging_in_store() {
 
 #[test]
 fn test_p2_7_allow_downloads_modes() {
-
     let (mut st0, _rxs0) = seated_game(2);
     st0.cfg.allow_downloads = 0;
     st0.cfg.map.size = 100_000;

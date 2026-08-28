@@ -1,4 +1,4 @@
-﻿use spectre_engine::map::*;
+use spectre_engine::map::*;
 use spectre_engine::slots::SlotStatus;
 use spectre_engine::state::{GameConfig, GameState, MapInfo};
 use spectre_protocol::w3gs::SlotInfo;
@@ -8,7 +8,6 @@ use std::time::Duration;
 
 #[test]
 fn test_m1_map_flags_wire_decomposition() {
-
     let flags_3 = calculate_game_flags(
         MAPSPEED_FAST,
         MAPVIS_DEFAULT,
@@ -43,7 +42,6 @@ fn test_m1_map_flags_wire_decomposition() {
 
 #[test]
 fn test_m2_m3_game_type_four_independent_filters() {
-
     let default_gt = calculate_game_type(
         MAPFILTER_MAKER_USER,
         MAPFILTER_TYPE_SCENARIO,
@@ -219,7 +217,6 @@ fn test_m6_observer_slots_and_editor_version() {
 
 #[test]
 fn test_m7_closed_slots_and_num_players() {
-
     let raw_slots = vec![
         SlotInfo {
             pid: 0,

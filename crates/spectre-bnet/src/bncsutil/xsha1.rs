@@ -1,5 +1,3 @@
-﻿
-
 pub fn xsha1(data: &[u8]) -> [u8; 20] {
     let mut hash = [
         0x6745_2301u32,

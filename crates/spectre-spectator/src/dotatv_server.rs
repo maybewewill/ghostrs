@@ -1,4 +1,3 @@
-
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -40,7 +39,6 @@ pub struct ChatRelay {
 
 impl ChatRelay {
     fn new() -> Self {
-
         let (tx, _rx) = broadcast::channel(256);
         Self {
             tx,
@@ -188,7 +186,6 @@ pub async fn publish_pending(
     prologue_sent: &mut bool,
 ) -> Result<(), DotaTvError> {
     if !*prologue_sent {
-
         let Ok(prologue) = body.prologue() else {
             return Ok(());
         };
@@ -240,7 +237,6 @@ pub async fn serve(addr: SocketAddr, shared: Arc<DotaTvShared>) -> io::Result<()
         let (sock, peer) = match listener.accept().await {
             Ok(v) => v,
             Err(err) => {
-
                 tracing::warn!(%err, "dotatv: accept failed; retrying");
                 tokio::time::sleep(IDLE_TICK).await;
                 continue;
@@ -298,7 +294,6 @@ async fn serve_viewer_with(
         MODE_BOOTSTRAP_FULL => serve_bootstrap_full(sock, shared).await,
         MODE_CHAT => serve_chat(sock, shared).await,
         MODE_STREAM => {
-
             let delay = if force_live {
                 Duration::ZERO
             } else {
@@ -337,7 +332,6 @@ async fn serve_status(
 }
 
 async fn serve_bootstrap(mut sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()> {
-
     let mut requested = [0u8; 4];
     sock.read_exact(&mut requested).await?;
 
@@ -459,7 +453,6 @@ async fn serve_chat(sock: TcpStream, shared: Arc<DotaTvShared>) -> io::Result<()
         }
         win_count += 1;
         if win_count > CHAT_RATE_MAX {
-
             continue;
         }
 
@@ -486,7 +479,6 @@ async fn serve_stream_with(
 
     let available = shared.chunk_count().await;
     if cursor > available {
-
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("start index {cursor} exceeds {available} published chunks"),
@@ -515,7 +507,6 @@ async fn serve_stream_with(
         };
 
         if batch.is_empty() {
-
             let _ = tokio::time::timeout(IDLE_TICK, notified).await;
             continue;
         }
@@ -528,7 +519,6 @@ async fn serve_stream_with(
             sock.flush().await
         };
         if tokio::time::timeout(write_timeout, send).await.is_err() {
-
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!(
@@ -924,7 +914,6 @@ mod tests {
 
     #[tokio::test]
     async fn every_tick_is_published_immediately_with_no_filler() {
-
         let shared = DotaTvShared::new(DotaTvStream::for_126a());
         let mut body = crate::ReplayBody::new(1, "host");
         let mut prologue_sent = false;
@@ -985,7 +974,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_bootstrap_requested_before_the_match_starts_is_refused() {
-
         let shared = DotaTvShared::new(DotaTvStream::for_126a());
         let addr = start_server(Arc::clone(&shared)).await;
 

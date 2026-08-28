@@ -1,5 +1,3 @@
-﻿
-
 use crate::bncsutil::xsha1::{hash_password as xsha1_hash_password, xsha1};
 
 #[inline]

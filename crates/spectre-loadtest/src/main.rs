@@ -1,4 +1,4 @@
-﻿#![forbid(unsafe_code)]
+#![forbid(unsafe_code)]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -322,7 +322,6 @@ async fn run_viewer(
     let mut bytes = 0u64;
     loop {
         let gap = tokio::time::timeout(Duration::from_secs(10), async {
-
             let hdr = read_n(&mut sock, 8).await.ok()?;
             let comp_len = u16::from_le_bytes(hdr[..2].try_into().unwrap()) as usize;
             let _valid_bytes = u16::from_le_bytes(hdr[2..4].try_into().unwrap());

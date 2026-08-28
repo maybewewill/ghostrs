@@ -1,5 +1,3 @@
-﻿
-
 use std::time::Duration;
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -210,7 +208,6 @@ fn spawn_relay_actor(
 
 #[tokio::test]
 async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
-
     let relay_cfg = RelayConfig {
         port: 0,
         delay: Duration::ZERO,

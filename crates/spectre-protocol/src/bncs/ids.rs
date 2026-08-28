@@ -1,5 +1,3 @@
-﻿
-
 pub const SID_NULL: u8 = 0x00;
 pub const SID_STOPADV: u8 = 0x02;
 pub const SID_SERVERLIST: u8 = 0x04;

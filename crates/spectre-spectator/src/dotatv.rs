@@ -1,5 +1,3 @@
-﻿
-
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -54,7 +52,6 @@ pub struct Chunk {
 }
 
 impl Chunk {
-
     pub fn frame(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8 + self.compressed.len());
         out.extend_from_slice(&(self.compressed.len() as u16).to_le_bytes());
@@ -67,13 +64,11 @@ impl Chunk {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DotaTvError {
-
     #[error("compressed chunk is {0} bytes, exceeds the {CHUNK_SIZE}-byte limit")]
     ChunkTooLarge(usize),
 }
 
 pub struct DotaTvStream {
-
     raw: Vec<u8>,
 
     raw_base: usize,
@@ -139,7 +134,6 @@ impl DotaTvStream {
     pub fn flush(&mut self) -> Result<usize, DotaTvError> {
         let mut cut = 0;
         while self.framed_len < self.raw.len() {
-
             let start_abs = self.raw_base + self.framed_len;
             let block_end = (start_abs / CHUNK_SIZE + 1) * CHUNK_SIZE;
             let end_abs = (self.raw_base + self.raw.len())
@@ -225,7 +219,6 @@ impl DotaTvStream {
     }
 
     pub fn bootstrap(&self, replay_length_ms: u32) -> (Vec<u8>, u32) {
-
         debug_assert_eq!(
             self.prologue.len(),
             self.prologue_end,
@@ -359,7 +352,6 @@ mod tests {
 
     #[test]
     fn a_small_flush_publishes_a_small_frame_with_no_filler() {
-
         let mut s = DotaTvStream::for_126a();
         s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
         s.flush().unwrap();
@@ -410,7 +402,6 @@ mod tests {
 
     #[test]
     fn frames_never_cross_a_block_boundary() {
-
         let mut s = DotaTvStream::for_126a();
         s.push_body(&vec![0x66; CHUNK_SIZE * 2 + 500]).unwrap();
         s.flush().unwrap();
@@ -521,7 +512,6 @@ mod tests {
 
     #[test]
     fn flush_keeps_the_raw_window_bounded() {
-
         let mut s = DotaTvStream::for_126a();
         let mut rebuilt = Vec::new();
         for block in 0..40 {
@@ -554,7 +544,6 @@ mod tests {
 
     #[test]
     fn bootstrap_is_stable_across_raw_trimming() {
-
         let prologue: Vec<u8> = (0..500).map(|i| (i % 13) as u8).collect();
 
         let mut early = DotaTvStream::for_126a();
@@ -582,10 +571,8 @@ mod tests {
 
     #[test]
     fn frames_never_cross_a_block_boundary_even_after_front_trimming() {
-
         let mut s = DotaTvStream::for_126a();
         for block in 0..25 {
-
             s.push_body(&vec![0x51; CHUNK_SIZE / 3 + block]).unwrap();
             s.flush().unwrap();
         }

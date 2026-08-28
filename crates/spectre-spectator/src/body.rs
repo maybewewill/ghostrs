@@ -1,5 +1,3 @@
-﻿
-
 const REPLAY_LEAVEGAME: u8 = 0x17;
 const REPLAY_FIRSTSTARTBLOCK: u8 = 0x1A;
 const REPLAY_SECONDSTARTBLOCK: u8 = 0x1B;
@@ -12,7 +10,6 @@ const REPLAY_GAME_TYPE: u32 = 0x0000_0001;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReplayBodyError {
-
     StartNeverSet,
 
     InvalidSlotsLength(usize),

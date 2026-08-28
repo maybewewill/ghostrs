@@ -1,5 +1,3 @@
-﻿
-
 pub fn extract_mpq_number(mpq_name: &str) -> i32 {
     let name = mpq_name.strip_suffix(".mpq").unwrap_or(mpq_name);
     let stem = if let Some(dot_idx) = name.rfind('.') {

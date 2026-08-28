@@ -1,4 +1,4 @@
-﻿use spectre_bnet::bncsutil::{
+use spectre_bnet::bncsutil::{
     BNCSUTIL_PLATFORM_MAC, BNCSUTIL_PLATFORM_OSX, BNCSUTIL_PLATFORM_WIN, BNCSUTIL_PLATFORM_WINDOWS,
     BNCSUTIL_PLATFORM_X86, BNCSUTIL_VERSION, BNCSUTIL_VERSION_STRING, CdKeyDecoder, CdKeyError,
     DEFAULT_MPQ_SEEDS, KeyType, NLS_G, NLS_I, NLS_PRIME_BYTES, NLS_SIG_N, NLS_SIGNATURE_KEY,
@@ -16,7 +16,10 @@ fn test_libinfo_version_constants_and_getters() {
     assert_eq!(get_version(), 10405);
     assert_eq!(get_version_string(), "1.4.5");
     assert_eq!(spectre_bnet::bncsutil::bncsutil_get_version(), 10405);
-    assert_eq!(spectre_bnet::bncsutil::bncsutil_get_version_string(), "1.4.5");
+    assert_eq!(
+        spectre_bnet::bncsutil::bncsutil_get_version_string(),
+        "1.4.5"
+    );
 }
 
 #[test]
@@ -126,7 +129,6 @@ fn test_cdkey_warcraft2_16_char() {
 
 #[test]
 fn test_cdkey_starcraft_13_char() {
-
     let prefix = "123456789012";
     let mut accum: i32 = 3;
     for c in prefix.chars() {
@@ -248,7 +250,6 @@ fn test_exe_info_platforms() {
 
 #[test]
 fn test_pe_fixed_file_info_extraction() {
-
     let mut fake_pe = vec![0u8; 256];
     fake_pe[0..2].copy_from_slice(b"MZ");
     fake_pe[0x3C..0x40].copy_from_slice(&0x40u32.to_le_bytes());

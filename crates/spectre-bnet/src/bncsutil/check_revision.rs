@@ -1,5 +1,3 @@
-﻿
-
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;

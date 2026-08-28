@@ -1,5 +1,3 @@
-﻿
-
 use num_bigint::BigUint;
 use num_traits::Zero;
 use sha1::{Digest, Sha1};
@@ -65,7 +63,6 @@ pub struct NlsSession {
 }
 
 impl NlsSession {
-
     pub fn new(username: &str, password: &str) -> Self {
         let n = BigUint::from_bytes_le(&NLS_PRIME_BYTES);
         let g = BigUint::from(NLS_G);

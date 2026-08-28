@@ -1,4 +1,4 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -37,7 +37,6 @@ pub struct MapInfo {
 }
 
 impl MapInfo {
-
     pub fn has_fixed_player_settings(&self) -> bool {
         self.options & crate::map::MAPOPT_FIXEDPLAYERSETTINGS != 0
     }
@@ -223,7 +222,6 @@ pub struct GameState {
 }
 
 impl GameState {
-
     fn build_replay_stat_string(cfg: &GameConfig) -> Vec<u8> {
         let mut raw = Vec::with_capacity(44 + cfg.map.path.len() + cfg.virtual_host_name.len());
         raw.extend_from_slice(&cfg.map.flags.to_le_bytes());

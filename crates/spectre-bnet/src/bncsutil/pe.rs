@@ -1,5 +1,3 @@
-﻿
-
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -24,7 +22,6 @@ pub struct PeFixedFileInfo {
 }
 
 impl PeFixedFileInfo {
-
     pub fn packed_product_version(&self) -> u32 {
         let hi_ms = (self.product_version_ms >> 16) & 0xFF;
         let lo_ms = self.product_version_ms & 0xFF;

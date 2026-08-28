@@ -1,4 +1,4 @@
-﻿use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::error::ProtoError;
@@ -102,7 +102,6 @@ mod tests {
 
     #[test]
     fn a_bncs_frame_is_not_mistaken_for_a_gps_frame() {
-
         let mut buf = BytesMut::from(&[0xFF, 0x50, 0x04, 0x00][..]);
         assert!(Gps::default().decode(&mut buf).unwrap().is_none());
         assert!(buf.is_empty(), "unusable bytes must be discarded");

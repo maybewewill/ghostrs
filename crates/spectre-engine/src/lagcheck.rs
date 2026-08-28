@@ -1,11 +1,10 @@
-﻿use std::time::{Duration, Instant};
+use std::time::{Duration, Instant};
 
 use spectre_protocol::w3gs::outgoing;
 
 use crate::state::GameState;
 
 impl GameState {
-
     pub fn check_lag(&mut self) -> bool {
         let limit = self.cfg.sync_limit;
         let game_sync = self.sync_counter;
@@ -22,7 +21,6 @@ impl GameState {
         {
             let behind = game_sync.saturating_sub(p.sync_counter);
             if p.lagging {
-
                 if behind < limit / 2 {
                     p.lagging = false;
                     let lag_ms = p

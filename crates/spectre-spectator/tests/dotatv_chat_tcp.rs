@@ -1,4 +1,4 @@
-﻿use spectre_protocol::dotatv::{decode_chat, encode_client_chat, ids as dotatv_ids};
+use spectre_protocol::dotatv::{decode_chat, encode_client_chat, ids as dotatv_ids};
 use spectre_spectator::{RelayConfig, spawn_relay};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -44,7 +44,6 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
         {
             let n = n.unwrap_or(0);
             if n >= 4 {
-
                 let mut offset = 0;
                 while offset + 4 <= n {
                     if buf[offset] == 0xFD && buf[offset + 1] == dotatv_ids::CHAT {

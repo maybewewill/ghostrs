@@ -1,4 +1,4 @@
-﻿use bytes::Bytes;
+use bytes::Bytes;
 use spectre_protocol::w3gs::{ActionBlock, incoming::OutgoingAction, outgoing};
 
 use crate::state::{GamePhase, GameState};
@@ -21,9 +21,7 @@ impl GameState {
             return;
         }
         match OutgoingAction::decode(payload) {
-
             Ok(a) => {
-
                 if a.data.len() + 3 > 1027 {
                     tracing::warn!(
                         conn_id,
@@ -44,7 +42,6 @@ impl GameState {
     }
 
     pub fn handle_keepalive(&mut self, conn_id: u64, payload: &Bytes) {
-
         if !matches!(self.phase, GamePhase::Playing) {
             return;
         }
@@ -378,9 +375,9 @@ impl GameState {
         };
 
         if let Err(err) =
-            spectre_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent).await
+            spectre_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent)
+                .await
         {
-
             tracing::warn!(error = %err, "dotatv: publish failed, disabling live stream");
             self.dotatv = None;
         }
@@ -395,7 +392,8 @@ impl GameState {
         };
 
         if let Err(err) =
-            spectre_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent).await
+            spectre_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent)
+                .await
         {
             tracing::warn!(error = %err, "dotatv: final publish failed");
             return;
@@ -1109,7 +1107,6 @@ mod tests {
 
     #[test]
     fn actions_sent_before_the_game_starts_kick_the_sender() {
-
         let (mut st, _rxs) = seated_game(1);
         assert!(matches!(st.phase, GamePhase::Lobby));
 
@@ -1126,7 +1123,6 @@ mod tests {
 
     #[test]
     fn oversized_action_packets_kick_the_sender() {
-
         let (mut st, _rxs) = seated_game(1);
         st.begin_playing();
 
@@ -1142,7 +1138,6 @@ mod tests {
 
     #[test]
     fn keepalives_before_the_game_starts_are_ignored() {
-
         let (mut st, _rxs) = seated_game(1);
 
         let mut p = bytes::BytesMut::new();

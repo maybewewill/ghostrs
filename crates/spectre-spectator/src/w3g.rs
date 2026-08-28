@@ -1,5 +1,3 @@
-﻿
-
 use std::io::Write;
 
 use flate2::Compression;
@@ -32,7 +30,6 @@ impl W3gWriter {
     }
 
     pub fn pack(&self, decompressed: &[u8]) -> Vec<u8> {
-
         let mut padded = decompressed.to_vec();
         let pad = BLOCK_SIZE - (padded.len() % BLOCK_SIZE);
         padded.resize(padded.len() + pad, 0);
@@ -214,7 +211,6 @@ mod tests {
 
     #[test]
     fn the_decompressed_size_field_enables_trim_and_round_trip() {
-
         let body = vec![0x42u8; 8192 * 2 + 7];
         let w = W3gWriter::new(26, 6059, true);
         let out = w.pack(&body);

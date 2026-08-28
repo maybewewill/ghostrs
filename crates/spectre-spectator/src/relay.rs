@@ -1,4 +1,4 @@
-﻿use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -501,7 +501,6 @@ mod tests {
     #[tokio::test]
     async fn joining_viewer_receives_exact_ordered_sequence_of_0xfd_message_ids_and_decoded_payloads()
      {
-
         let (handle, _join) = spawn_relay(RelayConfig {
             port: 0,
             delay: Duration::ZERO,

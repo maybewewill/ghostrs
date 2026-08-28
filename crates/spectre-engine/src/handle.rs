@@ -1,9 +1,8 @@
-﻿use spectre_net::{ConnEvent, PlayerLink};
+use spectre_net::{ConnEvent, PlayerLink};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum GameCmd {
-
     ToggleFakePlayer,
 
     AttachDotaTv(std::sync::Arc<spectre_spectator::DotaTvShared>),
