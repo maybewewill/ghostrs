@@ -227,6 +227,11 @@ impl GameState {
                     self.handle_gps_reconnect(conn_id, req, link);
                 }
             }
+            spectre_protocol::gps::ids::FULL => {
+                if let Ok((pid, key)) = spectre_protocol::gps::decode_full(&frame.payload) {
+                    self.pending_full.insert(conn_id, (pid, key));
+                }
+            }
             _ => {}
         }
     }
@@ -505,5 +510,17 @@ mod tests {
             .await
             .expect("actor must exit promptly")
             .expect("actor must not panic");
+    }
+
+    #[tokio::test]
+    async fn gps_full_frame_caches_the_token() {
+        let (mut st, _rxs) = tests_support::seated_game(1);
+        let conn_id = st.players.by_pid(1).unwrap().conn_id;
+        let frame = spectre_protocol::frame::Frame::new(
+            spectre_protocol::gps::ids::FULL,
+            spectre_protocol::gps::full(9, 0x1234_5678).slice(4..),
+        );
+        st.on_gps_frame(conn_id, frame);
+        assert_eq!(st.pending_full.get(&conn_id), Some(&(9u8, 0x1234_5678u32)));
     }
 }

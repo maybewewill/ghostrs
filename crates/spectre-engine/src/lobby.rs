@@ -166,6 +166,7 @@ impl GameState {
     }
 
     pub fn handle_conn_closed(&mut self, conn_id: u64, reason: String) {
+        self.pending_full.remove(&conn_id);
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             if p.gproxy {
                 if p.disconnected_since.is_none() {
