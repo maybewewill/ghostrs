@@ -22,6 +22,9 @@ impl FullHistory {
     }
 
     pub fn push(&mut self, pkt: Bytes) {
+        if self.cap == 0 {
+            return;
+        }
         if self.inner.len() >= self.cap {
             self.inner.pop_front();
         }
@@ -91,5 +94,13 @@ mod tests {
         h.push(Bytes::from_static(b"3"));
         assert_eq!(h.len(), 2);
         assert_eq!(h.snapshot_from(0)[0], Bytes::from_static(b"2"));
+    }
+
+    #[test]
+    fn zero_cap_never_retains() {
+        let mut h = FullHistory::new_with_cap(0);
+        h.push(Bytes::from_static(b"x"));
+        assert_eq!(h.len(), 0);
+        assert!(h.is_empty());
     }
 }
