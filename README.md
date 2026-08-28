@@ -131,10 +131,61 @@ cargo build --release --workspace
 
 ### Docker Deployment
 
+Ghost-RS provides a lightweight container image based on `debian:bookworm-slim` with multi-stage build caching.
+
+#### Quick Start with Docker Compose (Recommended)
+
+The included `docker-compose.yml` uses host networking (`network_mode: host`) to eliminate Docker NAT overhead and ensure low-latency UDP broadcasting and dynamic multi-lobby port allocation:
+
 ```bash
-# Launch via Docker Compose
+# 1. Ensure configuration and volume folders exist
+mkdir -p maps war3 replays data
+
+# 2. Start the bot in the background
 docker compose up -d
+
+# 3. View live bot logs
+docker compose logs -f ghostrs
+
+# 4. Stop the container
+docker compose down
 ```
+
+#### Build and Run Standalone Container
+
+```bash
+# Build local Docker image
+docker build -t ghostrs:latest .
+
+# Run container with host networking and mounted volumes
+docker run -d \
+  --name ghostrs \
+  --network host \
+  --restart unless-stopped \
+  -v $(pwd)/ghost.toml:/app/ghost.toml:ro \
+  -v $(pwd)/maps:/app/maps:ro \
+  -v $(pwd)/war3:/app/war3:ro \
+  -v $(pwd)/replays:/app/replays:rw \
+  -v $(pwd)/data:/app/data:rw \
+  ghostrs:latest
+```
+
+#### Volume Mounts & Ports
+
+| Mount / Path | Description | Access |
+|---|---|---|
+| `./ghost.toml` | Main configuration file | Read-only (`ro`) |
+| `./maps/` | DotA and custom Warcraft III map files (`.w3x`) | Read-only (`ro`) |
+| `./war3/` | Game scripts (`common.j`, `blizzard.j`) | Read-only (`ro`) |
+| `./replays/` | Saved `.w3g` replay files | Read-Write (`rw`) |
+| `./data/` | Persistent SQLite database (`ghost.db`) | Read-Write (`rw`) |
+
+| Port | Protocol | Purpose |
+|---|---|---|
+| `6112` | UDP | LAN Game Discovery & Broadcast |
+| `6114` | TCP | GProxy++ Reconnect Service |
+| `6115` | TCP | DotaTV Spectator Relay |
+| `40000–40150` | TCP | Dynamic Multi-Lobby Match Ports |
 
 ---
 
