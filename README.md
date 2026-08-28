@@ -113,7 +113,7 @@ The included `docker-compose.yml` uses host networking (`network_mode: host`) to
 
 ```bash
 # 1. Ensure configuration and volume folders exist
-mkdir -p maps war3 replays data
+mkdir -p maps replays data
 
 # 2. Start the bot in the background
 docker compose up -d
@@ -138,7 +138,6 @@ docker run -d \
   --restart unless-stopped \
   -v $(pwd)/spectre.toml:/app/spectre.toml:ro \
   -v $(pwd)/maps:/app/maps:ro \
-  -v $(pwd)/war3:/app/war3:ro \
   -v $(pwd)/replays:/app/replays:rw \
   -v $(pwd)/data:/app/data:rw \
   spectre:latest
@@ -150,7 +149,6 @@ docker run -d \
 |---|---|---|
 | `./spectre.toml` | Main configuration file | Read-only (`ro`) |
 | `./maps/` | DotA and custom Warcraft III map files (`.w3x`) | Read-only (`ro`) |
-| `./war3/` | Game scripts (`common.j`, `blizzard.j`) | Read-only (`ro`) |
 | `./replays/` | Saved `.w3g` replay files | Read-Write (`rw`) |
 | `./data/` | Persistent SQLite database (`spectre.db`) | Read-Write (`rw`) |
 
@@ -220,7 +218,6 @@ host_port = 6112
 max_games = 10
 default_map = "iCCup DotA 454.w3x"
 map_path = "maps"
-war3_path = "war3"
 
 [bnet]
 server = "wc3.theabyss.ru"

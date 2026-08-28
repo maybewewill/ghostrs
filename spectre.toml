@@ -8,7 +8,6 @@ max_games = 100
 tft = true
 default_map = "iCCup DotA 507.w3x"
 map_path = "maps"
-war3_path = "war3"
 allow_downloads = true
 max_downloaders = 3
 max_download_speed = 1000000

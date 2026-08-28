@@ -17,7 +17,7 @@ if ! docker compose version &> /dev/null; then
     sudo apt-get update && sudo apt-get install -y docker-compose-plugin
 fi
 
-mkdir -p maps war3 replays data
+mkdir -p maps replays data
 if [ -d "spectre.db" ]; then
     rm -rf spectre.db
 fi

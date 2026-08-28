@@ -15,13 +15,12 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-RUN mkdir -p /app/maps /app/war3 /app/replays
+RUN mkdir -p /app/maps /app/replays
 
 COPY --from=builder /usr/src/spectre/target/release/spectre /app/spectre
 
 COPY spectre.toml /app/spectre.toml
 COPY maps/ /app/maps/
-COPY war3/ /app/war3/
 
 ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1

@@ -6,9 +6,6 @@
 maps/** linguist-vendored
 maps/** linguist-documentation
 maps/** -linguist-detectable
-war3/** linguist-vendored
-war3/** linguist-documentation
-war3/** -linguist-detectable
 crates/spectre-protocol/tests/fixtures/** linguist-vendored
 crates/spectre-protocol/tests/fixtures/** linguist-documentation
 crates/spectre-protocol/tests/fixtures/** -linguist-detectable

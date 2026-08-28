@@ -11,7 +11,6 @@ services:
     volumes:
       - ./spectre.toml:/app/spectre.toml:ro
       - ./maps:/app/maps:ro
-      - ./war3:/app/war3:ro
       - ./replays:/app/replays:rw
       - ./data:/app/data:rw
     logging:
