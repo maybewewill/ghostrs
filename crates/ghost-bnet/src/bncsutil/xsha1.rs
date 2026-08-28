@@ -82,6 +82,12 @@ pub fn hash_password(password: &str) -> [u8; 20] {
     xsha1(password.as_bytes())
 }
 
+/// Canonical alias for `xsha1` matching BNCSutil C `calcHashBuf`.
+#[inline]
+pub fn calc_hash_buf(data: &[u8]) -> [u8; 20] {
+    xsha1(data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

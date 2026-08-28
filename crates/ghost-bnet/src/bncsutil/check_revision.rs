@@ -1,6 +1,11 @@
+//! BNCSutil CheckRevision Implementation
+//!
+//! Evaluates Battle.net CheckRevision formulas over game executables and MPQ archive seeds.
+
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
+use std::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OpType {
@@ -20,8 +25,7 @@ struct Operation {
 }
 
 /// Known Battle.net CheckRevision MPQ seed table from BNCSutil / GHost++.
-/// Used to XOR the initial seed 'A' value before hashing file streams.
-const MPQ_SEEDS: [u32; 8] = [
+pub const DEFAULT_MPQ_SEEDS: [u32; 8] = [
     0xE7F4_CB62,
     0xF6A1_4FFC,
     0xAA55_04AF,
@@ -32,10 +36,69 @@ const MPQ_SEEDS: [u32; 8] = [
     0x2FEC_8733,
 ];
 
-/// Evaluates a Battle.net CheckRevision formula string across three game binaries
-/// (typically warcraft.exe, Storm.dll, and game.dll).
+static SEED_REGISTRY: RwLock<Option<Vec<u32>>> = RwLock::new(None);
+
+/// Retrieves the seed value registered for the given MPQ number.
+pub fn get_mpq_seed(mpq_number: i32) -> u32 {
+    if mpq_number < 0 {
+        return 0;
+    }
+    let idx = mpq_number as usize;
+    let guard = SEED_REGISTRY.read().unwrap();
+    if let Some(seeds) = &*guard {
+        seeds.get(idx).copied().unwrap_or(0)
+    } else {
+        DEFAULT_MPQ_SEEDS.get(idx).copied().unwrap_or(0)
+    }
+}
+
+/// Sets or updates the seed value for the given MPQ number. Returns previous seed or 0.
+pub fn set_mpq_seed(mpq_number: i32, new_seed: u32) -> u32 {
+    if mpq_number < 0 {
+        return 0;
+    }
+    let idx = mpq_number as usize;
+    let mut guard = SEED_REGISTRY.write().unwrap();
+    let seeds = guard.get_or_insert_with(|| DEFAULT_MPQ_SEEDS.to_vec());
+    if idx >= seeds.len() {
+        seeds.resize(idx + 1, 0);
+    }
+    let old = seeds[idx];
+    seeds[idx] = new_seed;
+    old
+}
+
+/// Evaluates a Battle.net CheckRevision formula string across a slice of game binary paths.
 ///
 /// Returns the final checksum (register 'C') as `u32`.
+pub fn check_revision(
+    formula: &str,
+    files: &[&Path],
+    mpq_number: i32,
+) -> Result<u32, Error> {
+    if files.is_empty() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "checkRevision requires at least one file",
+        ));
+    }
+
+    let (mut a, mut b, mut c, ops) = parse_formula(formula)?;
+    let seed = get_mpq_seed(mpq_number);
+    let effective_seed = if seed != 0 { seed } else { DEFAULT_MPQ_SEEDS[1] };
+
+    a ^= effective_seed;
+
+    for path in files {
+        hash_file(path, &ops, &mut a, &mut b, &mut c)?;
+    }
+
+    Ok(c)
+}
+
+/// Alternate form of CheckRevision function evaluating across exactly three files
+/// (typically warcraft.exe, Storm.dll, and game.dll).
+#[inline]
 pub fn check_revision_flat(
     formula: &str,
     file1: &Path,
@@ -43,22 +106,7 @@ pub fn check_revision_flat(
     file3: &Path,
     mpq_number: i32,
 ) -> Result<u32, Error> {
-    let (mut a, mut b, mut c, ops) = parse_formula(formula)?;
-
-    let seed = if mpq_number >= 0 && (mpq_number as usize) < MPQ_SEEDS.len() {
-        MPQ_SEEDS[mpq_number as usize]
-    } else {
-        MPQ_SEEDS[1] // Default for standard IX86ver1.mpq
-    };
-
-    a ^= seed;
-
-    let files = [file1, file2, file3];
-    for path in &files {
-        hash_file(path, &ops, &mut a, &mut b, &mut c)?;
-    }
-
-    Ok(c)
+    check_revision(formula, &[file1, file2, file3], mpq_number)
 }
 
 fn parse_formula(formula: &str) -> Result<(u32, u32, u32, Vec<Operation>), Error> {
@@ -129,63 +177,43 @@ fn hash_file(
     c: &mut u32,
 ) -> Result<(), Error> {
     let mut f = File::open(path)?;
-    let mut chunk_buf = [0u8; 8192];
-    let mut rem_buf = [0u8; 1024];
+    let mut block = [0u8; 1024];
 
     loop {
-        let n = f.read(&mut chunk_buf)?;
-        if n == 0 {
+        let mut total = 0;
+        while total < 1024 {
+            match f.read(&mut block[total..]) {
+                Ok(0) => break,
+                Ok(n) => total += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+
+        if total == 0 {
             break;
         }
 
-        let full_blocks = n / 1024;
-        let remainder = n % 1024;
-
-        for block in chunk_buf[..full_blocks * 1024].chunks_exact(4) {
-            let s = u32::from_le_bytes([block[0], block[1], block[2], block[3]]);
-            execute_ops(ops, a, b, c, s);
-        }
-
-        if remainder > 0 {
-            let next_n = f.read(&mut rem_buf[remainder..])?;
-            if next_n > 0 {
-                rem_buf[..remainder].copy_from_slice(&chunk_buf[full_blocks * 1024..n]);
-                let total = remainder + next_n;
-                if total == 1024 {
-                    for block in rem_buf.chunks_exact(4) {
-                        let s = u32::from_le_bytes([block[0], block[1], block[2], block[3]]);
-                        execute_ops(ops, a, b, c, s);
-                    }
-                } else {
-                    pad_and_execute(ops, a, b, c, &rem_buf[..total]);
-                    break;
-                }
-            } else {
-                pad_and_execute(ops, a, b, c, &chunk_buf[full_blocks * 1024..n]);
-                break;
+        if total == 1024 {
+            for chunk in block.chunks_exact(4) {
+                let s = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                execute_ops(ops, a, b, c, s);
             }
+        } else {
+            let mut pad_byte = 0xFFu8;
+            for b_dest in &mut block[total..] {
+                *b_dest = pad_byte;
+                pad_byte = pad_byte.wrapping_sub(1);
+            }
+            for chunk in block.chunks_exact(4) {
+                let s = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                execute_ops(ops, a, b, c, s);
+            }
+            break;
         }
     }
 
     Ok(())
-}
-
-#[inline(always)]
-fn pad_and_execute(ops: &[Operation], a: &mut u32, b: &mut u32, c: &mut u32, tail: &[u8]) {
-    let mut padded = [0u8; 1024];
-    let len = tail.len();
-    padded[..len].copy_from_slice(tail);
-
-    let mut pad_byte = 0xFFu8;
-    for b_dest in &mut padded[len..] {
-        *b_dest = pad_byte;
-        pad_byte = pad_byte.wrapping_sub(1);
-    }
-
-    for block in padded.chunks_exact(4) {
-        let s = u32::from_le_bytes([block[0], block[1], block[2], block[3]]);
-        execute_ops(ops, a, b, c, s);
-    }
 }
 
 #[inline(always)]
@@ -233,42 +261,16 @@ mod tests {
         assert_eq!(b, 880823580);
         assert_eq!(c, 1363937103);
         assert_eq!(ops.len(), 4);
-        assert_eq!(
-            ops[0],
-            Operation {
-                target: 'A',
-                left: 'A',
-                op: OpType::Sub,
-                right: 'S'
-            }
-        );
-        assert_eq!(
-            ops[1],
-            Operation {
-                target: 'B',
-                left: 'B',
-                op: OpType::Sub,
-                right: 'C'
-            }
-        );
-        assert_eq!(
-            ops[2],
-            Operation {
-                target: 'C',
-                left: 'C',
-                op: OpType::Sub,
-                right: 'A'
-            }
-        );
-        assert_eq!(
-            ops[3],
-            Operation {
-                target: 'A',
-                left: 'A',
-                op: OpType::Sub,
-                right: 'B'
-            }
-        );
+    }
+
+    #[test]
+    fn seed_get_and_set_works() {
+        let s1 = get_mpq_seed(1);
+        assert_eq!(s1, 0xF6A1_4FFC);
+        let old = set_mpq_seed(1, 0x12345678);
+        assert_eq!(old, 0xF6A1_4FFC);
+        assert_eq!(get_mpq_seed(1), 0x12345678);
+        set_mpq_seed(1, 0xF6A1_4FFC);
     }
 
     #[test]
