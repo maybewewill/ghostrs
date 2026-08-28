@@ -1,169 +1,161 @@
-# Ghost-RS
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset=".github/logo-light.svg">
+    <img alt="Ghost-RS" src=".github/logo-light.svg" width="440">
+  </picture>
 
-[![CI](https://github.com/slash/ghostrs/actions/workflows/ci.yml/badge.svg)](https://github.com/slash/ghostrs/actions/workflows/ci.yml)
-[![Rust](https://img.shields.io/badge/rust-1.96.1+-blue.svg)](https://www.rust-lang.org)
-[![Edition](https://img.shields.io/badge/edition-2024-green.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+  <p>Next-generation async Warcraft III 1.26a hostbot engine in pure Rust — zero-copy networking, microsecond tick precision, and live DotaTV spectator relay.</p>
+</div>
 
-A high-performance, asynchronous, pure-Rust Warcraft III 1.26a (The Frozen Throne) hostbot engine featuring GProxy++ reconnect protection, native DotA stats tracking, and live DotaTV spectator relay.
+<div align="center">
 
----
+[![CI][ci-shield]][ci-url]
+[![Rust][rust-shield]][rust-url]
+[![Edition][edition-shield]][edition-url]
+[![License][license-shield]][license-url]
 
-## ⚡ Key Features
+</div>
 
-- **Tokio Actor Architecture:** Each game session runs as an isolated actor task. Zero global locks (`Arc<Mutex<Game>>` completely eliminated) — an issue in one match cannot affect others.
-- **Microsecond-Precision Deterministic Ticking:** `TickScheduler` uses monotonic absolute deadlines (`tokio::time::sleep_until`), guaranteeing zero cumulative tick drift and input latency jitter $p99 < 0.85\text{ ms}$.
-- **Zero-Copy Lockless Packet Distribution:** Game actions and tick frames are constructed once and broadcast to players via atomic reference-counted `Bytes` slices (**5.42 ns** per 10-player broadcast).
-- **Pure-Rust BNCS & Crypto (No `bncsutil.dll` Needed):** 100% native Rust implementation of PvPGN password hashing, CD-key verification, and SRP/NLS handshake. Zero C-FFI or external DLL dependencies.
-- **Full DotA & MPQ Map Support:** In-engine MPQ parser extracting map dimensions, slot tables (Sentinel vs Scourge 5v5), CRC32, and SHA-1. Native DotA tracker parsing hero picks, KDA, CS, and throne destruction.
-- **GProxy++ Reconnect Protocol:** Sliding 500-packet ring buffer replay on reconnection (`GPS_RECONNECT`), transparently restoring disconnected players without desyncing the match.
-- **Live DotaTV Spectator Relay:** Dedicated streaming server on port 6114 with configurable broadcast delay (e.g. 120s), viewer chat, and automated `.w3g` replay writer.
-- **Modern TOML Configuration (`ghost.toml`):** Clean, type-safe configuration with full backward compatibility for legacy `default.cfg`.
-- **SQLite WAL Storage:** Dedicated asynchronous storage actor with write-ahead logging (WAL) for persistent bans, admin records, and game statistics.
-
----
-
-## 💻 System Requirements
-
-Thanks to the asynchronous actor model and zero-copy packet memory layout, Ghost-RS is extremely lightweight and efficient:
-
-| Resource | Minimum Requirements | Recommended (Production / 20+ Matches) |
-| :--- | :--- | :--- |
-| **CPU** | 1 vCPU / 1 Core (x86_64 or ARM64 / Raspberry Pi 4+) | 2 vCPU / Modern Core (Intel / AMD / Apple Silicon / Graviton) |
-| **RAM** | **16 MB** RSS RAM for the bot | **64 MB – 128 MB** (handles hundreds of active connections) |
-| **Disk** | ~25 MB for binary + map files (`.w3x`) | 500 MB (includes saved `.w3g` match replays & SQLite DB) |
-| **Network** | 2 Mbps uplink (5–15 KB/s per player) | 10–50 Mbps (for high-traffic public bots / DotaTV viewers) |
-| **OS** | Windows 10/11 / Windows Server, Linux (Ubuntu/Debian/Arch/Alpine), macOS | Any 64-bit Linux distribution or Windows Server |
+<div align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#why-ghost-rs">Why Ghost-RS</a> &middot;
+  <a href="#key-features">Features</a> &middot;
+  <a href="#architecture-at-a-glance">Architecture</a> &middot;
+  <a href="#commands">Commands</a> &middot;
+  <a href="#performance--benchmarks">Benchmarks</a>
+</div>
 
 ---
 
-## 📁 Workspace Structure
+## Why Ghost-RS?
 
+Legacy Warcraft III hostbots (such as GHost++ from 2008) rely on single-threaded `select()` event loops, brittle C-FFI `bncsutil.dll` dependencies, and global mutexes (`Arc<Mutex<Game>>`). Under high-traffic conditions or network packet bursts, these bottlenecks cause game-wide micro-stutters, desync crashes, and memory leaks.
+
+Ghost-RS completely reimagines Warcraft III 1.26a hosting in pure Rust with an asynchronous Tokio actor model:
+
+- **Eliminates global locks:** Every match session runs in its own actor task, preventing issues in one match from impacting any other.
+- **Zero external DLLs:** 100% native Rust implementations of PvPGN hashing, CD-key verification, and SRP/NLS Battle.net authentication.
+- **Microsecond determinism:** Monotonic absolute tick scheduling delivers jitter-free $p99 < 0.85\text{ ms}$ input synchronization.
+
+---
+
+## Key Features
+
+- **Isolated Tokio Actor Supervision** — Each game lobby runs as an autonomous actor task with zero global mutex contention, ensuring strict fault isolation across concurrent matches.
+- **Microsecond Deterministic Ticking** — The `TickScheduler` uses monotonic deadlines (`tokio::time::sleep_until`) to guarantee zero cumulative tick drift and stable game simulation.
+- **Zero-Copy Lockless Packet Distribution** — Game frames and W3GS action blocks are constructed once into reference-counted `bytes::Bytes` and distributed lock-free (**5.42 ns** per 10-player broadcast).
+- **100% Pure-Rust BNCS & Crypto** — Native PvPGN password hashing, CD-key validation, and SRP/NLS handshake without `bncsutil.dll` or C-FFI dependencies.
+- **GProxy++ Reconnect Protocol** — A sliding 500-packet ring buffer replay (`GPS_RECONNECT`) transparently restores disconnected players without causing match desyncs.
+- **Live DotaTV Spectator Relay** — Built-in spectator streaming server on port 6114 with configurable delay (e.g. 120s), viewer chat, and automated `.w3g` match replay writer.
+- **In-Engine DotA & MPQ Map Parser** — Built-in MPQ extractor parsing slot layouts (Sentinel vs Scourge 5v5), CRC32/SHA-1 checks, and real-time DotA tracker for hero picks, KDA, CS, and throne destruction.
+- **Asynchronous SQLite WAL Storage** — Dedicated storage actor operating in WAL mode for non-blocking persistence of bans, administrative access, and game statistics.
+
+---
+
+## Positioning & When to Use
+
+| When to Use Ghost-RS | When to Look Elsewhere |
+|---|---|
+| Hosting automated Warcraft III 1.26a DotA (5v5) matches | Modern Warcraft III: Reforged / Battle.net 2.0 (unsupported) |
+| Running PvPGN / Battle.net community leagues with persistent stats | Non-Warcraft III RTS game hosting |
+| Requiring crash-resilient multi-game hosting on Linux / Docker / ARM | Legacy bots requiring Windows-only C++ GUI tooling |
+| Low-latency LAN tournament hosting with GProxy++ reconnect protection | |
+
+---
+
+## Architecture At A Glance
+
+```mermaid
+flowchart TD
+  subgraph Network ["GhostNet Layer"]
+    BNCS["PvPGN / Battle.net Client Actor"]
+    TCP["TCP Player Connections (Dual-Framing)"]
+    UDP["LAN UDP Broadcaster"]
+  end
+
+  subgraph Engine ["GhostEngine Layer"]
+    Supervisor["Bot Supervisor"]
+    GameActor["Game Actor (Match Session)"]
+    Scheduler["TickScheduler (Absolute Deadlines)"]
+    DotA["DotA Stats Tracker & MPQ Parser"]
+    GProxy["GProxy++ Ring Buffer (500 Packets)"]
+  end
+
+  subgraph Services ["Spectator & Storage"]
+    Spectator["DotaTV Spectator Relay (Port 6114)"]
+    Replay[".w3g Replay Writer"]
+    Store["SQLite WAL Store Actor"]
+  end
+
+  BNCS --> Supervisor
+  TCP --> GameActor
+  UDP --> Supervisor
+  Supervisor --> GameActor
+  GameActor --> Scheduler
+  GameActor --> DotA
+  GameActor --> GProxy
+  GameActor --> Spectator
+  Spectator --> Replay
+  GameActor --> Store
 ```
-ghostrs/
-├── ghost.toml               # Modern TOML configuration file
-├── default.cfg              # Legacy configuration file (supported as fallback)
-├── crates/
-│   ├── ghost-protocol/      # Pure wire codecs for W3GS, GPS and BNCS (no I/O, no async)
-│   ├── ghost-net/           # Dual-framing TCP connection actors and UDP broadcaster
-│   ├── ghost-engine/        # Core game actor, tick scheduler, slot & player tables, DotA parser
-│   ├── ghost-bnet/          # PvPGN Battle.net client actor, authentication, and game advertiser
-│   ├── ghost-spectator/     # DotaTV delayed spectator relay, TCP server, and .w3g replay writer
-│   ├── ghost-store/         # SQLite storage actor running in WAL mode
-│   ├── ghostrs/             # Application entrypoint, typed config parser, and supervisor
-│   ├── ghost-loadtest/      # Multi-game synthetic load test harness
-│   └── ghost-legacy-attic/  # Preserved legacy modules for reference
-├── docs/
-│   └── PERFORMANCE.md       # Measured microbenchmarks and KPI verification
-└── Cargo.toml               # Workspace configuration
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/maybewewill/ghostrs.git
+cd ghostrs
+
+# 2. Build and launch with default ghost.toml
+cargo run --release -p ghostrs
 ```
 
 ---
 
-## 🚀 Getting Started
+## Install
 
-### 1. Build the Workspace
+### Build from Source
+
+Requires **Rust 1.96.1+** (2024 edition).
 
 ```bash
 # Debug build
 cargo build --workspace
 
-# Release build (recommended for hosting)
+# Optimized release build (recommended for production hosting)
 cargo build --release --workspace
 ```
 
-### 2. Run Automated Test Suite (102 Tests)
+### Docker Deployment
 
 ```bash
-cargo test --workspace
-```
-
-### 3. Run the Bot
-
-By default, Ghost-RS loads `ghost.toml` in the working directory (or you can specify a custom config path):
-
-```bash
-# Run with default ghost.toml
-cargo run --release -p ghostrs
-
-# Run with a custom config file
-cargo run --release -p ghostrs -- /path/to/my_config.toml
+# Launch via Docker Compose
+docker compose up -d
 ```
 
 ---
 
-## ⚙️ Configuration (`ghost.toml`)
-
-```toml
-[bot]
-bind_address = "0.0.0.0"
-host_port = 6112
-max_games = 10
-tft = true
-default_map = "iCCup DotA 454.w3x"
-map_path = "maps"
-war3_path = "war3"
-allow_downloads = true
-max_downloaders = 3
-max_download_speed = 1000000
-autokick_ping = 400
-lc_pings = true
-
-[bnet]
-server = "wc3.theabyss.ru"
-server_alias = "The Abyss"
-port = 6112
-username = "BOT"
-password = "my_password"
-cdkey_roc = "E2CDWX92HKY68XCFT2F9BJVZGK"
-cdkey_tft = "RTG4KBRCZB2PKPX8PKZVHM9ZK9"
-first_channel = "iccup.pro"
-root_admins = ["slash", "bonjour"]
-command_trigger = "!"
-war3_version = 26
-exe_version = [1, 0, 26, 1]
-password_hash_type = "pvpgn"
-pvpgn_realm_name = "PvPGN Realm"
-
-[game]
-latency_ms = 15
-sync_limit = 500
-virtual_host_name = "|cFFEB0000iCCup"
-reconnect_wait_sec = 180
-hcl_from_game_name = true
-votekick_allowed = true
-votekick_percentage = 100
-
-[spectator]
-enabled = true
-port = 6114
-delay_sec = 120
-max_viewers = 32
-
-[database]
-path = "ghost.db"
-```
-
----
-
-## 💬 Commands
+## Commands
 
 ### Battle.net Channel & Whisper Commands (Root Admins)
 
 | Command | Description |
 |---|---|
-| `!pub <name>` | Create and advertise a public game in the channel and LAN |
-| `!priv <name>` | Create a private game |
+| `!pub <name>` | Create and advertise a public game in channel and LAN |
+| `!priv <name>` | Create a private game lobby |
 | `!map <filename>` | Select default map for hosting |
-| `!autohost <map> <prefix>` | Enable automatic game hosting |
+| `!autohost <map> <prefix>` | Enable automatic match hosting |
 | `!unhost` | Unhost and cancel the current lobby |
 | `!start` | Force start the lobby countdown |
-| `!ban <user> [reason]` | Ban player and record in SQLite |
-| `!unban <user>` | Remove ban from SQLite |
+| `!ban <user> [reason]` | Ban player and record in SQLite database |
+| `!unban <user>` | Remove ban from SQLite database |
 | `!checkban <user>` | Check if a user is currently banned |
-| `!stats [user]` | Display DotA KDA, CS, and win rate |
-| `!say <msg>` | Send a chat message to the Battle.net channel |
-| `!status` | Display count of active lobbies and games |
+| `!stats [user]` | Display DotA KDA, creep score, and win rate |
+| `!say <msg>` | Broadcast a message to the Battle.net channel |
+| `!status` | Display active lobby and match counts |
 
 ### In-Lobby Commands (Host / Admin)
 
@@ -181,21 +173,92 @@ path = "ghost.db"
 
 ---
 
-## 📊 Benchmark Results (Criterion)
+## System Requirements
 
-Measured on **Intel Core i9-14900HX** (Windows 11 x64, Rust 1.96.1):
-
-| Metric | Legacy GHost++ (C++) | Ghost-RS (Rust) | Performance Gain |
-|---|---|---|---|
-| **Tick Scheduler Advance** | $\sim 500 - 2,000\text{ ns}$ | **$3.49\text{ ns}$** | **$150\times$ faster** |
-| **Broadcast to 10 Players** | $\sim 5,000 - 20,000\text{ ns}$ | **$5.42\text{ ns}$** | **$1,000\times$ faster** |
-| **W3GS Frame Decode** | $\sim 5,000\text{ ns}$ | **$18.4\text{ ns}$** | **$270\times$ faster** |
-| **Memory Footprint (Idle)** | $\sim 80\text{ MB}$ | **$\sim 18\text{ MB}$** | **$4.5\times$ lighter** |
-| **Concurrency Model** | Blocking 1-thread (`select()`) | Multi-threaded Tokio Actors | Scales across all CPU cores |
+| Resource | Minimum | Recommended (Production / 20+ Matches) |
+|---|---|---|
+| **CPU** | 1 vCPU / 1 Core (x86_64 or ARM64 / Raspberry Pi 4+) | 2 vCPU / Modern Core (Intel / AMD / Apple Silicon / Graviton) |
+| **RAM** | **16 MB** RSS RAM for the bot | **64 MB – 128 MB** (handles hundreds of active connections) |
+| **Disk** | ~25 MB for binary + map files (`.w3x`) | 500 MB (includes saved `.w3g` match replays & SQLite DB) |
+| **Network** | 2 Mbps uplink (5–15 KB/s per player) | 10–50 Mbps (for high-traffic public bots / DotaTV viewers) |
+| **OS** | Windows 10/11 / Windows Server, Linux, macOS | Any 64-bit Linux distribution or Windows Server |
 
 ---
 
-## 📜 License
+## Configuration
+
+Ghost-RS uses a typed TOML configuration (`ghost.toml`) with fallback support for legacy `default.cfg`.
+
+```toml
+[bot]
+bind_address = "0.0.0.0"
+host_port = 6112
+max_games = 10
+default_map = "iCCup DotA 454.w3x"
+map_path = "maps"
+war3_path = "war3"
+
+[bnet]
+server = "wc3.theabyss.ru"
+username = "BOT"
+password = "my_password"
+first_channel = "iccup.pro"
+root_admins = ["slash", "bonjour"]
+
+[game]
+latency_ms = 15
+sync_limit = 500
+reconnect_wait_sec = 180
+
+[spectator]
+enabled = true
+port = 6114
+delay_sec = 120
+max_viewers = 32
+
+[database]
+path = "ghost.db"
+```
+
+---
+
+## Performance & Benchmarks
+
+Ghost-RS was benchmarked using **Criterion** on an **Intel Core i9-14900HX** (Windows 11 x64, Rust 1.96.1):
+
+| Operation / Pipeline Stage | Legacy GHost++ (C++) | Ghost-RS (Rust) | Performance Gain |
+|---|---|---|---|
+| **Tick Scheduler Advance** | ~500 – 2,000 ns | **3.49 ns** | **150x faster** |
+| **Broadcast to 10 Players** | ~5,000 – 20,000 ns | **5.42 ns** | **1,000x faster** |
+| **W3GS Frame Decode** | ~5,000 ns | **18.4 ns** | **270x faster** |
+| **Memory Footprint (Idle)** | ~80 MB | **~18 MB** | **4.5x lighter** |
+| **Concurrency Scaling** | Single-threaded `select()` | Actor-per-game on Tokio | Scales across all CPU cores |
+
+→ [Detailed Performance & Benchmark Analysis](docs/PERFORMANCE.md)
+
+---
+
+## Development & Verification
+
+Run the full workspace test suite (102 automated unit and integration tests):
+
+```bash
+# Run all workspace tests
+cargo test --workspace
+
+# Run linter checks
+cargo clippy --workspace -- -D warnings
+```
+
+---
+
+## Contributing
+
+Contributions, bug reports, and suggestions are welcome. Please open an issue or pull request on GitHub.
+
+---
+
+## License
 
 Dual-licensed under either of:
 
@@ -203,3 +266,18 @@ Dual-licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+---
+
+Crafted with [Readme Craft](https://github.com/motiful/readme-craft)
+
+<!-- Reference-style link definitions -->
+[ci-shield]: https://github.com/maybewewill/ghostrs/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/maybewewill/ghostrs/actions
+[rust-shield]: https://img.shields.io/badge/rust-1.96.1+-blue.svg?logo=rust
+[rust-url]: https://www.rust-lang.org
+[edition-shield]: https://img.shields.io/badge/edition-2024-green.svg
+[edition-url]: https://doc.rust-lang.org/edition-guide/rust-2024/
+[license-shield]: https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg
+[license-url]: LICENSE
+

@@ -1,0 +1,21 @@
+description: >
+  Next-generation async Warcraft III 1.26a hostbot engine in pure Rust with zero-copy networking, microsecond tick precision, GProxy++ reconnect, and live DotaTV spectator relay.
+topics:
+  # Tier 1: Big traffic / domain
+  - rust
+  - game-server
+  - multiplayer
+  - server
+  # Tier 2: Domain-specific
+  - warcraft-3
+  - dota
+  - hostbot
+  - pvpgn
+  - gproxy
+  - mpq
+  # Tier 3: Ecosystem & technology
+  - tokio
+  - actor-model
+  - async-rust
+  - zero-copy
+homepage: ""
