@@ -1,0 +1,23 @@
+[package]
+name = "spectre-protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+crc32fast.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "codec"
+harness = false

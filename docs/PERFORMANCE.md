@@ -1,12 +1,12 @@
 # Performance & Benchmarks
 
-Ghost-RS is engineered from the ground up to replace legacy single-threaded C++ GHost++ architectures with lock-free, zero-copy asynchronous Rust pipelines.
+Spectre is engineered from the ground up to replace legacy single-threaded C++ GHost++ architectures with lock-free, zero-copy asynchronous Rust pipelines.
 
 ## Measured Microbenchmarks (Criterion)
 
 Measured on **Intel Core i9-14900HX** (Windows 11 x64, Rust 1.96.1):
 
-| Operation / Pipeline Stage | Legacy GHost++ (C++) | Ghost-RS (Rust) | Performance Multiplier |
+| Operation / Pipeline Stage | Legacy GHost++ (C++) | Spectre (Rust) | Performance Multiplier |
 |---|---|---|---|
 | **Tick Scheduler Advance** | ~500 – 2,000 ns | **3.49 ns** | **150x faster** |
 | **Broadcast to 10 Players** | ~5,000 – 20,000 ns | **5.42 ns** | **1,000x faster** |

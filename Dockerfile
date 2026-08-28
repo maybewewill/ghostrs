@@ -3,14 +3,14 @@
 # =============================================================================
 FROM rust:1-bookworm AS builder
 
-WORKDIR /usr/src/ghostrs
+WORKDIR /usr/src/spectre
 
 # Copy workspace manifests
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-# Build release binary for ghostrs
-RUN cargo build --release --bin ghostrs
+# Build release binary for spectre
+RUN cargo build --release --bin spectre
 
 # =============================================================================
 # Stage 2: Minimal runtime image
@@ -28,10 +28,10 @@ WORKDIR /app
 RUN mkdir -p /app/maps /app/war3 /app/replays
 
 # Copy compiled binary from builder stage
-COPY --from=builder /usr/src/ghostrs/target/release/ghostrs /app/ghostrs
+COPY --from=builder /usr/src/spectre/target/release/spectre /app/spectre
 
 # Copy default config and map resources
-COPY ghost.toml /app/ghost.toml
+COPY spectre.toml /app/spectre.toml
 COPY maps/ /app/maps/
 COPY war3/ /app/war3/
 
@@ -48,4 +48,4 @@ EXPOSE 6115/tcp
 EXPOSE 40000-40150/tcp
 EXPOSE 6112/udp
 
-ENTRYPOINT ["/app/ghostrs"]
+ENTRYPOINT ["/app/spectre"]

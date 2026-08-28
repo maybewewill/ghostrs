@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "========================================="
-echo "   Ghost-RS Server Deployment Script     "
+echo "   Spectre Server Deployment Script      "
 echo "========================================="
 
 # 1. Check & Install Docker if needed
@@ -22,18 +22,18 @@ fi
 
 # 3. Ensure directories exist
 mkdir -p maps war3 replays data
-if [ -d "ghost.db" ]; then
-    rm -rf ghost.db
+if [ -d "spectre.db" ]; then
+    rm -rf spectre.db
 fi
 
-# 4. Pull and Run Ghost-RS
-echo "[+] Pulling and starting Ghost-RS in Docker..."
+# 4. Pull and Run Spectre
+echo "[+] Pulling and starting Spectre in Docker..."
 docker compose down || true
 docker compose pull
 docker compose up -d
 
 echo "========================================="
-echo "   Ghost-RS is now running in background "
+echo "   Spectre is now running in background  "
 echo "   To view logs: docker compose logs -f  "
 echo "========================================="
 docker compose logs -f --tail=50

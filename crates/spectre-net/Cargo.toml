@@ -1,0 +1,21 @@
+[package]
+name = "spectre-net"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+
+[dependencies]
+spectre-protocol = { path = "../spectre-protocol" }
+bytes.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

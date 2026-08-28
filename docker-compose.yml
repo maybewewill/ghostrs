@@ -1,16 +1,16 @@
 services:
-  ghostrs:
-    image: ghcr.io/maybewewill/ghostrs:latest
-    container_name: ghostrs
+  spectre:
+    image: ghcr.io/maybewewill/spectre:latest
+    container_name: spectre
     restart: unless-stopped
-    entrypoint: ["/app/ghostrs"]
+    entrypoint: ["/app/spectre"]
     # host networking ensures direct high-performance socket access without Docker bridge/NAT overhead
     network_mode: host
     environment:
       - RUST_LOG=info
       - RUST_BACKTRACE=1
     volumes:
-      - ./ghost.toml:/app/ghost.toml:ro
+      - ./spectre.toml:/app/spectre.toml:ro
       - ./maps:/app/maps:ro
       - ./war3:/app/war3:ro
       - ./replays:/app/replays:rw

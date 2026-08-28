@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset=".github/logo-light.svg">
-    <img alt="Ghost-RS" src=".github/logo-light.svg" width="440">
+    <img alt="Spectre" src=".github/logo-light.svg" width="440">
   </picture>
 
   <p>Next-generation async Warcraft III 1.26a hostbot engine in pure Rust — zero-copy networking, microsecond tick precision, and live DotaTV spectator relay.</p>
@@ -19,7 +19,7 @@
 
 <div align="center">
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#why-ghost-rs">Why Ghost-RS</a> &middot;
+  <a href="#why-spectre">Why Spectre</a> &middot;
   <a href="#key-features">Features</a> &middot;
   <a href="#architecture-at-a-glance">Architecture</a> &middot;
   <a href="#commands">Commands</a> &middot;
@@ -28,11 +28,11 @@
 
 ---
 
-## Why Ghost-RS?
+## Why Spectre?
 
 Legacy Warcraft III hostbots (such as GHost++ from 2008) rely on single-threaded `select()` event loops, brittle C-FFI `bncsutil.dll` dependencies, and global mutexes (`Arc<Mutex<Game>>`). Under high-traffic conditions or network packet bursts, these bottlenecks cause game-wide micro-stutters, desync crashes, and memory leaks.
 
-Ghost-RS completely reimagines Warcraft III 1.26a hosting in pure Rust with an asynchronous Tokio actor model:
+Spectre completely reimagines Warcraft III 1.26a hosting in pure Rust with an asynchronous Tokio actor model:
 
 - **Eliminates global locks:** Every match session runs in its own actor task, preventing issues in one match from impacting any other.
 - **Zero external DLLs:** 100% native Rust implementations of PvPGN hashing, CD-key verification, and SRP/NLS Battle.net authentication.
@@ -55,7 +55,7 @@ Ghost-RS completely reimagines Warcraft III 1.26a hosting in pure Rust with an a
 
 ## Positioning & When to Use
 
-| When to Use Ghost-RS | When to Look Elsewhere |
+| When to Use Spectre | When to Look Elsewhere |
 |---|---|
 | Hosting automated Warcraft III 1.26a DotA (5v5) matches | Modern Warcraft III: Reforged / Battle.net 2.0 (unsupported) |
 | Running PvPGN / Battle.net community leagues with persistent stats | Non-Warcraft III RTS game hosting |
@@ -68,13 +68,13 @@ Ghost-RS completely reimagines Warcraft III 1.26a hosting in pure Rust with an a
 
 ```mermaid
 flowchart TD
-  subgraph Network ["GhostNet Layer"]
+  subgraph Network ["SpectreNet Layer"]
     BNCS["PvPGN / Battle.net Client Actor"]
     TCP["TCP Player Connections (Dual-Framing)"]
     UDP["LAN UDP Broadcaster"]
   end
 
-  subgraph Engine ["GhostEngine Layer"]
+  subgraph Engine ["SpectreEngine Layer"]
     Supervisor["Bot Supervisor"]
     GameActor["Game Actor (Match Session)"]
     Scheduler["TickScheduler (Absolute Deadlines)"]
@@ -109,8 +109,8 @@ flowchart TD
 git clone https://github.com/maybewewill/ghostrs.git
 cd ghostrs
 
-# 2. Build and launch with default ghost.toml
-cargo run --release -p ghostrs
+# 2. Build and launch with default spectre.toml
+cargo run --release -p spectre
 ```
 
 ---
@@ -131,7 +131,7 @@ cargo build --release --workspace
 
 ### Docker Deployment
 
-Ghost-RS provides a lightweight container image based on `debian:bookworm-slim` with multi-stage build caching.
+Spectre provides a lightweight container image based on `debian:bookworm-slim` with multi-stage build caching.
 
 #### Quick Start with Docker Compose (Recommended)
 
@@ -145,7 +145,7 @@ mkdir -p maps war3 replays data
 docker compose up -d
 
 # 3. View live bot logs
-docker compose logs -f ghostrs
+docker compose logs -f spectre
 
 # 4. Stop the container
 docker compose down
@@ -155,30 +155,30 @@ docker compose down
 
 ```bash
 # Build local Docker image
-docker build -t ghostrs:latest .
+docker build -t spectre:latest .
 
 # Run container with host networking and mounted volumes
 docker run -d \
-  --name ghostrs \
+  --name spectre \
   --network host \
   --restart unless-stopped \
-  -v $(pwd)/ghost.toml:/app/ghost.toml:ro \
+  -v $(pwd)/spectre.toml:/app/spectre.toml:ro \
   -v $(pwd)/maps:/app/maps:ro \
   -v $(pwd)/war3:/app/war3:ro \
   -v $(pwd)/replays:/app/replays:rw \
   -v $(pwd)/data:/app/data:rw \
-  ghostrs:latest
+  spectre:latest
 ```
 
 #### Volume Mounts & Ports
 
 | Mount / Path | Description | Access |
 |---|---|---|
-| `./ghost.toml` | Main configuration file | Read-only (`ro`) |
+| `./spectre.toml` | Main configuration file | Read-only (`ro`) |
 | `./maps/` | DotA and custom Warcraft III map files (`.w3x`) | Read-only (`ro`) |
 | `./war3/` | Game scripts (`common.j`, `blizzard.j`) | Read-only (`ro`) |
 | `./replays/` | Saved `.w3g` replay files | Read-Write (`rw`) |
-| `./data/` | Persistent SQLite database (`ghost.db`) | Read-Write (`rw`) |
+| `./data/` | Persistent SQLite database (`spectre.db`) | Read-Write (`rw`) |
 
 | Port | Protocol | Purpose |
 |---|---|---|
@@ -237,7 +237,7 @@ docker run -d \
 
 ## Configuration
 
-Ghost-RS uses a typed TOML configuration (`ghost.toml`) with fallback support for legacy `default.cfg`.
+Spectre uses a typed TOML configuration (`spectre.toml`) with fallback support for legacy `default.cfg`.
 
 ```toml
 [bot]
@@ -267,16 +267,16 @@ delay_sec = 120
 max_viewers = 32
 
 [database]
-path = "ghost.db"
+path = "spectre.db"
 ```
 
 ---
 
 ## Performance & Benchmarks
 
-Ghost-RS was benchmarked using **Criterion** on an **Intel Core i9-14900HX** (Windows 11 x64, Rust 1.96.1):
+Spectre was benchmarked using **Criterion** on an **Intel Core i9-14900HX** (Windows 11 x64, Rust 1.96.1):
 
-| Operation / Pipeline Stage | Legacy GHost++ (C++) | Ghost-RS (Rust) | Performance Gain |
+| Operation / Pipeline Stage | Legacy GHost++ (C++) | Spectre (Rust) | Performance Gain |
 |---|---|---|---|
 | **Tick Scheduler Advance** | ~500 – 2,000 ns | **3.49 ns** | **150x faster** |
 | **Broadcast to 10 Players** | ~5,000 – 20,000 ns | **5.42 ns** | **1,000x faster** |

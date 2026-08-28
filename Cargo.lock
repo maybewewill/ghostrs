@@ -414,127 +414,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ghost-bnet"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures-util",
- "ghost-protocol",
- "num-bigint",
- "num-traits",
- "rand",
- "sha1",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "ghost-engine"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "criterion",
- "ghost-net",
- "ghost-protocol",
- "ghost-spectator",
- "ghost-store",
- "mpq",
- "rand",
- "sha1",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ghost-loadtest"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "futures-util",
- "ghost-protocol",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "ghost-net"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures-util",
- "ghost-protocol",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "ghost-protocol"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "criterion",
- "proptest",
- "thiserror",
- "tokio-util",
-]
-
-[[package]]
-name = "ghost-spectator"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "flate2",
- "ghost-net",
- "ghost-protocol",
- "socket2 0.5.10",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ghost-store"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rusqlite",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ghostrs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "ghost-bnet",
- "ghost-engine",
- "ghost-net",
- "ghost-protocol",
- "ghost-spectator",
- "ghost-store",
- "rand",
- "serde",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1153,6 +1032,127 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spectre"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "rand",
+ "serde",
+ "spectre-bnet",
+ "spectre-engine",
+ "spectre-net",
+ "spectre-protocol",
+ "spectre-spectator",
+ "spectre-store",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "spectre-bnet"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "num-bigint",
+ "num-traits",
+ "rand",
+ "sha1",
+ "spectre-protocol",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "spectre-engine"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "criterion",
+ "mpq",
+ "rand",
+ "sha1",
+ "spectre-net",
+ "spectre-protocol",
+ "spectre-spectator",
+ "spectre-store",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "spectre-loadtest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "spectre-protocol",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "spectre-net"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "spectre-protocol",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "spectre-protocol"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "criterion",
+ "proptest",
+ "thiserror",
+ "tokio-util",
+]
+
+[[package]]
+name = "spectre-spectator"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32fast",
+ "flate2",
+ "socket2 0.5.10",
+ "spectre-net",
+ "spectre-protocol",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "spectre-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

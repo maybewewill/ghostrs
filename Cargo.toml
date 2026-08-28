@@ -1,20 +1,20 @@
 [workspace]
 members = [
-    "crates/ghost-protocol",
-    "crates/ghost-net",
-    "crates/ghost-engine",
-    "crates/ghost-bnet",
-    "crates/ghost-spectator",
-    "crates/ghost-store",
-    "crates/ghostrs",
-    "crates/ghost-loadtest",
+    "crates/spectre-protocol",
+    "crates/spectre-net",
+    "crates/spectre-engine",
+    "crates/spectre-bnet",
+    "crates/spectre-spectator",
+    "crates/spectre-store",
+    "crates/spectre",
+    "crates/spectre-loadtest",
 ]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
 rust-version = "1.96.1"
-authors = ["Ghost-RS Team"]
+authors = ["Spectre Team"]
 
 [workspace.dependencies]
 bytes = "1.10.1"

@@ -1,4 +1,4 @@
-﻿target/
+target/
 .git/
 .github/
 .superpowers/
@@ -11,5 +11,5 @@ docs/
 *.i64
 *.idb
 replays/*.w3g
-ghost.db-shm
-ghost.db-wal
+spectre.db-shm
+spectre.db-wal
