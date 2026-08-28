@@ -31,7 +31,6 @@ pub struct MapInfo {
     pub options: u32,
     pub map_type: String,
     pub matchmaking_category: String,
-    pub stats_w3mmd_category: String,
     pub default_hcl: String,
     pub default_player_score: u32,
     pub loading_in_game: bool,
@@ -111,7 +110,6 @@ impl MapInfo {
             options: 0,
             map_type: "dota".into(),
             matchmaking_category: String::new(),
-            stats_w3mmd_category: "default".into(),
             default_hcl: String::new(),
             default_player_score: 1000,
             loading_in_game: false,
@@ -148,8 +146,6 @@ pub struct GameConfig {
     pub stat_string: Vec<u8>,
     pub event_tx: Option<tokio::sync::mpsc::Sender<crate::handle::GameEvent>>,
     pub lobby_time_limit: u32,
-    pub load_in_game: bool,
-    pub auto_save: bool,
     pub creator_name: String,
     pub creator_server: String,
     pub min_score: f64,
@@ -207,7 +203,6 @@ pub struct GameState {
     pub last_jitter_report: Instant,
     pub dota: Option<crate::stats_dota::StatsDotA>,
     pub game_over_time: Option<tokio::time::Instant>,
-    pub w3mmd: Option<crate::stats_w3mmd::StatsW3MMD>,
     pub hcl: Option<String>,
     pub muted_all: bool,
     pub locked: bool,
@@ -230,8 +225,6 @@ pub struct GameState {
     pub last_lag_screen_reset: Instant,
     pub last_reserved_seen: Instant,
     pub start_players: usize,
-    pub load_in_game: bool,
-    pub auto_save: bool,
     pub mute_lobby: bool,
     pub local_admin_messages: bool,
     pub last_game_name: String,
@@ -305,18 +298,6 @@ impl GameState {
                 None
             },
             game_over_time: None,
-            w3mmd: if cfg.map.map_type == "w3mmd" {
-                Some(crate::stats_w3mmd::StatsW3MMD::new(
-                    cfg.name.clone(),
-                    if cfg.map.stats_w3mmd_category.is_empty() {
-                        "default".into()
-                    } else {
-                        cfg.map.stats_w3mmd_category.clone()
-                    },
-                ))
-            } else {
-                None
-            },
             hcl: crate::hcl::Hcl::parse_from_gamename(&cfg.name).or_else(|| {
                 if !cfg.map.default_hcl.is_empty() {
                     Some(cfg.map.default_hcl.clone())
@@ -339,8 +320,6 @@ impl GameState {
             last_announce_time: None,
             virtual_host_pid: 255,
             started_loading_at: None,
-            load_in_game: cfg.load_in_game,
-            auto_save: cfg.auto_save,
             mute_lobby: false,
             local_admin_messages: true,
             last_game_name: cfg.name.clone(),
@@ -380,10 +359,6 @@ impl GameState {
             }
             if let Some(buf) = p.gproxy_buffer.as_mut() {
                 buf.push(bytes.clone());
-            }
-            if self.load_in_game && !p.loaded && self.phase == GamePhase::Loading {
-                p.load_in_game_data.push(bytes.clone());
-                continue;
             }
             if p.disconnected_since.is_some() {
                 continue;
@@ -522,7 +497,7 @@ impl GameState {
         if matches!(self.phase, GamePhase::Countdown { .. }) {
             tracing::info!(game = %self.cfg.name, "player left during countdown, aborting to lobby");
             self.phase = GamePhase::Lobby;
-            self.send_chat_all(&crate::lang::countdown_aborted());
+            self.send_chat_all("Countdown aborted.");
         }
 
         self.last_player_left_time = Some(Instant::now());

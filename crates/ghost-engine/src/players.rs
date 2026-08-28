@@ -50,7 +50,6 @@ pub struct Player {
     /// True for the socket-less bot player seated to fill the lobby headcount.
     pub virtual_host: bool,
     pub finished_loading_at: Option<Instant>,
-    pub load_in_game_data: Vec<bytes::Bytes>,
     pub download_allowed: bool,
     pub score: f64,
     pub stats_sent_time: Option<Instant>,
@@ -90,7 +89,6 @@ impl Player {
             left_code: ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
             left: None,
             virtual_host: false,
-            load_in_game_data: Vec::new(),
             download_allowed: false,
             score: 0.0,
             finished_loading_at: None,

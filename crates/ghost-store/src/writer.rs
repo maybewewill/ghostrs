@@ -70,8 +70,6 @@ pub enum StoreQuery {
     },
 }
 
-pub type W3MMDVarRecord = (u32, String, Option<i32>, Option<f64>, Option<String>);
-
 pub enum StoreCmd {
     AddBan {
         name: String,
@@ -103,11 +101,6 @@ pub enum StoreCmd {
         tree_hp: u32,
         throne_hp: u32,
         players: Vec<DotAPlayerRecord>,
-    },
-    LogW3MMD {
-        game_name: String,
-        players: Vec<(u32, String, String)>,
-        vars: Vec<W3MMDVarRecord>,
     },
     RecordDownload {
         map: String,
@@ -362,35 +355,6 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                             "INSERT INTO dotaplayers (game_id, colour, name, hero, kills, deaths, assists, creep_kills, creep_denies, neutral_kills, tower_kills, rax_kills, courier_kills)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                             rusqlite::params![game_id, p.colour, p.name, p.hero, p.kills, p.deaths, p.assists, p.creep_kills, p.creep_denies, p.neutral_kills, p.tower_kills, p.rax_kills, p.courier_kills],
-                        );
-                    }
-                    let _ = tx.commit();
-                }
-            }
-            StoreCmd::LogW3MMD {
-                game_name,
-                players,
-                vars,
-            } => {
-                if let Ok(tx) = conn.transaction() {
-                    let game_id: i64 = tx
-                        .query_row(
-                            "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
-                            rusqlite::params![game_name],
-                            |r| r.get(0),
-                        )
-                        .unwrap_or(0);
-
-                    for (pid, name, flag) in players {
-                        let _ = tx.execute(
-                            "INSERT INTO w3mmdplayers (game_id, pid, name, flag) VALUES (?1, ?2, ?3, ?4)",
-                            rusqlite::params![game_id, pid, name, flag],
-                        );
-                    }
-                    for (pid, var_name, vi, vr, vs) in vars {
-                        let _ = tx.execute(
-                            "INSERT INTO w3mmdvars (game_id, pid, var_name, value_int, value_real, value_string) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            rusqlite::params![game_id, pid, var_name, vi, vr, vs],
                         );
                     }
                     let _ = tx.commit();

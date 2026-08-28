@@ -12,9 +12,7 @@ workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
-tracing.workspace = true
 crc32fast.workspace = true
-sha1.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

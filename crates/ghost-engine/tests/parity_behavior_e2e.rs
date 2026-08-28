@@ -374,39 +374,6 @@ async fn parity_d1_game_and_download_logging_in_store() {
 }
 
 #[test]
-fn test_p2_7_load_in_game_queues_and_drains_on_loaded() {
-    let (mut st, mut rxs) = seated_game(2);
-    st.load_in_game = true;
-    st.phase = GamePhase::Loading;
-    for rx in &mut rxs {
-        let _ = drain_ids(rx);
-    }
-
-    // Player 1 is loaded, Player 2 is still loading
-    st.players.by_pid_mut(1).unwrap().loaded = true;
-    st.players.by_pid_mut(2).unwrap().loaded = false;
-
-    // Broadcast a dummy action/chat packet
-    let dummy_packet = Bytes::from_static(&[0xF7, 0x01, 0x05, 0x00, 0x99]);
-    st.broadcast(dummy_packet.clone());
-
-    // Player 1 receives immediately
-    let p1_recv = rxs[0].try_recv();
-    assert!(p1_recv.is_ok());
-
-    // Player 2 did not receive through link yet, but has it in load_in_game_data
-    let p2_recv_early = rxs[1].try_recv();
-    assert!(p2_recv_early.is_err());
-    assert_eq!(st.players.by_pid(2).unwrap().load_in_game_data.len(), 1);
-
-    // Player 2 finishes loading -> load_in_game_data is drained
-    st.handle_loaded(2);
-    let p2_recv_drained = rxs[1].try_recv();
-    assert!(p2_recv_drained.is_ok());
-    assert_eq!(st.players.by_pid(2).unwrap().load_in_game_data.len(), 0);
-}
-
-#[test]
 fn test_p2_7_allow_downloads_modes() {
     // Mode 0: downloads disabled -> kicked
     let (mut st0, _rxs0) = seated_game(2);
@@ -489,12 +456,6 @@ fn test_p2_8_in_game_and_lobby_commands() {
     for rx in &mut rxs {
         let _ = drain_ids(rx);
     }
-
-    // !autosave
-    st.run_command(1, "slash", ChatCommand::AutoSave(Some(true)));
-    assert!(st.auto_save);
-    st.run_command(1, "slash", ChatCommand::AutoSave(Some(false)));
-    assert!(!st.auto_save);
 
     // !dbstatus
     st.run_command(1, "slash", ChatCommand::DbStatus);

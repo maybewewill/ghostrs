@@ -33,8 +33,6 @@ fn test_game_cfg() -> GameConfig {
         stat_string: Vec::new(),
         event_tx: None,
         lobby_time_limit: 10,
-        load_in_game: false,
-        auto_save: false,
         creator_name: String::new(),
         creator_server: String::new(),
         min_score: 0.0,

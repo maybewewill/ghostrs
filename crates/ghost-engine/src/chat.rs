@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use ghost_protocol::w3gs::incoming::ChatToHost;
 
-use crate::lang;
 use crate::lobby::MAX_SLOTS;
 use crate::players::NameMatch;
 use crate::slots::SlotStatus;
@@ -94,7 +93,6 @@ pub enum ChatCommand {
         team: u8,
     },
     Download(String),
-    AutoSave(Option<bool>),
     DbStatus,
     FakePlayer,
     FpPause,
@@ -244,18 +242,6 @@ pub fn parse_command(trigger: char, msg: &str) -> Option<ChatCommand> {
         "hcl" => ChatCommand::Hcl(args.join(" ")),
         "clearhcl" => ChatCommand::ClearHcl,
         "owner" => ChatCommand::Owner(args.first().map(|s| s.to_string())),
-        "autosave" => {
-            let opt = args.first().and_then(|s| {
-                if s.eq_ignore_ascii_case("on") || s.eq_ignore_ascii_case("1") {
-                    Some(true)
-                } else if s.eq_ignore_ascii_case("off") || s.eq_ignore_ascii_case("0") {
-                    Some(false)
-                } else {
-                    None
-                }
-            });
-            ChatCommand::AutoSave(opt)
-        }
         "dbstatus" => ChatCommand::DbStatus,
         "fakeplayer" | "fp" => ChatCommand::FakePlayer,
         "fppause" => ChatCommand::FpPause,
@@ -336,7 +322,7 @@ impl GameState {
         // GHost++ game_base.cpp:2952: "?trigger" replies with the command
         // trigger and is still relayed like any other message.
         if chat.message == "?trigger" {
-            self.send_chat_to(pid, &lang::command_trigger(trigger));
+            self.send_chat_to(pid, &format!("Command trigger: {trigger}"));
         }
 
         // Team/colour/race/handicap change requests only apply in the lobby.
@@ -374,7 +360,7 @@ impl GameState {
                 );
 
                 if !is_owner && !public_cmd {
-                    self.send_chat_to(pid, &lang::command_not_allowed());
+                    self.send_chat_to(pid, "You are not the owner of this game.");
                     return;
                 }
                 self.run_command(pid, &name, cmd);
@@ -456,7 +442,10 @@ impl GameState {
             ChatCommand::Start { force } => {
                 if !force {
                     if self.players.human_count() < 1 {
-                        let msg = lang::unable_to_start_not_enough(self.players.human_count());
+                        let msg = format!(
+                            "Unable to start: only {} player(s) in the lobby.",
+                            self.players.human_count()
+                        );
                         self.send_chat_to(pid, &msg);
                         return;
                     }
@@ -540,7 +529,7 @@ impl GameState {
             ChatCommand::Abort => {
                 if matches!(self.phase, GamePhase::Countdown { .. }) {
                     self.phase = GamePhase::Lobby;
-                    self.send_chat_all(&lang::countdown_aborted());
+                    self.send_chat_all("Countdown aborted.");
                 }
             }
             ChatCommand::Open(sid) => {
@@ -591,10 +580,13 @@ impl GameState {
                         };
                     self.kick_player(target_pid, "was kicked", left_code);
                 }
-                Err(NameMatch::None) => self.send_chat_to(pid, &lang::no_such_player(&name)),
-                Err(NameMatch::Ambiguous(n)) => {
-                    self.send_chat_to(pid, &lang::ambiguous_player(&name, n))
+                Err(NameMatch::None) => {
+                    self.send_chat_to(pid, &format!("No player matching [{name}]."))
                 }
+                Err(NameMatch::Ambiguous(n)) => self.send_chat_to(
+                    pid,
+                    &format!("[{name}] matches {n} players, be more specific."),
+                ),
             },
             ChatCommand::Ban { name, reason } => {
                 if let Some(store) = &self.store {
@@ -713,7 +705,7 @@ impl GameState {
                         "Votekick started against [{tname}] (1/{needed} votes). Type !yes to vote."
                     ));
                 }
-                Err(_) => self.send_chat_to(pid, &lang::no_such_player(&name)),
+                Err(_) => self.send_chat_to(pid, &format!("No player matching [{name}].")),
             },
             ChatCommand::Yes => {
                 if let Some(target_pid) = self.votekick_target
@@ -770,7 +762,14 @@ impl GameState {
                     .iter_humans()
                     .map(|p| (p.name.clone(), p.average_ping()))
                     .collect();
-                let msg = lang::player_pings(&pairs);
+                let body: Vec<String> = pairs
+                    .iter()
+                    .map(|(name, ping)| match ping {
+                        Some(ms) => format!("{name}: {ms}ms"),
+                        None => format!("{name}: N/A"),
+                    })
+                    .collect();
+                let msg = format!("Pings: {}", body.join(", "));
                 self.send_chat_to(pid, &msg);
             }
             ChatCommand::Check(name) => {
@@ -790,7 +789,7 @@ impl GameState {
                         ),
                     );
                 } else {
-                    self.send_chat_to(pid, &lang::no_such_player(&name));
+                    self.send_chat_to(pid, &format!("No player matching [{name}]."));
                 }
             }
             ChatCommand::CheckMe => {
@@ -920,7 +919,7 @@ impl GameState {
                         ghost_protocol::w3gs::outgoing::start_download(self.host_pid()),
                     );
                 } else {
-                    self.send_chat_to(pid, &lang::no_such_player(&name));
+                    self.send_chat_to(pid, &format!("No player matching [{name}]."));
                 }
             }
             ChatCommand::Stats(name) => {
@@ -965,11 +964,11 @@ impl GameState {
                 if !self.draw_votes.contains(&pid) {
                     self.draw_votes.push(pid);
                     let votes = self.draw_votes.len();
-                    let total = self.players.len();
+                    let total = self.players.human_count();
                     self.send_chat_all(&format!("Draw vote: {votes}/{total} players agreed."));
-                    if votes == total {
-                        self.send_chat_all("All players agreed to a draw. Ending game.");
-                        self.phase = GamePhase::Over;
+                    if votes >= total {
+                        self.send_chat_all("Game ended in a draw.");
+                        self.finished = true;
                     }
                 }
             }
@@ -979,7 +978,7 @@ impl GameState {
             }
             ChatCommand::ClearHcl => {
                 self.hcl = None;
-                self.send_chat_all("HCL cleared.");
+                self.send_chat_all("HCL settings cleared.");
             }
             ChatCommand::Owner(new_owner) => {
                 if let Some(o) = new_owner {
@@ -991,11 +990,11 @@ impl GameState {
             }
             ChatCommand::Lock => {
                 self.locked = true;
-                self.send_chat_all("Game is now locked.");
+                self.send_chat_all("Game locked.");
             }
             ChatCommand::Unlock => {
                 self.locked = false;
-                self.send_chat_all("Game is now unlocked.");
+                self.send_chat_all("Game unlocked.");
             }
             ChatCommand::End => {
                 self.send_chat_all("Game ended by host.");
@@ -1007,29 +1006,6 @@ impl GameState {
                     self.finished = true;
                 }
             }
-            ChatCommand::AutoSave(opt) => match opt {
-                Some(true) => {
-                    self.auto_save = true;
-                    self.send_chat_to(pid, "Auto save enabled.");
-                }
-                Some(false) => {
-                    self.auto_save = false;
-                    self.send_chat_to(pid, "Auto save disabled.");
-                }
-                None => {
-                    self.send_chat_to(
-                        pid,
-                        &format!(
-                            "Auto save is {}.",
-                            if self.auto_save {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
-                        ),
-                    );
-                }
-            },
             ChatCommand::DbStatus => {
                 self.send_chat_to(pid, "DB STATUS --- OK");
             }
@@ -1166,7 +1142,7 @@ impl GameState {
                     );
                     self.send_chat_to(pid, &format!("[Whisper to {target_name}]: {message}"));
                 } else {
-                    self.send_chat_to(pid, &lang::no_such_player(&user));
+                    self.send_chat_to(pid, &format!("No player matching [{user}]."));
                 }
             }
             ChatCommand::Unknown(v) => {

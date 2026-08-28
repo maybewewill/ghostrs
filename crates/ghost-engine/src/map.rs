@@ -241,7 +241,6 @@ pub struct MapOverride {
     pub custom_slots: Option<Vec<SlotInfo>>,
     pub map_type: Option<String>,
     pub matchmaking_category: Option<String>,
-    pub stats_w3mmd_category: Option<String>,
     pub default_hcl: Option<String>,
     pub default_player_score: Option<u32>,
     pub loading_in_game: Option<bool>,
@@ -588,9 +587,6 @@ impl ParsedMap {
         let matchmaking_category = ovr
             .and_then(|o| o.matchmaking_category.clone())
             .unwrap_or_default();
-        let stats_w3mmd_category = ovr
-            .and_then(|o| o.stats_w3mmd_category.clone())
-            .unwrap_or_else(|| "default".into());
         let default_hcl = ovr.and_then(|o| o.default_hcl.clone()).unwrap_or_default();
         let default_player_score = ovr.and_then(|o| o.default_player_score).unwrap_or(1000);
         let loading_in_game = ovr.and_then(|o| o.loading_in_game).unwrap_or(false);
@@ -620,7 +616,6 @@ impl ParsedMap {
             options: map_options,
             map_type,
             matchmaking_category,
-            stats_w3mmd_category,
             default_hcl,
             default_player_score,
             loading_in_game,
@@ -750,8 +745,6 @@ mod tests {
             stat_string: Vec::new(),
             event_tx: None,
             lobby_time_limit: 10,
-            load_in_game: false,
-            auto_save: false,
             creator_name: String::new(),
             creator_server: String::new(),
             min_score: 0.0,

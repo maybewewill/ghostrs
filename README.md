@@ -198,7 +198,6 @@ docker run -d \
 | `!pub <name>` | Create and advertise a public game in channel and LAN |
 | `!priv <name>` | Create a private game lobby |
 | `!map <filename>` | Select default map for hosting |
-| `!autohost <map> <prefix>` | Enable automatic match hosting |
 | `!unhost` | Unhost and cancel the current lobby |
 | `!start` | Force start the lobby countdown |
 | `!ban <user> [reason]` | Ban player and record in SQLite database |

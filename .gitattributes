@@ -1,0 +1,7 @@
+﻿# GitHub Linguist Overrides
+# Exclude bundled Warcraft III scripts and vendored assets from language statistics
+*.j linguist-vendored
+*.j linguist-detectable=false
+maps/** linguist-vendored
+war3/** linguist-vendored
+crates/ghost-protocol/tests/fixtures/** linguist-vendored

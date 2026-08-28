@@ -65,12 +65,8 @@ impl GameState {
             .filter(|p| !p.virtual_host)
             .any(|p| p.lagging);
 
-        // GHost++ game_base.cpp:923 - Reset lag screen every 60 seconds (or 30s if load_in_game)
-        let reset_interval = if self.load_in_game {
-            Duration::from_secs(30)
-        } else {
-            Duration::from_secs(60)
-        };
+        // GHost++ game_base.cpp:923 - Reset lag screen every 60 seconds
+        let reset_interval = Duration::from_secs(60);
         if self.lagging && self.last_lag_screen_reset.elapsed() >= reset_interval {
             let laggers: Vec<(u8, u32)> = self
                 .players

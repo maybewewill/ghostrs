@@ -457,7 +457,6 @@ dependencies = [
  "bytes",
  "futures-util",
  "ghost-protocol",
- "rand",
  "tokio",
  "tokio-util",
  "tracing",
@@ -485,10 +484,8 @@ dependencies = [
  "crc32fast",
  "criterion",
  "proptest",
- "sha1",
  "thiserror",
  "tokio-util",
- "tracing",
 ]
 
 [[package]]

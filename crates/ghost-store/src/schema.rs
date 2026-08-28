@@ -74,26 +74,6 @@ CREATE TABLE IF NOT EXISTS dotaplayers (
 CREATE INDEX IF NOT EXISTS idx_dotaplayers_game ON dotaplayers(game_id);
 CREATE INDEX IF NOT EXISTS idx_dotaplayers_name ON dotaplayers(name COLLATE NOCASE);
 
-CREATE TABLE IF NOT EXISTS w3mmdplayers (
-    id      INTEGER PRIMARY KEY,
-    game_id INTEGER NOT NULL REFERENCES games(id),
-    pid     INTEGER NOT NULL,
-    name    TEXT NOT NULL,
-    flag    TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_w3mmdplayers_game ON w3mmdplayers(game_id);
-
-CREATE TABLE IF NOT EXISTS w3mmdvars (
-    id           INTEGER PRIMARY KEY,
-    game_id      INTEGER NOT NULL REFERENCES games(id),
-    pid          INTEGER NOT NULL,
-    var_name     TEXT NOT NULL,
-    value_int    INTEGER,
-    value_real   REAL,
-    value_string TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_w3mmdvars_game ON w3mmdvars(game_id);
-
 CREATE TABLE IF NOT EXISTS downloads (
     id         INTEGER PRIMARY KEY,
     map        TEXT NOT NULL,

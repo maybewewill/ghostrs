@@ -284,7 +284,6 @@ fn test_m8_map_fields_and_stats_and_hcl_dispatch() {
     map.map_type = "dota".into();
     map.default_player_score = 1500;
     map.matchmaking_category = "dota_ladder".into();
-    map.stats_w3mmd_category = "dota_stats".into();
 
     let cfg = GameConfig {
         name: "Casual Game".into(), // no HCL in name
@@ -312,8 +311,6 @@ fn test_m8_map_fields_and_stats_and_hcl_dispatch() {
         stat_string: Vec::new(),
         event_tx: None,
         lobby_time_limit: 0,
-        load_in_game: false,
-        auto_save: false,
         creator_name: "slash".into(),
         creator_server: "iCCup".into(),
         min_score: 0.0,
@@ -324,16 +321,6 @@ fn test_m8_map_fields_and_stats_and_hcl_dispatch() {
     let st = GameState::new(cfg);
     assert_eq!(st.hcl, Some("apem".to_string()));
     assert!(st.dota.is_some());
-    assert!(st.w3mmd.is_none());
-
-    // Switch map_type to w3mmd
-    let mut map_w3mmd = MapInfo::test_default();
-    map_w3mmd.map_type = "w3mmd".into();
-    let mut cfg_w3mmd = st.cfg.clone();
-    cfg_w3mmd.map = map_w3mmd;
-    let st_w3mmd = GameState::new(cfg_w3mmd);
-    assert!(st_w3mmd.dota.is_none());
-    assert!(st_w3mmd.w3mmd.is_some());
 }
 
 #[test]

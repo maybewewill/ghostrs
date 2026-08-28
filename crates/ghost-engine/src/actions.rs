@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use ghost_protocol::w3gs::{ActionBlock, incoming::OutgoingAction, outgoing};
 
-use crate::lang;
 use crate::state::{GamePhase, GameState};
 
 /// Actions beyond this many wire bytes spill into an INCOMING_ACTION2 packet.
@@ -43,20 +42,6 @@ impl GameState {
                         ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST,
                     );
                     return;
-                }
-                // Action type 6 = save game; announce it like GHost++ does
-                // (game_base.cpp:2737).
-                if !a.data.is_empty() && a.data[0] == 6 {
-                    let name = self
-                        .players
-                        .by_pid(pid)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    tracing::info!(game = %self.cfg.name, pid, name = %name, "player is saving the game");
-                    self.send_chat_all(&lang::player_is_saving_the_game(&name));
-                }
-                if let Some(w3mmd) = &mut self.w3mmd {
-                    w3mmd.process_action(&a.data);
                 }
                 self.actions.push(ActionBlock { pid, data: a.data });
             }
@@ -201,10 +186,6 @@ impl GameState {
             p.loaded = true;
             p.finished_loading_at = Some(std::time::Instant::now());
             tracing::info!(game = %self.cfg.name, pid, name = %p.name, "player finished loading");
-            let queued = std::mem::take(&mut p.load_in_game_data);
-            for pkt in queued {
-                let _ = p.link.try_send(pkt);
-            }
         }
         self.broadcast(outgoing::game_loaded_others(pid));
 
@@ -275,12 +256,19 @@ impl GameState {
             }
 
             if let (Some((s_name, s_time)), Some((l_name, l_time))) = (shortest, longest) {
-                self.send_chat_all(&lang::shortest_load_by_player(&s_name, s_time));
-                self.send_chat_all(&lang::longest_load_by_player(&l_name, l_time));
+                self.send_chat_all(&format!(
+                    "Shortest load by player [{s_name}] was {s_time:.2} seconds."
+                ));
+                self.send_chat_all(&format!(
+                    "Longest load by player [{l_name}] was {l_time:.2} seconds."
+                ));
             }
 
             for (pid, time_sec) in personal {
-                self.send_chat_to(pid, &lang::your_loading_time_was(time_sec));
+                self.send_chat_to(
+                    pid,
+                    &format!("Your loading time was {time_sec:.2} seconds."),
+                );
             }
         }
 
@@ -1203,26 +1191,6 @@ mod tests {
         let p = st.players.by_pid(1).unwrap();
         assert_eq!(p.left.as_deref(), Some("Invalid action packet"));
         assert!(st.actions.is_empty());
-    }
-
-    #[test]
-    fn a_save_game_action_notifies_everyone() {
-        // GHost++ game_base.cpp:2737: action type 6 (save game) is announced.
-        let (mut st, mut rxs) = seated_game(1);
-        st.begin_playing();
-        let _ = drain_ids(&mut rxs[0]);
-
-        let mut payload = bytes::BytesMut::new();
-        payload.extend_from_slice(&0u32.to_le_bytes()); // crc
-        bytes::BufMut::put_u8(&mut payload, 6); // save game
-        payload.extend_from_slice(&[0, 0, 0]);
-        st.handle_action(1, &payload.freeze());
-
-        let sent = drain_ids(&mut rxs[0]);
-        assert!(
-            sent.contains(&ids::CHAT_FROM_HOST),
-            "save-game must be announced, got {sent:?}"
-        );
     }
 
     #[test]

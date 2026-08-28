@@ -17,13 +17,6 @@ use tokio::task::JoinHandle;
 use crate::config::Config;
 
 #[derive(Debug, Clone)]
-pub struct AutohostConfig {
-    pub map_file: String,
-    pub game_prefix: String,
-    pub max_games: usize,
-}
-
-#[derive(Debug, Clone)]
 pub struct ActiveLobbyAdvert {
     pub game_name: String,
     pub stat_string: Vec<u8>,
@@ -71,8 +64,6 @@ pub struct Supervisor {
     udp_broadcaster: Option<UdpBroadcaster>,
     spectator_relay: Option<RelayHandle>,
     selected_map_file: Option<String>,
-    autohost: Option<AutohostConfig>,
-    autohost_counter: u32,
     host_counter: u32,
     current_game_created_at: Option<std::time::Instant>,
 }
@@ -166,8 +157,6 @@ impl Supervisor {
             udp_broadcaster,
             spectator_relay,
             selected_map_file: None,
-            autohost: None,
-            autohost_counter: 1,
             host_counter: 1,
             current_game_created_at: None,
         };
@@ -212,7 +201,6 @@ impl Supervisor {
 
                 _ = cleanup_timer.tick() => {
                     self.clean_finished_games();
-                    self.check_autohost();
                 }
 
                 Some((conn_id, stream, peer, local_port)) = self.listener_rx.recv() => {
@@ -532,30 +520,6 @@ impl Supervisor {
                     )));
                 }
             }
-            "autohost" => {
-                let args: Vec<&str> = parts.collect();
-                if args.first() == Some(&"off") {
-                    self.autohost = None;
-                    self.bnet
-                        .send(BnetCmd::SendChat(format!("/w {user} Autohost disabled.")));
-                } else if args.len() >= 2 {
-                    let map_file = args[0].to_string();
-                    let game_prefix = args[1..].join(" ");
-                    self.autohost = Some(AutohostConfig {
-                        map_file: map_file.clone(),
-                        game_prefix: game_prefix.clone(),
-                        max_games: self.cfg.bot.max_games,
-                    });
-                    self.selected_map_file = Some(map_file.clone());
-                    self.bnet.send(BnetCmd::SendChat(format!(
-                        "/w {user} Autohost enabled for map [{map_file}] prefix [{game_prefix}]."
-                    )));
-                } else {
-                    self.bnet.send(BnetCmd::SendChat(format!(
-                        "/w {user} Usage: !autohost <mapfile> <prefix> | !autohost off"
-                    )));
-                }
-            }
             "unhost" => {
                 let target_name = parts.collect::<Vec<_>>().join(" ");
                 if !target_name.is_empty() {
@@ -866,7 +830,6 @@ impl Supervisor {
                 )));
             }
             "disable" => {
-                self.autohost = None;
                 self.bnet.send(BnetCmd::SendChat(format!(
                     "/w {user} Bot hosting disabled."
                 )));
@@ -874,24 +837,6 @@ impl Supervisor {
             "enable" => {
                 self.bnet
                     .send(BnetCmd::SendChat(format!("/w {user} Bot hosting enabled.")));
-            }
-            "enforcesg" => {
-                let sg_name = parts.collect::<Vec<_>>().join(" ");
-                self.bnet.send(BnetCmd::SendChat(format!(
-                    "/w {user} Enforced savegame [{sg_name}]."
-                )));
-            }
-            "hostsg" => {
-                let sg_name = parts.collect::<Vec<_>>().join(" ");
-                self.bnet.send(BnetCmd::SendChat(format!(
-                    "/w {user} Hosting savegame [{sg_name}]."
-                )));
-            }
-            "loadsg" => {
-                let sg_name = parts.collect::<Vec<_>>().join(" ");
-                self.bnet.send(BnetCmd::SendChat(format!(
-                    "/w {user} Loaded savegame [{sg_name}]."
-                )));
             }
             "pubby" | "privby" => {
                 let visibility = if verb.eq_ignore_ascii_case("pubby") {
@@ -914,21 +859,6 @@ impl Supervisor {
                 self.bnet.send(BnetCmd::SendChat(format!(
                     "/w {user} Configuration and maps reloaded."
                 )));
-            }
-            "autohostmm" => {
-                let args: Vec<&str> = parts.collect();
-                if args.first() == Some(&"off") {
-                    self.autohost = None;
-                    self.bnet.send(BnetCmd::SendChat(format!(
-                        "/w {user} Matchmaking autohost disabled."
-                    )));
-                } else if args.len() >= 4 {
-                    let min_score = args[2].parse().unwrap_or(0.0);
-                    let max_score = args[3].parse().unwrap_or(0.0);
-                    self.bnet.send(BnetCmd::SendChat(format!(
-                        "/w {user} Matchmaking autohost enabled: min={min_score}, max={max_score}."
-                    )));
-                }
             }
             "wardenstatus" => {
                 self.bnet.send(BnetCmd::SendChat(format!(
@@ -1037,7 +967,6 @@ impl Supervisor {
             options: 0,
             map_type: "dota".into(),
             matchmaking_category: String::new(),
-            stats_w3mmd_category: "default".into(),
             default_hcl: String::new(),
             default_player_score: 1000,
             loading_in_game: false,
@@ -1142,8 +1071,6 @@ impl Supervisor {
             stat_string: stat_string.clone(),
             event_tx: Some(self.game_event_tx.clone()),
             lobby_time_limit: self.cfg.game.lobby_time_limit,
-            load_in_game: false,
-            auto_save: false,
             creator_name: owner.to_string(),
             creator_server: creator_server.to_string(),
             min_score: 0.0,
@@ -1262,19 +1189,6 @@ impl Supervisor {
         }
     }
 
-    fn check_autohost(&mut self) {
-        let Some(auto) = &self.autohost else { return };
-        if self.current_game.is_some() || self.games.len() >= auto.max_games {
-            return;
-        }
-        let name = format!("{} #{}", auto.game_prefix, self.autohost_counter);
-        let map_file = auto.map_file.clone();
-        self.autohost_counter += 1;
-        self.selected_map_file = Some(map_file);
-        let bot_name = self.cfg.bnet.username.clone();
-        self.create_game(&name, &bot_name, ghost_protocol::GameVisibility::Public);
-    }
-
     fn shutdown(&self) {
         self.bnet.send(BnetCmd::Shutdown);
         for g in &self.games {
@@ -1321,8 +1235,6 @@ impl Supervisor {
             udp_broadcaster: None,
             spectator_relay: None,
             selected_map_file: None,
-            autohost: None,
-            autohost_counter: 1,
             host_counter: 1,
             current_game_created_at: None,
         }
@@ -1347,18 +1259,6 @@ mod tests {
             "host_counter must produce distinct random values, got {}",
             seen.len()
         );
-    }
-
-    #[test]
-    fn autohost_config_stores_settings() {
-        let auto = super::AutohostConfig {
-            map_file: "dota.w3x".into(),
-            game_prefix: "Dota AP".into(),
-            max_games: 5,
-        };
-        assert_eq!(auto.map_file, "dota.w3x");
-        assert_eq!(auto.game_prefix, "Dota AP");
-        assert_eq!(auto.max_games, 5);
     }
 
     #[test]
