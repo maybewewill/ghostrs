@@ -89,7 +89,6 @@ pub fn startadvex3(
     }
     let host_counter_string = format!("{:08x}", host_counter);
     let host_counter_string: String = host_counter_string.chars().rev().collect();
-
     let mut p = BytesMut::with_capacity(40 + game_name.len() + stat_string.len());
     p.put_u8(visibility.as_u8());
     p.put_slice(&[0, 0, 0]);
@@ -353,7 +352,6 @@ mod tests {
 
         assert_eq!(pkt_pub[0], 0xFF);
         assert_eq!(pkt_pub[1], 0x1C);
-
         assert_eq!(pkt_pub[4], 16, "public game state must be 16");
         assert_eq!(&pkt_pub[5..8], &[0, 0, 0]);
 
@@ -410,7 +408,6 @@ mod tests {
     fn auth_info_declares_the_configured_war3_version() {
         let p = auth_info(26, true, 1033, "USA", "United States").unwrap();
         assert_eq!(p[1], ids::SID_AUTH_INFO);
-
         assert!(p.windows(4).any(|w| w == b"PX3W"));
     }
 

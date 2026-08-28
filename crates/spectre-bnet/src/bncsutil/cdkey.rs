@@ -404,7 +404,6 @@ fn decode_26_char_key_components(key: &str) -> Result<(u32, u32, [u8; 10]), CdKe
     decode_key_table(&mut values);
 
     let product = values[0] >> 10;
-
     let mut be_bytes = [0u8; 16];
     for i in 0..4 {
         be_bytes[i * 4..i * 4 + 4].copy_from_slice(&values[i].to_be_bytes());
@@ -413,7 +412,6 @@ fn decode_26_char_key_components(key: &str) -> Result<(u32, u32, [u8; 10]), CdKe
     let value1 =
         u32::from_le_bytes([be_bytes[2], be_bytes[3], be_bytes[4], be_bytes[5]]) & 0xFFFFFF03;
     let public_value = value1.swap_bytes();
-
     let mut w3value2 = [0u8; 10];
     w3value2[0] = be_bytes[7];
     w3value2[1] = be_bytes[6];
@@ -527,7 +525,6 @@ pub fn create_key_info(
         16u32
     };
     let product = if is_tft { 7u32 } else { info.product };
-
     let mut wire = [0u8; 36];
     wire[0..4].copy_from_slice(&key_len.to_le_bytes());
     wire[4..8].copy_from_slice(&product.to_le_bytes());

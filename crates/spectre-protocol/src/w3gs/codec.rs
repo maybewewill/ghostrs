@@ -6,7 +6,6 @@ use crate::frame::{Frame as RawFrame, HeaderCodec};
 
 pub const W3GS_HEADER: u8 = 0xF7;
 pub type W3gsCodec = HeaderCodec<W3GS_HEADER>;
-
 pub type Frame = RawFrame;
 
 pub trait W3gsFrameExt {

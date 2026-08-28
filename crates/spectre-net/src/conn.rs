@@ -168,10 +168,8 @@ where
 
     let (read_half, write_half) = stream.into_split();
     let (out_tx, mut out_rx) = mpsc::channel::<Bytes>(write_capacity);
-
     let cancel = CancellationToken::new();
     let cancel_writer = cancel.clone();
-
     let reader_events = events.clone();
     tokio::spawn(async move {
         let mut framed = FramedRead::new(read_half, C::default());
@@ -323,7 +321,6 @@ mod tests {
         let (_client, server) = connected_pair().await;
         let (tx, _rx) = mpsc::channel(16);
         let link = spawn_conn(1, server, tx, 1);
-
         let big = Bytes::from(vec![0u8; 256 * 1024]);
         let mut hit_backpressure = false;
         for _ in 0..10_000 {

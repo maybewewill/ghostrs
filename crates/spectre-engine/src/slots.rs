@@ -318,7 +318,6 @@ mod tests {
         assert_eq!(t.count_occupied(), 1);
         assert_eq!(t.count_open(), 3);
         assert_eq!(t.first_open(), Some(0));
-
         assert_eq!(t.release(7), Some(1));
         assert_eq!(t.sid_of_pid(7), None);
         assert_eq!(t.count_open(), 4);

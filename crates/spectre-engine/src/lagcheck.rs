@@ -8,10 +8,8 @@ impl GameState {
     pub fn check_lag(&mut self) -> bool {
         let limit = self.cfg.sync_limit;
         let game_sync = self.sync_counter;
-
         let mut newly_lagging: Vec<(u8, u32)> = Vec::new();
         let mut recovered: Vec<(u8, u32)> = Vec::new();
-
         let was_lagging = self.lagging;
 
         for p in self

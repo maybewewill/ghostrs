@@ -47,7 +47,6 @@ fn bench_w3gs_decode(c: &mut Criterion) {
         },
     ];
     let packet = incoming_action(&actions, 100).unwrap();
-
     let mut buffer = BytesMut::new();
     for _ in 0..1000 {
         buffer.extend_from_slice(&packet);

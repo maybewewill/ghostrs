@@ -15,14 +15,12 @@ pub const NLS_PRIME_BYTES: [u8; 32] = [
 ];
 
 pub const NLS_G: u32 = 47;
-
 pub const NLS_I: [u8; 20] = [
     0x6C, 0x0E, 0x97, 0xED, 0x0A, 0xF9, 0x6B, 0xAB, 0xB1, 0x58, 0x89, 0xEB, 0x8B, 0xBA, 0x25, 0xA4,
     0xF0, 0x8C, 0x01, 0xF8,
 ];
 
 pub const NLS_SIGNATURE_KEY: u32 = 0x10001;
-
 pub const NLS_SIG_N: [u8; 128] = [
     0xD5, 0xA3, 0xD6, 0xAB, 0x0F, 0x0D, 0xC5, 0x0F, 0xC3, 0xFA, 0x6E, 0x78, 0x9D, 0x0B, 0xE3, 0x32,
     0xB0, 0xFA, 0x20, 0xE8, 0x42, 0x19, 0xB4, 0xA1, 0x3A, 0x3B, 0xCD, 0x0E, 0x8F, 0xB5, 0x56, 0xB5,
@@ -66,13 +64,11 @@ impl NlsSession {
     pub fn new(username: &str, password: &str) -> Self {
         let n = BigUint::from_bytes_le(&NLS_PRIME_BYTES);
         let g = BigUint::from(NLS_G);
-
         let mut a_bytes = [0u8; 32];
         for b in &mut a_bytes {
             *b = rand::random();
         }
         let a = BigUint::from_bytes_le(&a_bytes) % &n;
-
         let a_biguint = g.modpow(&a, &n);
         let a_le = a_biguint.to_bytes_le();
         let mut a_pub = [0u8; 32];
@@ -91,7 +87,6 @@ impl NlsSession {
         let n = BigUint::from_bytes_le(&NLS_PRIME_BYTES);
         let g = BigUint::from(NLS_G);
         let a = BigUint::from(private_key);
-
         let a_biguint = g.modpow(&a, &n);
         let a_le = a_biguint.to_bytes_le();
         let mut a_pub = [0u8; 32];
@@ -121,7 +116,6 @@ impl NlsSession {
         let g = BigUint::from(NLS_G);
         let x = self.compute_x(salt);
         let v = g.modpow(&x, &n);
-
         let mut v_bytes = [0u8; 32];
         let v_le = v.to_bytes_le();
         let len = v_le.len().min(32);
@@ -134,7 +128,6 @@ impl NlsSession {
         let upper_pass = self.password.to_ascii_uppercase();
         let userpass = format!("{upper_user}:{upper_pass}");
         let userpass_hash = sha1_digest(userpass.as_bytes());
-
         let mut x_hasher = Sha1::new();
         x_hasher.update(salt);
         x_hasher.update(userpass_hash);
@@ -157,16 +150,13 @@ impl NlsSession {
 
         let x = self.compute_x(salt);
         let v = g.modpow(&x, &n);
-
         let u_hash = sha1_digest(server_public_key);
         let u_val = u32::from_be_bytes([u_hash[0], u_hash[1], u_hash[2], u_hash[3]]);
         let u = BigUint::from(u_val);
-
         let v_mod_n = v % &n;
         let base = (&b + &n - v_mod_n) % &n;
         let exp = &self.a + (u * x);
         let s = base.modpow(&exp, &n);
-
         let mut s_bytes = [0u8; 32];
         let s_le = s.to_bytes_le();
         let s_len = s_le.len().min(32);
@@ -183,7 +173,6 @@ impl NlsSession {
         }
         let odd_hash = sha1_digest(&odd);
         let even_hash = sha1_digest(&even);
-
         let mut k = [0u8; 40];
         for i in 0..20 {
             k[i * 2] = odd_hash[i];
@@ -199,10 +188,8 @@ impl NlsSession {
     ) -> Result<[u8; 20], NlsError> {
         let s = self.compute_s(server_public_key, salt)?;
         let k = self.compute_k(&s);
-
         let upper_user = self.username.to_ascii_uppercase();
         let username_hash = sha1_digest(upper_user.as_bytes());
-
         let mut m1_hasher = Sha1::new();
         m1_hasher.update(NLS_I);
         m1_hasher.update(username_hash);
@@ -211,7 +198,6 @@ impl NlsSession {
         m1_hasher.update(server_public_key);
         m1_hasher.update(k);
         let res = m1_hasher.finalize();
-
         let mut m1 = [0u8; 20];
         m1.copy_from_slice(&res);
         Ok(m1)
@@ -225,13 +211,11 @@ impl NlsSession {
     ) -> Result<[u8; 20], NlsError> {
         let s = self.compute_s(server_public_key, salt)?;
         let k = self.compute_k(&s);
-
         let mut m2_hasher = Sha1::new();
         m2_hasher.update(self.a_pub);
         m2_hasher.update(m1);
         m2_hasher.update(k);
         let res = m2_hasher.finalize();
-
         let mut m2 = [0u8; 20];
         m2.copy_from_slice(&res);
         Ok(m2)
@@ -280,7 +264,6 @@ impl NlsSession {
     ) -> Result<(NlsSession, NlsChangeProofPacket), NlsError> {
         let m1 = self.compute_m1(server_public_key, salt)?;
         let new_session = NlsSession::new(&self.username, new_password);
-
         let mut new_salt = [0u8; 32];
         for b in &mut new_salt {
             *b = rand::random();
@@ -305,7 +288,6 @@ pub fn check_signature(server_ip_be: u32, signature_raw: &[u8; 128]) -> bool {
     let modulus = BigUint::from_bytes_le(&NLS_SIG_N);
     let signature = BigUint::from_bytes_le(signature_raw);
     let exponent = BigUint::from(NLS_SIGNATURE_KEY);
-
     let result = signature.modpow(&exponent, &modulus);
     let res_le = result.to_bytes_le();
 
@@ -358,7 +340,6 @@ mod tests {
         let nls = NlsSession::with_private_key_for_test("testuser", "secretpass", 2u32);
         let salt = [0x19u8; 32];
         let server_pub = [0x42u8; 32];
-
         let v = nls.compute_v(&salt);
         assert_ne!(v, [0u8; 32]);
 

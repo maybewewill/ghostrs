@@ -24,12 +24,10 @@ pub struct Player {
     pub joined_realm: String,
     pub spoofed: bool,
     pub whois_sent: bool,
-
     pub sync_counter: u32,
     pub lagging: bool,
     pub started_lagging: Option<Instant>,
     pub loaded: bool,
-
     pub download_status: u8,
     pub ping_history: VecDeque<u32>,
     pub reconnect_key: u32,
@@ -42,11 +40,8 @@ pub struct Player {
     pub total_packets_received: u32,
     pub checksums: VecDeque<u32>,
     pub consecutive_send_failures: u32,
-
     pub left_code: u32,
-
     pub left: Option<String>,
-
     pub virtual_host: bool,
     pub finished_loading_at: Option<Instant>,
     pub download_allowed: bool,
@@ -236,7 +231,6 @@ mod tests {
             Err(NameMatch::Ambiguous(2))
         ));
         assert!(matches!(t.by_name_partial("zzz"), Err(NameMatch::None)));
-
         assert_eq!(t.by_name_partial("Slash").unwrap().pid, 1);
     }
 

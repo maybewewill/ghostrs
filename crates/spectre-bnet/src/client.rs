@@ -180,7 +180,6 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
         let (read_half, write_half) = stream.into_split();
         let mut framed_read = FramedRead::new(read_half, BncsCodec::default());
         let mut framed_write = FramedWrite::new(write_half, BncsCodec::default());
-
         let _ = events.send(BnetEvent::Connected).await;
 
         let auth_info_pkt =
@@ -203,15 +202,12 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
         let mut stage = Stage::AwaitAuthInfo;
         let mut active_adverts: Vec<ActiveAdvert> = Vec::new();
         let mut cur_nls: Option<NlsSession> = None;
-
         let mut advert_listed = false;
-
         let mut _friends: Vec<incoming::FriendListEntry> = Vec::new();
         let mut _clan_members: Vec<incoming::ClanMemberEntry> = Vec::new();
         let mut last_clan_invite_tag = [0u8; 4];
         let mut last_clan_invite_name = String::new();
         let mut last_invite_creation = false;
-
         let mut null_timer = tokio::time::interval(Duration::from_secs(30));
         let mut adv_timer = tokio::time::interval(Duration::from_secs(3));
         let mut probe_timer = tokio::time::interval(Duration::from_secs(10));

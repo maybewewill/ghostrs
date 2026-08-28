@@ -65,10 +65,8 @@ pub struct ChatToHost {
     pub to_pids: Vec<u8>,
     pub from_pid: u8,
     pub flag: u8,
-
     pub extra: Bytes,
     pub message: String,
-
     pub byte: u8,
 }
 
@@ -79,7 +77,6 @@ impl ChatToHost {
         let to_pids = b.try_get_bytes(count)?.to_vec();
         let from_pid = b.try_get_u8()?;
         let flag = b.try_get_u8()?;
-
         let mut extra = Bytes::new();
         let mut message = String::new();
         let mut byte = 0u8;
@@ -204,11 +201,9 @@ mod tests {
         b.put_u32_le(0xAABB_CCDD);
         b.put_slice(&[0x10, 0x20, 0x30]);
         let payload = b.freeze();
-
         let a = OutgoingAction::decode(&payload).unwrap();
         assert_eq!(a.crc, 0xAABB_CCDD);
         assert_eq!(&a.data[..], &[0x10, 0x20, 0x30]);
-
         assert_eq!(a.data.as_ptr(), payload[4..].as_ptr());
     }
 

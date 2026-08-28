@@ -47,7 +47,6 @@ mod tests {
     fn deadlines_do_not_drift_when_ticks_run_late() {
         let mut t = TickScheduler::new(Duration::from_millis(100));
         let first = t.deadline();
-
         let skipped = t.advance(first + Duration::from_millis(30));
         assert_eq!(skipped, 0);
         assert_eq!(t.deadline(), first + Duration::from_millis(100));
@@ -69,7 +68,6 @@ mod tests {
     fn reports_skipped_periods_after_a_long_stall() {
         let mut t = TickScheduler::new(Duration::from_millis(100));
         let first = t.deadline();
-
         let skipped = t.advance(first + Duration::from_millis(350));
         assert_eq!(skipped, 3);
         assert!(t.deadline() > first + Duration::from_millis(350));

@@ -43,7 +43,6 @@ mod save_tests {
         let dir = std::env::temp_dir().join("spectre-w3g-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("live.w3g");
-
         let mut b = ReplayBody::new(1, "host");
         b.set_game("test game", &[0u8; 4], 0);
         b.set_start(vec![0u8; 9], 42, 0, 1).unwrap();
@@ -68,7 +67,6 @@ mod save_tests {
         let dir = std::env::temp_dir().join("spectre-w3g-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("offthread-{}.w3g", std::process::id()));
-
         let mut b = ReplayBody::new(1, "host");
         b.set_start(vec![0u8; 9], 1, 0, 1).unwrap();
 

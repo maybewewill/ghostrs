@@ -158,10 +158,8 @@ pub fn decode_ping(payload: &Bytes) -> Result<[u8; 4], ProtoError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvListEntry {
     pub ip: [u8; 4],
-
     pub port: u16,
     pub game_name: String,
-
     pub host_counter: Option<u32>,
 }
 
@@ -220,7 +218,6 @@ pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, Proto
         .get(..nul_pos)
         .ok_or(ProtoError::UnterminatedString)?;
     let game_name = String::from_utf8_lossy(name_bytes).into_owned();
-
     let hc_start = nul_pos + 23;
     let hc_end = hc_start + 8;
     let hc_bytes = payload.get(hc_start..hc_end).ok_or(ProtoError::Truncated {
@@ -451,7 +448,6 @@ mod tests {
         assert_eq!(friends[0].status, 1);
         assert_eq!(friends[0].area, 3);
         assert_eq!(friends[0].location, "PX3WDOTA");
-
         assert_eq!(friends[1].account, "Bob");
         assert_eq!(friends[1].status, 0);
         assert_eq!(friends[1].area, 0);
@@ -480,7 +476,6 @@ mod tests {
         assert_eq!(members[0].rank, 4);
         assert_eq!(members[0].status, 1);
         assert_eq!(members[0].location, "PX3WChannel");
-
         assert_eq!(members[1].name, "PeonUser");
         assert_eq!(members[1].rank, 1);
         assert_eq!(members[1].status, 0);
@@ -511,7 +506,6 @@ mod tests {
         let warden_data = b"warden challenge payload";
         let res = decode_warden(warden_data).expect("warden decode succeeds");
         assert_eq!(&res[..], warden_data);
-
         assert!(decode_checkad(&[]).is_ok());
     }
 }

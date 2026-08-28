@@ -11,7 +11,6 @@ const REPLAY_GAME_TYPE: u32 = 0x0000_0001;
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReplayBodyError {
     StartNeverSet,
-
     InvalidSlotsLength(usize),
 }
 
@@ -46,7 +45,6 @@ pub struct ReplayBody {
     loading_blocks: Vec<Vec<u8>>,
     blocks: Vec<u8>,
     replay_length_ms: u32,
-
     published: usize,
 }
 

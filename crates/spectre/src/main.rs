@@ -8,7 +8,6 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("spectre starting");
 
     let args: Vec<String> = std::env::args().collect();
-
     let mut host_on_start = Vec::new();
     let mut start_after = None;
     let mut fake_player = false;

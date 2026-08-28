@@ -66,7 +66,6 @@ fn test_oldauth_single_and_double_hash() {
     let client_token = 0x11223344u32;
     let server_token = 0x55667788u32;
     let double = double_hash_password("secret", client_token, server_token);
-
     let mut buf = [0u8; 28];
     buf[0..4].copy_from_slice(&client_token.to_le_bytes());
     buf[4..8].copy_from_slice(&server_token.to_le_bytes());
@@ -80,7 +79,6 @@ fn test_cdkey_warcraft3_26_char() {
     let tft_key = "TAKLIBFWQWJRVGPSO68MUTV5D0";
     let client_token = 0x1122_3344;
     let server_token = 0x5566_7788;
-
     let decoder = CdKeyDecoder::new(tft_key).expect("valid TFT key");
     assert_eq!(decoder.key_type(), KeyType::WarCraft3);
     assert_eq!(decoder.product(), 13473);
@@ -137,7 +135,6 @@ fn test_cdkey_starcraft_13_char() {
     }
     let check_digit = (accum % 10) as u8 + b'0';
     let valid_sc_key = format!("{}{}", prefix, check_digit as char);
-
     let dec = CdKeyDecoder::new(&valid_sc_key).expect("valid SC key");
     assert_eq!(dec.key_type(), KeyType::StarCraft);
     assert_eq!(dec.val2_length(), 4);
@@ -196,7 +193,6 @@ fn test_check_revision_multi_file_and_flat() {
         .unwrap();
 
     let formula = "A=3845581634 B=880823580 C=1363937103 4 A=A-S B=B-C C=C-A A=A-B";
-
     let c_flat = check_revision_flat(formula, &f1, &f2, &f3, 1).expect("checksum flat");
     let c_slice = check_revision(formula, &[&f1, &f2, &f3], 1).expect("checksum slice");
     assert_eq!(c_flat, c_slice);
@@ -299,7 +295,6 @@ fn test_nls_full_exchange() {
         .compute_m2(&server_pub, &salt, &m1)
         .expect("m2 proof");
     assert_eq!(m2.len(), 20);
-
     assert!(session.check_m2(&m2, &server_pub, &salt));
     assert!(!session.check_m2(&[0u8; 20], &server_pub, &salt));
 }

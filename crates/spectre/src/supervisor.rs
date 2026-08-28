@@ -80,7 +80,6 @@ impl Supervisor {
 
         let (bnet_events_tx, bnet_events_rx) = mpsc::channel(256);
         let (bnet, _bnet_task) = spawn_bnet(cfg.bnet.clone(), bnet_events_tx);
-
         let (listener_tx, listener_rx) = mpsc::channel(256);
         let mut active_listeners = HashMap::new();
         let base_port = cfg.bot.host_port;
@@ -100,7 +99,6 @@ impl Supervisor {
         }
 
         let (reconnect_adopted_tx, reconnect_adopted_rx) = mpsc::channel(64);
-
         let (conn_event_tx, conn_event_rx) = mpsc::channel(1024);
         let (game_event_tx, game_event_rx) = mpsc::channel(64);
 
@@ -187,7 +185,6 @@ impl Supervisor {
 
         loop {
             tokio::select! {
-
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down gracefully");
                     self.shutdown();
@@ -1306,7 +1303,6 @@ mod tests {
         let (bnet_cmd_tx, mut bnet_cmd_rx) = tokio::sync::mpsc::channel(64);
         let (_bnet_event_tx, bnet_event_rx) = tokio::sync::mpsc::channel(64);
         let bnet_handle = spectre_bnet::BnetHandle::new(bnet_cmd_tx);
-
         let mut cfg = crate::config::Config::parse("").unwrap();
         cfg.bnet.root_admins.push("admin".into());
         let mut sup = super::Supervisor::new_for_test(cfg, store, bnet_handle, bnet_event_rx);
@@ -1353,7 +1349,6 @@ mod tests {
         let (bnet_cmd_tx, mut bnet_cmd_rx) = tokio::sync::mpsc::channel(64);
         let (_bnet_event_tx, bnet_event_rx) = tokio::sync::mpsc::channel(64);
         let bnet_handle = spectre_bnet::BnetHandle::new(bnet_cmd_tx);
-
         let mut cfg = crate::config::Config::parse("").unwrap();
         cfg.bnet.root_admins.push("admin".into());
         cfg.bot.port_pool_start = Some(6113);

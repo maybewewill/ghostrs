@@ -344,7 +344,6 @@ impl GameState {
 
         let fpid = self.players.next_free_pid()?;
         let slot_idx = self.slots.first_open()?;
-
         let (tx, rx) = tokio::sync::mpsc::channel(128);
         std::mem::forget(rx);
         let mut p = crate::players::Player::new(
@@ -594,7 +593,6 @@ impl GameState {
 
     pub fn send_all_actions(&mut self, skipped: u32) {
         let latency_ms = self.tick.period().as_millis() as u32;
-
         let elapsed = latency_ms.saturating_mul(skipped + 1);
         let send_interval = elapsed.min(u16::MAX as u32) as u16;
 
@@ -604,7 +602,6 @@ impl GameState {
         let queued = std::mem::take(&mut self.actions);
         let mut batch: Vec<ActionBlock> = Vec::new();
         let mut batch_len = 0usize;
-
         let mut game_over_winner = None;
 
         for action in queued {
@@ -800,7 +797,6 @@ mod tests {
 
         let raw_actions1 = ActionBlock::encode_actions_raw(&[action1]);
         let raw_actions2 = ActionBlock::encode_actions_raw(&[action2]);
-
         let mut expected_timeslot_bytes = Vec::new();
 
         expected_timeslot_bytes.push(0x1E);
@@ -1043,12 +1039,10 @@ mod tests {
         let conn1 = st.players.by_pid(1).unwrap().conn_id;
         let conn2 = st.players.by_pid(2).unwrap().conn_id;
         let conn3 = st.players.by_pid(3).unwrap().conn_id;
-
         let mut p1 = bytes::BytesMut::new();
         p1.extend_from_slice(&[0x00]);
         p1.extend_from_slice(&0x11112222u32.to_le_bytes());
         let payload1 = p1.freeze();
-
         let mut p3 = bytes::BytesMut::new();
         p3.extend_from_slice(&[0x00]);
         p3.extend_from_slice(&0x99998888u32.to_le_bytes());
@@ -1081,7 +1075,6 @@ mod tests {
 
         let conn1 = st.players.by_pid(1).unwrap().conn_id;
         let conn2 = st.players.by_pid(2).unwrap().conn_id;
-
         let mut p1 = bytes::BytesMut::new();
         p1.extend_from_slice(&[0x00]);
         p1.extend_from_slice(&0x11112222u32.to_le_bytes());
@@ -1139,7 +1132,6 @@ mod tests {
     #[test]
     fn keepalives_before_the_game_starts_are_ignored() {
         let (mut st, _rxs) = seated_game(1);
-
         let mut p = bytes::BytesMut::new();
         bytes::BufMut::put_u8(&mut p, 0);
         bytes::BufMut::put_u32_le(&mut p, 0xDEAD);

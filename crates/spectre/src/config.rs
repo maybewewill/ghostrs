@@ -65,7 +65,6 @@ pub struct GameDefaults {
 pub struct SpectatorConfig {
     pub enabled: bool,
     pub port: u16,
-
     pub dotatv_enabled: bool,
     pub dotatv_port: u16,
     pub delay: Duration,
@@ -466,7 +465,6 @@ impl Config {
         let game = toml_cfg.game.unwrap_or_default();
         let spectator = toml_cfg.spectator.unwrap_or_default();
         let database = toml_cfg.database.unwrap_or_default();
-
         let mut maps = HashMap::new();
         for (k, v) in toml_cfg.maps {
             maps.insert(k, v.into());
@@ -580,7 +578,6 @@ impl Config {
             .and_then(|s| s.chars().next())
             .unwrap_or('!');
         let bnet_war3_version = parse_int(&map, "bnet_custom_war3version", 26)? as u8;
-
         let latency_ms = parse_int(&map, "bot_latency", 100)?;
         let sync_limit = parse_int(&map, "bot_synclimit", 50)?;
         let reconnect_wait_sec = parse_int(&map, "bot_reconnectwaittime", 180)?;
@@ -592,7 +589,6 @@ impl Config {
         let spoof_checks = parse_int(&map, "bnet_spoofchecks", 0)? as u8;
         let require_spoof_checks = parse_bool(&map, "bnet_requirespoofchecks", false);
         let lobby_time_limit = parse_int(&map, "bot_lobbytimelimit", 10).unwrap_or(10) as u32;
-
         let spectator_enabled = parse_bool(&map, "spectator_enabled", false);
         let spectator_port = parse_int(&map, "spectator_port", 6115)?;
         let spectator_dotatv_enabled = parse_bool(&map, "spectator_dotatv_enabled", true);

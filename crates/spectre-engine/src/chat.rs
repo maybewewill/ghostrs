@@ -1448,7 +1448,6 @@ mod tests {
 
         assert!(!st.apply_slot_request(1, 0x11, 1));
         assert_eq!(st.slots.as_wire()[0].team, 0, "team must be unchanged");
-
         assert!(!st.apply_slot_request(1, 0x11, 2));
         assert_eq!(st.slots.as_wire()[0].team, 0);
     }
@@ -1491,7 +1490,6 @@ mod tests {
 
         assert!(!st.apply_slot_request(1, 0x13, 3));
         assert_eq!(st.slots.as_wire()[0].race, 0x20);
-
         assert!(st.apply_slot_request(1, 0x13, 1));
         assert_eq!(st.slots.as_wire()[0].race, 0x41);
 

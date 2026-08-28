@@ -10,7 +10,6 @@ use crate::state::GameState;
 #[derive(Debug, Clone)]
 pub struct GProxyBuffer {
     capacity: usize,
-
     first_packet_id: u32,
     packets: VecDeque<Bytes>,
 }
@@ -295,9 +294,7 @@ mod tests {
 
         let port = u32::from_le_bytes([sent[4], sent[5], sent[6], sent[7]]);
         assert_eq!(port, 6114);
-
         assert_eq!(sent[8], 1);
-
         assert_eq!(sent[13], 2);
     }
 }

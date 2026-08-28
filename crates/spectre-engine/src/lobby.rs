@@ -7,7 +7,6 @@ use crate::state::{GamePhase, GameState};
 pub const REJECT_FULL: u32 = 0x09;
 pub const REJECT_STARTED: u32 = 0x0A;
 pub const REJECT_WRONG_PASSWORD: u32 = 0x1B;
-
 pub const MAX_SLOTS: usize = 24;
 
 impl GameState {

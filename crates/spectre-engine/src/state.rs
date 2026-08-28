@@ -22,10 +22,8 @@ pub struct MapInfo {
     pub height: u16,
     pub game_type: u32,
     pub flags: u32,
-
     pub data: Option<Arc<Vec<u8>>>,
     pub layout_style: u8,
-
     pub options: u32,
     pub map_type: String,
     pub matchmaking_category: String,
@@ -168,7 +166,6 @@ pub struct GameState {
     pub slots: SlotTable,
     pub players: PlayerTable,
     pub tick: TickScheduler,
-
     pub pending: Vec<(u64, PlayerLink, [u8; 4])>,
     pub actions: Vec<ActionBlock>,
     pub sync_counter: u32,
@@ -184,9 +181,7 @@ pub struct GameState {
     pub last_download_tick: Instant,
     pub relay: Option<spectre_spectator::RelayHandle>,
     pub replay: Option<spectre_spectator::ReplayBody>,
-
     pub dotatv: Option<std::sync::Arc<spectre_spectator::DotaTvShared>>,
-
     pub dotatv_prologue_sent: bool,
     pub store: Option<spectre_store::Store>,
     pub jitter_histogram: [u64; 5],
@@ -207,7 +202,6 @@ pub struct GameState {
     pub announce_message: Option<String>,
     pub announce_interval: Duration,
     pub last_announce_time: Option<Instant>,
-
     pub virtual_host_pid: u8,
     pub started_loading_at: Option<Instant>,
     pub last_ping_at: Instant,
@@ -244,7 +238,6 @@ impl GameState {
         };
         let tick = TickScheduler::new(cfg.latency);
         let relay = cfg.relay.clone();
-
         let replay_stat_string = Self::build_replay_stat_string(&cfg);
         let mut replay = spectre_spectator::ReplayBody::new(255, &cfg.virtual_host_name);
         replay.set_game(&cfg.name, &replay_stat_string, cfg.map.game_type);

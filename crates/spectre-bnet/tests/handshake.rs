@@ -15,7 +15,6 @@ async fn bnet_client_completes_handshake_to_login() {
 
     let server_task = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-
         let mut proto_byte = [0u8; 1];
         stream.read_exact(&mut proto_byte).await.unwrap();
         assert_eq!(proto_byte[0], 0x01);
@@ -137,7 +136,6 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
 
     let server_task = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-
         let mut proto_byte = [0u8; 1];
         stream.read_exact(&mut proto_byte).await.unwrap();
 

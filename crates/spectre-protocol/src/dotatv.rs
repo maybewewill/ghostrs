@@ -17,7 +17,6 @@ pub mod ids {
     pub const CHAT: u8 = 0x05;
     pub const GAME_OVER: u8 = 0x06;
     pub const HISTORY_END: u8 = 0x07;
-
     pub const SUBSCRIBE: u8 = 0x80;
     pub const CLIENT_CHAT: u8 = 0x81;
 }
@@ -141,7 +140,6 @@ pub fn decode_snapshot(payload: &[u8]) -> Result<GameStartSnapshot, ProtoError> 
     let war3_version = b.try_get_u8()?;
     let is_tft = b.try_get_u8()? != 0;
     let num_slots = b.try_get_u8()? as usize;
-
     let mut slots = Vec::with_capacity(num_slots);
     for _ in 0..num_slots {
         let pid = b.try_get_u8()?;

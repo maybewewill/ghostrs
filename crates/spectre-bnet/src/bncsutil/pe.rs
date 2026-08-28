@@ -67,7 +67,6 @@ pub fn extract_pe_fixed_file_info(data: &[u8]) -> Option<PeFixedFileInfo> {
 
     let opt_hdr_offset = pe_offset + 24;
     let sections_offset = opt_hdr_offset + opt_hdr_size;
-
     let mut rsrc_virt_addr = None;
     let mut rsrc_raw_offset = None;
     let mut rsrc_raw_size = None;

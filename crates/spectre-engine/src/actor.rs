@@ -29,7 +29,6 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
 
     loop {
         tokio::select! {
-
             biased;
 
             cmd = rx.recv() => {

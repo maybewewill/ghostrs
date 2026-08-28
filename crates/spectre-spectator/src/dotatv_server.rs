@@ -11,24 +11,15 @@ use tokio::sync::{Notify, RwLock, broadcast};
 use crate::dotatv::{DotaTvError, DotaTvStream, GREETING};
 
 pub const MODE_BOOTSTRAP: u8 = 0;
-
 pub const MODE_STREAM: u8 = 1;
-
 pub const MODE_BOOTSTRAP_FULL: u8 = 2;
-
 pub const MODE_CHAT: u8 = 3;
-
 pub const MODE_STREAM_LIVE: u8 = 4;
-
 pub const MODE_STREAM_STATUS: u8 = 5;
-
 pub const STREAM_DELAY: Duration = Duration::from_secs(180);
-
 const CHAT_KIND_CHAT: u8 = 0;
 const CHAT_KIND_PING: u8 = 1;
-
 const CHAT_MAX_TEXT: usize = 255;
-
 const CHAT_RATE_WINDOW: Duration = Duration::from_secs(5);
 const CHAT_RATE_MAX: u32 = 1;
 
@@ -62,15 +53,10 @@ pub struct DotaTvShared {
     stream: RwLock<DotaTvStream>,
     chunks_ready: Notify,
     replay_length_ms: AtomicU32,
-
     last_marker_ms: AtomicU32,
-
     heartbeat_enabled: AtomicU32,
-
     heartbeat_pid: AtomicU32,
-
     stream_delay_ms: AtomicU32,
-
     chat: ChatRelay,
 }
 
@@ -226,7 +212,6 @@ pub async fn publish_pending(
 }
 
 const VIEWER_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-
 const IDLE_TICK: Duration = Duration::from_millis(50);
 
 pub async fn serve(addr: SocketAddr, shared: Arc<DotaTvShared>) -> io::Result<()> {
@@ -476,7 +461,6 @@ async fn serve_stream_with(
     let mut idx = [0u8; 4];
     sock.read_exact(&mut idx).await?;
     let mut cursor = u32::from_le_bytes(idx) as usize;
-
     let available = shared.chunk_count().await;
     if cursor > available {
         return Err(io::Error::new(
@@ -495,7 +479,6 @@ async fn serve_stream_with(
 
         let batch = {
             let stream = shared.stream.read().await;
-
             let count = stream.count_delayed(delay);
             let mut batch = Vec::with_capacity(count.saturating_sub(cursor));
             for i in cursor..count {
@@ -548,7 +531,6 @@ mod tests {
         let valid = u16::from_le_bytes([header[2], header[3]]);
         let crc = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
         let compressed = read_exact_n(sock, comp_size).await;
-
         let mut raw = Vec::new();
         flate2::read::ZlibDecoder::new(&compressed[..])
             .read_to_end(&mut raw)
@@ -644,7 +626,6 @@ mod tests {
     async fn chat_fans_out_to_all_viewers_with_stamped_sender_and_self_echo() {
         let shared = DotaTvShared::new(DotaTvStream::for_126a());
         let addr = start_server(Arc::clone(&shared)).await;
-
         let (mut a, id_a) = connect_chat(addr).await;
         let (mut b, id_b) = connect_chat(addr).await;
         assert_eq!(id_a, 1);
@@ -711,7 +692,6 @@ mod tests {
         shared.push_body(&vec![0xB2; CHUNK_SIZE * 3]).await.unwrap();
         shared.flush().await.unwrap();
         let total = shared.chunk_count().await;
-
         let addr = start_server(Arc::clone(&shared)).await;
         let mut sock = TcpStream::connect(addr).await.unwrap();
         assert_eq!(read_exact_n(&mut sock, 4).await, GREETING);
@@ -757,7 +737,6 @@ mod tests {
         shared.set_replay_length(31_337);
 
         let addr = start_server(Arc::clone(&shared)).await;
-
         let mut sock = TcpStream::connect(addr).await.unwrap();
         assert_eq!(read_exact_n(&mut sock, 4).await, GREETING);
         sock.write_all(&[MODE_BOOTSTRAP, 0, 0, 0, 0]).await.unwrap();
@@ -768,7 +747,6 @@ mod tests {
         let file = read_exact_n(&mut sock, file_len).await;
 
         assert_eq!(&file[..28], b"Warcraft III recorded game\x1A\0");
-
         assert_eq!(start_index, 0, "header-only bootstrap resumes at frame 0");
         let blocks = u32::from_le_bytes([file[44], file[45], file[46], file[47]]) as usize;
         assert_eq!(blocks, 0, "bootstrap must carry no replay body");
@@ -809,7 +787,6 @@ mod tests {
     async fn an_unknown_mode_byte_is_refused() {
         let shared = DotaTvShared::new(DotaTvStream::for_126a());
         let addr = start_server(Arc::clone(&shared)).await;
-
         let mut sock = TcpStream::connect(addr).await.unwrap();
         assert_eq!(read_exact_n(&mut sock, 4).await, GREETING);
         sock.write_all(&[0xEE]).await.unwrap();
@@ -976,7 +953,6 @@ mod tests {
     async fn a_bootstrap_requested_before_the_match_starts_is_refused() {
         let shared = DotaTvShared::new(DotaTvStream::for_126a());
         let addr = start_server(Arc::clone(&shared)).await;
-
         let mut sock = TcpStream::connect(addr).await.unwrap();
         assert_eq!(read_exact_n(&mut sock, 4).await, GREETING);
         sock.write_all(&[MODE_BOOTSTRAP, 0, 0, 0, 0]).await.unwrap();
@@ -1011,7 +987,6 @@ mod tests {
 
         let shared = DotaTvShared::new(DotaTvStream::for_126a());
         let addr = start_short_timeout_server(Arc::clone(&shared)).await;
-
         let std_sock = socket2::Socket::from(std::net::TcpStream::connect(addr).unwrap());
         let _ = std_sock.set_recv_buffer_size(8192);
         let _ = std_sock.set_nonblocking(true);

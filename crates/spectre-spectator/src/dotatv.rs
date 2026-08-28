@@ -8,11 +8,8 @@ use flate2::write::ZlibEncoder;
 use crate::w3g::W3gWriter;
 
 pub const CHUNK_SIZE: usize = 8192;
-
 pub const GREETING: [u8; 4] = *b"DTV1";
-
 const MAX_FRAME: usize = CHUNK_SIZE;
-
 const EMPTY_TIMESLOT: [u8; 5] = [0x1F, 0x02, 0x00, 0x00, 0x00];
 
 fn crc_table() -> [u32; 256] {
@@ -45,9 +42,7 @@ pub fn crc32(data: &[u8]) -> u32 {
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub compressed: Arc<Vec<u8>>,
-
     pub valid_bytes: u16,
-
     pub crc: u32,
 }
 
@@ -70,21 +65,15 @@ pub enum DotaTvError {
 
 pub struct DotaTvStream {
     raw: Vec<u8>,
-
     raw_base: usize,
     frames: Vec<Chunk>,
-
     frame_times: Vec<Instant>,
-
     framed_len: usize,
-
     prologue: Vec<u8>,
-
     prologue_end: usize,
     war3_version: u32,
     build: u16,
     tft: bool,
-
     crc_reg: u32,
     crc_table: [u32; 256],
 }
@@ -141,7 +130,6 @@ impl DotaTvStream {
                 .min(start_abs + MAX_FRAME);
             let end = end_abs - self.raw_base;
             let slice = &self.raw[self.framed_len..end];
-
             let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
             enc.write_all(slice)
                 .expect("zlib encode into Vec cannot fail");
@@ -226,7 +214,6 @@ impl DotaTvStream {
              mark_prologue_end must run before any trim could drop prologue bytes"
         );
         let prefix = self.prologue_end.min(self.published_len());
-
         let mut writer = W3gWriter::new(self.war3_version, self.build, self.tft);
         writer.set_replay_length(replay_length_ms);
 
@@ -310,7 +297,6 @@ mod tests {
         s.push_body(&[0x11; 100]).unwrap();
         assert_eq!(s.chunk_count(), 0, "push alone must not publish");
         assert_eq!(s.pending_len(), 100);
-
         assert_eq!(s.flush().unwrap(), 1);
         assert_eq!(s.chunk_count(), 1);
         assert_eq!(s.published_len(), 100);
@@ -323,9 +309,7 @@ mod tests {
         s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
         s.flush().unwrap();
         assert_eq!(s.chunk_count(), 1);
-
         assert_eq!(s.count_delayed(Duration::ZERO), 1);
-
         assert_eq!(s.count_delayed(Duration::from_secs(60)), 0);
 
         std::thread::sleep(Duration::from_millis(40));
@@ -343,7 +327,6 @@ mod tests {
         s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
         s.flush().unwrap();
         assert_eq!(s.chunk_count(), 2);
-
         assert_eq!(s.count_delayed(Duration::from_millis(20)), 1);
 
         std::thread::sleep(Duration::from_millis(40));
@@ -443,7 +426,6 @@ mod tests {
     #[test]
     fn a_long_match_streams_its_whole_history_without_a_hole() {
         let mut s = DotaTvStream::for_126a();
-
         let total = CHUNK_SIZE * 20 + 777;
         for i in 0..total / 5 {
             let t = (i % 251) as u8;
@@ -471,7 +453,6 @@ mod tests {
         s.push_body(&vec![0x66; CHUNK_SIZE * 2]).unwrap();
         s.flush().unwrap();
         let (_, next_index) = s.bootstrap(0);
-
         let live: Vec<u8> = (0..CHUNK_SIZE).map(|i| (i % 97) as u8).collect();
         s.push_body(&live).unwrap();
         s.flush().unwrap();
@@ -497,7 +478,6 @@ mod tests {
         s.push_body(&vec![0x77; 4096]).unwrap();
         s.flush().unwrap();
         let chunk = s.chunk(0).unwrap();
-
         let frame = chunk.frame();
         let comp_size = u16::from_le_bytes([frame[0], frame[1]]) as usize;
         let valid = u16::from_le_bytes([frame[2], frame[3]]) as usize;
@@ -545,13 +525,11 @@ mod tests {
     #[test]
     fn bootstrap_is_stable_across_raw_trimming() {
         let prologue: Vec<u8> = (0..500).map(|i| (i % 13) as u8).collect();
-
         let mut early = DotaTvStream::for_126a();
         early.push_body(&prologue).unwrap();
         early.flush().unwrap();
         early.mark_prologue_end();
         let (want_file, want_resume) = early.bootstrap(777);
-
         let mut late = DotaTvStream::for_126a();
         late.push_body(&prologue).unwrap();
         late.flush().unwrap();

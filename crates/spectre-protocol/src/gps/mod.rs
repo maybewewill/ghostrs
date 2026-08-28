@@ -15,9 +15,7 @@ pub mod ids {
 }
 
 pub mod reject_reason {
-
     pub const NOT_FOUND: u32 = 0x01;
-
     pub const INVALID_KEY: u32 = 0x02;
 }
 
@@ -60,7 +58,6 @@ pub fn reject(reason: u32) -> Bytes {
 pub struct ReconnectReq {
     pub pid: u8,
     pub reconnect_key: u32,
-
     pub last_packet: u32,
 }
 

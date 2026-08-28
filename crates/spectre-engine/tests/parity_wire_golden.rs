@@ -12,7 +12,6 @@ fn parity_wire_b1_map_transfer_packets_use_host_pid() {
     st.cfg.map.size = 10_000;
     st.cfg.map.data = Some(std::sync::Arc::new(vec![0x77; 10_000]));
     let _ = drain_ids(&mut rxs[0]);
-
     let mut p = BytesMut::new();
     p.put_slice(&[0, 0, 0, 0]);
     p.put_u8(1);
@@ -227,7 +226,6 @@ fn parity_wire_p1_2_replay_contains_real_statstring() {
 
     let rep = st.replay.take().expect("replay exists");
     let (body, _) = rep.finish().expect("finish replay");
-
     let game_name_bytes = b"test\0";
     let name_pos = body
         .windows(game_name_bytes.len())
@@ -366,7 +364,6 @@ fn parity_wire_p1_7_replay_host_pid_and_name() {
 fn parity_wire_p1_8_relay_receives_in_game_chat_and_game_over() {
     let (relay_tx, mut relay_rx) = tokio::sync::mpsc::channel(64);
     let relay_handle = spectre_spectator::RelayHandle::new(relay_tx);
-
     let (mut st, _rxs) = seated_game(2);
     st.relay = Some(relay_handle);
     st.begin_playing();
@@ -438,7 +435,6 @@ fn parity_wire_p1_9_replay_chat_preserves_flag_and_extra() {
 
     let rep = st.replay.take().expect("replay exists");
     let (body, _) = rep.finish().expect("finish replay");
-
     let msg_bytes = b"allied chat message\0";
     let pos = body
         .windows(msg_bytes.len())

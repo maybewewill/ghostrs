@@ -193,7 +193,6 @@ fn parity_c8_in_game_commands_openall_closeall_votekick_lock() {
 #[test]
 fn test_p2_1_kick_marks_player_left_without_sending_0x1c() {
     let kick_id = spectre_protocol::w3gs::ids::HOST_KICK_PLAYER;
-
     let (mut st, mut rxs) = seated_game(2);
     st.cfg.owner = "slash".into();
     st.run_command(1, "slash", ChatCommand::Kick("P2".into()));

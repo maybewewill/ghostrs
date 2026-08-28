@@ -13,23 +13,19 @@ use spectre_protocol::w3gs::SlotInfo;
 pub const MAPSPEED_SLOW: u8 = 1;
 pub const MAPSPEED_NORMAL: u8 = 2;
 pub const MAPSPEED_FAST: u8 = 3;
-
 pub const MAPVIS_HIDETERRAIN: u8 = 1;
 pub const MAPVIS_EXPLORED: u8 = 2;
 pub const MAPVIS_ALWAYSVISIBLE: u8 = 3;
 pub const MAPVIS_DEFAULT: u8 = 4;
-
 pub const MAPOBS_NONE: u8 = 1;
 pub const MAPOBS_ONDEFEAT: u8 = 2;
 pub const MAPOBS_ALLOWED: u8 = 3;
 pub const MAPOBS_REFEREES: u8 = 4;
-
 pub const MAPFLAG_TEAMSTOGETHER: u8 = 1;
 pub const MAPFLAG_FIXEDTEAMS: u8 = 2;
 pub const MAPFLAG_UNITSHARE: u8 = 4;
 pub const MAPFLAG_RANDOMHERO: u8 = 8;
 pub const MAPFLAG_RANDOMRACES: u8 = 16;
-
 pub const MAPOPT_HIDEMINIMAP: u32 = 1 << 0;
 pub const MAPOPT_MODIFYALLYPRIORITIES: u32 = 1 << 1;
 pub const MAPOPT_MELEE: u32 = 1 << 2;
@@ -39,7 +35,6 @@ pub const MAPOPT_CUSTOMFORCES: u32 = 1 << 6;
 pub const MAPOPT_CUSTOMTECHTREE: u32 = 1 << 7;
 pub const MAPOPT_CUSTOMABILITIES: u32 = 1 << 8;
 pub const MAPOPT_CUSTOMUPGRADES: u32 = 1 << 9;
-
 pub const MAPFILTER_MAKER_USER: u8 = 1;
 pub const MAPFILTER_MAKER_BLIZZARD: u8 = 2;
 pub const MAPFILTER_TYPE_MELEE: u8 = 1;
@@ -50,7 +45,6 @@ pub const MAPFILTER_SIZE_LARGE: u8 = 4;
 pub const MAPFILTER_OBS_FULL: u8 = 1;
 pub const MAPFILTER_OBS_ONDEATH: u8 = 2;
 pub const MAPFILTER_OBS_NONE: u8 = 4;
-
 pub const MAPGAMETYPE_MAKERUSER: u32 = 1 << 13;
 pub const MAPGAMETYPE_MAKERBLIZZARD: u32 = 1 << 14;
 pub const MAPGAMETYPE_TYPEMELEE: u32 = 1 << 15;
@@ -274,7 +268,6 @@ impl ParsedMap {
 
         let mut val: u32 = 0;
         let mut hasher = Sha1::new();
-
         let mut overrode_common_j = false;
         if let Ok(file) = map_archive.open_file("Scripts\\common.j") {
             let mut buf = vec![0u8; file.size() as usize];
@@ -355,7 +348,6 @@ impl ParsedMap {
         let mut height = 128u16;
         let mut num_teams = 2u8;
         let mut editor_version = 0u32;
-
         let mut slots = Vec::new();
         let mut map_options = 0u32;
 
@@ -378,7 +370,6 @@ impl ParsedMap {
                                 let _ = read_cstring(&mut cursor);
                             }
                             let _ = cursor.seek(SeekFrom::Current(32 + 16));
-
                             let _ = cursor.read_exact(&mut u32_buf);
                             let raw_w = u32::from_le_bytes(u32_buf) as u16;
                             let _ = cursor.read_exact(&mut u32_buf);
@@ -551,7 +542,6 @@ impl ParsedMap {
             ovr.and_then(|o| o.max_slots),
         );
         let num_players = ovr.and_then(|o| o.num_players).unwrap_or(slots.len() as u8);
-
         let flags = calculate_game_flags(speed, visibility, observers, map_flags);
 
         let default_filter_type = if map_options & MAPOPT_MELEE != 0 {
@@ -569,7 +559,6 @@ impl ParsedMap {
             .and_then(|o| o.filter_size)
             .unwrap_or(MAPFILTER_SIZE_LARGE);
         let filter_obs = ovr.and_then(|o| o.filter_obs).unwrap_or(MAPFILTER_OBS_NONE);
-
         let mut game_type = calculate_game_type(filter_maker, filter_type, filter_size, filter_obs);
         if let Some(gt) = ovr.and_then(|o| o.game_type) {
             game_type = gt;

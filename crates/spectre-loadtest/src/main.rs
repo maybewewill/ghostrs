@@ -151,7 +151,6 @@ async fn run_client(
 
                 match frame.id {
                     ids::SLOT_INFO_JOIN => {
-
                         let p = &frame.payload;
                         if p.len() >= 3 {
                             let num_slots = p[2] as usize;
@@ -171,7 +170,6 @@ async fn run_client(
                         }
                     }
                     ids::MAP_CHECK => {
-
                         let size = map_size_from_mapcheck(&frame.payload).unwrap_or(1000);
                         let _ = framed_write.send(mapsize_bytes(size)).await;
                     }
@@ -314,7 +312,6 @@ async fn run_viewer(
     let mut req = vec![1u8];
     req.extend_from_slice(&start_index.to_le_bytes());
     let _ = sock.write_all(&req).await;
-
     let deadline = Instant::now() + duration;
     let mut last_frame = Instant::now();
     let mut local_gaps = Vec::new();
@@ -365,7 +362,6 @@ async fn main() -> anyhow::Result<()> {
     let mut tv_addr = "127.0.0.1:6116".to_string();
     let mut viewers = 0usize;
     let mut viewer_delay_secs = 0u64;
-
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {

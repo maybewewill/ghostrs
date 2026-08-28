@@ -27,7 +27,6 @@ pub fn get_exe_info(file_path: &Path, platform: u32) -> Result<ExeInfo, std::io:
     let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
     let duration = modified.duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = duration.as_secs();
-
     let (yy, month, day, hours, mins, seconds) = timestamp_to_utc_parts(secs);
 
     let info_str = format!(
@@ -67,7 +66,6 @@ fn timestamp_to_utc_parts(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
     let hour = (rem / 3600) as u32;
     let min = ((rem % 3600) / 60) as u32;
     let sec = (rem % 60) as u32;
-
     let z = days + 719468;
     let era = z / 146097;
     let doe = z - era * 146097;

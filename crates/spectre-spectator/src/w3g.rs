@@ -5,7 +5,6 @@ use flate2::write::ZlibEncoder;
 
 const HEADER_SIZE: u32 = 68;
 const BLOCK_SIZE: usize = 8192;
-
 const FLAGS_MULTIPLAYER: u16 = 0xC000;
 
 pub struct W3gWriter {
@@ -66,7 +65,6 @@ impl W3gWriter {
 
         let compressed_total: usize = blocks.iter().map(|b| b.len()).sum();
         let file_size = HEADER_SIZE as usize + compressed_total + blocks.len() * 8;
-
         let mut header = Vec::with_capacity(HEADER_SIZE as usize);
         header.extend_from_slice(b"Warcraft III recorded game\x1A\0");
         header.extend_from_slice(&HEADER_SIZE.to_le_bytes());
@@ -151,10 +149,8 @@ mod tests {
     #[test]
     fn every_block_decompresses_to_exactly_8192_bytes() {
         let w = W3gWriter::new(26, 6059, true);
-
         let body = vec![0x5Au8; 8192 * 2 + 7];
         let out = w.pack(&body);
-
         let n_blocks = read_u32(&out, 44) as usize;
         assert_eq!(n_blocks, 3);
         assert_eq!(
@@ -190,7 +186,6 @@ mod tests {
         let w = W3gWriter::new(26, 6059, true);
         let out = w.pack(&[1u8; 10]);
         let c_len = u16::from_le_bytes([out[68], out[69]]) as usize;
-
         let mut bh = out[68..76].to_vec();
         bh[4..8].copy_from_slice(&0u32.to_le_bytes());
         let crc1 = {
@@ -214,9 +209,7 @@ mod tests {
         let body = vec![0x42u8; 8192 * 2 + 7];
         let w = W3gWriter::new(26, 6059, true);
         let out = w.pack(&body);
-
         let block_count = read_u32(&out, 44) as usize;
-
         let mut decompressed = Vec::new();
         let mut pos = 68;
         for _ in 0..block_count {

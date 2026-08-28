@@ -216,7 +216,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         history_max_mb: 64,
     };
     let (relay_handle, relay_cmd_tx, relay_join) = spawn_relay_actor(relay_cfg);
-
     let mut st = GameState::new(test_game_cfg(relay_handle));
     let mut player_rxs = Vec::new();
     for i in 1..=3 {

@@ -3,18 +3,13 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SlotInfo {
     pub pid: u8,
-
     pub download_status: u8,
-
     pub slot_status: u8,
-
     pub computer: u8,
     pub team: u8,
     pub colour: u8,
     pub race: u8,
-
     pub computer_type: u8,
-
     pub handicap: u8,
 }
 

@@ -218,7 +218,6 @@ impl Relay {
 pub fn spawn_relay(cfg: RelayConfig) -> (RelayHandle, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(1024);
     let handle = RelayHandle::new(tx.clone());
-
     let port = cfg.port;
     if port > 0 {
         let tx_clone = tx.clone();
@@ -228,7 +227,6 @@ pub fn spawn_relay(cfg: RelayConfig) -> (RelayHandle, JoinHandle<()>) {
                 tracing::info!(%addr, "spectator relay listening for DotaTV viewers");
                 let mut conn_counter = 100_000u64;
                 let (conn_tx, mut conn_rx) = mpsc::channel(256);
-
                 let tx_events = tx_clone.clone();
                 tokio::spawn(async move {
                     while let Some(ev) = conn_rx.recv().await {
@@ -306,7 +304,6 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
                         }
                     }
                     Some(RelayCmd::GameBlock(block)) => {
-
                         let release_at = Instant::now() + relay.cfg.delay;
                         relay.delayed_blocks.push_back((release_at, block));
                         relay.release_due_blocks();
@@ -331,7 +328,6 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
                         }
                     }
                     Some(RelayCmd::GameOver) => {
-
                         while let Some((_, block)) = relay.delayed_blocks.pop_front() {
                             if let Ok(framed) = encode_action(&block) {
                                 relay.broadcast(&framed);
@@ -460,7 +456,6 @@ mod tests {
             history_max_mb: 64,
         };
         let mut relay = Relay::new(cfg);
-
         let (tx, _rx) = mpsc::channel(1);
         let link = PlayerLink::for_test(tx);
         relay.add_viewer(1, link).unwrap();
@@ -568,11 +563,9 @@ mod tests {
         let (hello_ver, hello_server) = decode_hello(&frames[0][4..]).unwrap();
         assert_eq!(hello_ver, 1);
         assert_eq!(hello_server, "spectre");
-
         assert_eq!(frames[1][0], 0xFD);
         let decoded_snap = decode_snapshot(&frames[1][4..]).unwrap();
         assert_eq!(decoded_snap, expected_snap);
-
         assert_eq!(frames[2][0], 0xFD);
         let p1 = decode_player(&frames[2][4..]).unwrap();
         assert_eq!(
@@ -602,15 +595,12 @@ mod tests {
         assert_eq!(frames[4][0], 0xFD);
         let act1 = decode_action(&frames[4][4..]).unwrap();
         assert_eq!(act1, block1);
-
         assert_eq!(frames[5][0], 0xFD);
         let act2 = decode_action(&frames[5][4..]).unwrap();
         assert_eq!(act2, block2);
-
         assert_eq!(frames[6][0], 0xFD);
         let act3 = decode_action(&frames[6][4..]).unwrap();
         assert_eq!(act3, block3);
-
         assert_eq!(frames[7][0], 0xFD);
         let history_count = decode_history_end(&frames[7][4..]).unwrap();
         assert_eq!(history_count, 3);

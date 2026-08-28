@@ -6,7 +6,6 @@ use spectre_protocol::w3gs::{incoming, incoming::MapSizeReport, outgoing};
 use crate::state::{GamePhase, GameState};
 
 pub const MAP_CHUNK: usize = 1442;
-
 pub const MAX_PARTS_PER_TICK: usize = 10;
 
 #[derive(Debug, Clone)]
@@ -295,7 +294,6 @@ mod tests {
         st.cfg.map.size = 100_000;
         st.cfg.map.data = Some(std::sync::Arc::new(vec![0u8; 100_000]));
         let _ = drain_ids(&mut rxs[0]);
-
         let mut p = bytes::BytesMut::new();
         bytes::BufMut::put_slice(&mut p, &[0, 0, 0, 0]);
         bytes::BufMut::put_u8(&mut p, 1);
@@ -305,7 +303,6 @@ mod tests {
         assert_eq!(st.downloads.len(), 1);
         let first_pkt = rxs[0].try_recv().expect("must receive START_DOWNLOAD");
         assert_eq!(first_pkt[1], ids::START_DOWNLOAD);
-
         assert_eq!(first_pkt[4], 1, "START_DOWNLOAD fromPID must be host PID");
     }
 
@@ -321,7 +318,6 @@ mod tests {
 
         let part_pkt = rxs[0].try_recv().expect("must receive MAP_PART");
         assert_eq!(part_pkt[1], ids::MAP_PART);
-
         assert_eq!(part_pkt[4], 1, "MAP_PART fromPID must be host PID");
         assert_eq!(part_pkt[5], 1, "MAP_PART toPID must be receiver PID");
     }
@@ -402,7 +398,6 @@ mod tests {
         st.downloads.push(d);
 
         let _ = drain_ids(&mut rxs[0]);
-
         let mut p = bytes::BytesMut::new();
         bytes::BufMut::put_u8(&mut p, 1);
         bytes::BufMut::put_u8(&mut p, 1);

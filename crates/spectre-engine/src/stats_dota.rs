@@ -32,7 +32,6 @@ impl DotAPlayerStats {
 #[derive(Debug, Clone, Default)]
 pub struct StatsDotA {
     pub players: HashMap<u32, DotAPlayerStats>,
-
     pub winner: u32,
     pub duration_min: u32,
     pub duration_sec: u32,
@@ -91,7 +90,6 @@ impl StatsDotA {
                     action_data[val_start + 3],
                 ]);
                 let value_raw = &action_data[val_start..val_start + 4];
-
                 let data_str = String::from_utf8_lossy(data_bytes);
                 let key_str = String::from_utf8_lossy(key_bytes);
 
