@@ -31,12 +31,12 @@ impl Hcl {
 
         let mut encoding_map = [0u8; 256];
         let mut j: u8 = 0;
-        for i in 0..256 {
+        for slot in &mut encoding_map {
             // The following 7 handicap values are forbidden by Warcraft 3
             if j == 0 || j == 50 || j == 60 || j == 70 || j == 80 || j == 90 || j == 100 {
                 j = j.wrapping_add(1);
             }
-            encoding_map[i] = j;
+            *slot = j;
             j = j.wrapping_add(1);
         }
 

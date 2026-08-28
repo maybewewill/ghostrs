@@ -110,53 +110,63 @@ impl StatsW3MMD {
                     if !tokens.is_empty() {
                         match tokens[0].as_str() {
                             "init" => {
-                                if tokens.len() == 4 && tokens[1] == "pid" {
-                                    if let Ok(pid) = tokens[2].parse::<u32>() {
-                                        self.pid_to_name.insert(pid, tokens[3].clone());
-                                    }
+                                if tokens.len() == 4
+                                    && tokens[1] == "pid"
+                                    && let Ok(pid) = tokens[2].parse::<u32>()
+                                {
+                                    self.pid_to_name.insert(pid, tokens[3].clone());
                                 }
                             }
                             "DefVarP" => {
                                 if tokens.len() == 5
-                                    && (tokens[2] == "int" || tokens[2] == "real" || tokens[2] == "string")
+                                    && (tokens[2] == "int"
+                                        || tokens[2] == "real"
+                                        || tokens[2] == "string")
                                 {
                                     self.def_vars.insert(tokens[1].clone(), tokens[2].clone());
                                 }
                             }
                             "VarP" => {
-                                if tokens.len() == 5 {
-                                    if let Ok(pid) = tokens[1].parse::<u32>() {
-                                        let var_name = tokens[2].clone();
-                                        if let Some(vtype) = self.def_vars.get(&var_name).cloned() {
-                                            let op = &tokens[3];
-                                            let val_str = &tokens[4];
-                                            match vtype.as_str() {
-                                                "int" => {
-                                                    if let Ok(val) = val_str.parse::<i32>() {
-                                                        let entry = self.var_ints.entry((pid, var_name)).or_insert(0);
-                                                        match op.as_str() {
-                                                            "=" => *entry = val,
-                                                            "+=" => *entry += val,
-                                                            "-=" => *entry -= val,
-                                                            _ => {}
-                                                        }
+                                if tokens.len() == 5
+                                    && let Ok(pid) = tokens[1].parse::<u32>()
+                                {
+                                    let var_name = tokens[2].clone();
+                                    if let Some(vtype) = self.def_vars.get(&var_name).cloned() {
+                                        let op = &tokens[3];
+                                        let val_str = &tokens[4];
+                                        match vtype.as_str() {
+                                            "int" => {
+                                                if let Ok(val) = val_str.parse::<i32>() {
+                                                    let entry = self
+                                                        .var_ints
+                                                        .entry((pid, var_name))
+                                                        .or_insert(0);
+                                                    match op.as_str() {
+                                                        "=" => *entry = val,
+                                                        "+=" => *entry += val,
+                                                        "-=" => *entry -= val,
+                                                        _ => {}
                                                     }
                                                 }
-                                                "real" => {
-                                                    if let Ok(val) = val_str.parse::<f64>() {
-                                                        let entry = self.var_reals.entry((pid, var_name)).or_insert(0.0);
-                                                        match op.as_str() {
-                                                            "=" => *entry = val,
-                                                            "+=" => *entry += val,
-                                                            "-=" => *entry -= val,
-                                                            _ => {}
-                                                        }
+                                            }
+                                            "real" => {
+                                                if let Ok(val) = val_str.parse::<f64>() {
+                                                    let entry = self
+                                                        .var_reals
+                                                        .entry((pid, var_name))
+                                                        .or_insert(0.0);
+                                                    match op.as_str() {
+                                                        "=" => *entry = val,
+                                                        "+=" => *entry += val,
+                                                        "-=" => *entry -= val,
+                                                        _ => {}
                                                     }
                                                 }
-                                                _ => {
-                                                    if op == "=" {
-                                                        self.var_strings.insert((pid, var_name), val_str.clone());
-                                                    }
+                                            }
+                                            _ => {
+                                                if op == "=" {
+                                                    self.var_strings
+                                                        .insert((pid, var_name), val_str.clone());
                                                 }
                                             }
                                         }
@@ -164,20 +174,20 @@ impl StatsW3MMD {
                                 }
                             }
                             "FlagP" => {
-                                if tokens.len() == 3 {
-                                    if let Ok(pid) = tokens[1].parse::<u32>() {
-                                        match tokens[2].as_str() {
-                                            "winner" | "loser" | "drawer" => {
-                                                self.flags.insert(pid, tokens[2].clone());
-                                            }
-                                            "leaver" => {
-                                                self.flags_leaver.insert(pid, true);
-                                            }
-                                            "practicing" => {
-                                                self.flags_practicing.insert(pid, true);
-                                            }
-                                            _ => {}
+                                if tokens.len() == 3
+                                    && let Ok(pid) = tokens[1].parse::<u32>()
+                                {
+                                    match tokens[2].as_str() {
+                                        "winner" | "loser" | "drawer" => {
+                                            self.flags.insert(pid, tokens[2].clone());
                                         }
+                                        "leaver" => {
+                                            self.flags_leaver.insert(pid, true);
+                                        }
+                                        "practicing" => {
+                                            self.flags_practicing.insert(pid, true);
+                                        }
+                                        _ => {}
                                     }
                                 }
                             }
@@ -206,7 +216,9 @@ impl StatsW3MMD {
                                                             .pid_to_name
                                                             .get(&pid)
                                                             .cloned()
-                                                            .unwrap_or_else(|| format!("PID:{}", pid));
+                                                            .unwrap_or_else(|| {
+                                                                format!("PID:{}", pid)
+                                                            });
                                                         format = format.replace(&marker, &name);
                                                     } else {
                                                         format = format.replace(&marker, arg_token);
@@ -215,7 +227,11 @@ impl StatsW3MMD {
                                                     format = format.replace(&marker, arg_token);
                                                 }
                                             }
-                                            tracing::info!("[STATSW3MMD: {}] {}", self.game_name, format);
+                                            tracing::info!(
+                                                "[STATSW3MMD: {}] {}",
+                                                self.game_name,
+                                                format
+                                            );
                                         }
                                     }
                                 }

@@ -71,9 +71,7 @@ impl GameState {
                 .as_wire()
                 .iter()
                 .enumerate()
-                .find(|(s_idx, s)| {
-                    s.slot_status == 0 && !self.holds.contains_key(&(*s_idx as u8))
-                })
+                .find(|(s_idx, s)| s.slot_status == 0 && !self.holds.contains_key(&(*s_idx as u8)))
                 .map(|(s_idx, _)| s_idx as u8)
         };
 
@@ -201,18 +199,18 @@ impl GameState {
                 }
             } else if p.left.is_none() {
                 p.left = Some(reason);
-                p.left_code = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
-                    ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
-                } else {
-                    ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT
-                };
+                p.left_code =
+                    if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
+                        ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
+                    } else {
+                        ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT
+                    };
             }
         } else {
             self.pending.retain(|(id, _, _)| *id != conn_id);
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

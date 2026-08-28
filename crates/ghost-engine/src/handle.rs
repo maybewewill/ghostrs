@@ -64,4 +64,3 @@ pub enum GameEvent {
         human_players: u32,
     },
 }
-

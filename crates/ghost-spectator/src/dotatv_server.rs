@@ -201,7 +201,6 @@ impl DotaTvShared {
         self.stream.read().await.published_crc()
     }
 
-
     /// Game time elapsed so far, written into the bootstrap header. Producers
     /// update it as they publish timeslots.
     pub fn set_replay_length(&self, ms: u32) {
@@ -391,9 +390,7 @@ pub async fn serve_admin(addr: SocketAddr, shared: Arc<DotaTvShared>) -> io::Res
         };
         let shared = Arc::clone(&shared);
         tokio::spawn(async move {
-            if let Err(err) =
-                serve_viewer_with(sock, shared, VIEWER_WRITE_TIMEOUT, true).await
-            {
+            if let Err(err) = serve_viewer_with(sock, shared, VIEWER_WRITE_TIMEOUT, true).await {
                 tracing::debug!(%peer, %err, "dotatv: admin viewer disconnected");
             }
         });
@@ -758,7 +755,10 @@ mod tests {
         shared.flush().await.unwrap();
 
         let (_, resume) = shared.bootstrap(0).await;
-        assert_eq!(resume, 0, "bootstrap is header-only, stream starts at frame 0");
+        assert_eq!(
+            resume, 0,
+            "bootstrap is header-only, stream starts at frame 0"
+        );
 
         let addr = start_server(Arc::clone(&shared)).await;
         let mut sock = TcpStream::connect(addr).await.unwrap();
@@ -884,7 +884,10 @@ mod tests {
             assert_eq!(&msg.2[2..2 + len][..1], b"m");
             got += 1;
         }
-        assert!(got >= 1 && got <= CHAT_RATE_MAX, "delivered {got}, budget {CHAT_RATE_MAX}");
+        assert!(
+            got >= 1 && got <= CHAT_RATE_MAX,
+            "delivered {got}, budget {CHAT_RATE_MAX}"
+        );
     }
 
     #[tokio::test]
@@ -921,7 +924,11 @@ mod tests {
 
         // The server closes instead of sending a frame from the wrong offset.
         let mut buf = [0u8; 1];
-        assert_eq!(sock.read(&mut buf).await.unwrap(), 0, "expected clean close");
+        assert_eq!(
+            sock.read(&mut buf).await.unwrap(),
+            0,
+            "expected clean close"
+        );
     }
 
     #[tokio::test]
@@ -943,12 +950,9 @@ mod tests {
         assert_eq!(read_exact_n(&mut sock, 4).await, GREETING);
         sock.write_all(&[MODE_BOOTSTRAP, 0, 0, 0, 0]).await.unwrap();
 
-        let start_index = u32::from_le_bytes(
-            read_exact_n(&mut sock, 4).await.try_into().unwrap(),
-        );
-        let file_len = u32::from_le_bytes(
-            read_exact_n(&mut sock, 4).await.try_into().unwrap(),
-        ) as usize;
+        let start_index = u32::from_le_bytes(read_exact_n(&mut sock, 4).await.try_into().unwrap());
+        let file_len =
+            u32::from_le_bytes(read_exact_n(&mut sock, 4).await.try_into().unwrap()) as usize;
         let file = read_exact_n(&mut sock, file_len).await;
 
         assert_eq!(&file[..28], b"Warcraft III recorded game\x1A\0");
@@ -987,7 +991,10 @@ mod tests {
             (frame, valid, (c.compressed.to_vec(), c.valid_bytes))
         };
         assert_eq!(valid, expected.1);
-        assert_eq!(frame, expected.0, "first streamed frame follows the bootstrap");
+        assert_eq!(
+            frame, expected.0,
+            "first streamed frame follows the bootstrap"
+        );
     }
 
     #[tokio::test]
@@ -1000,7 +1007,11 @@ mod tests {
         sock.write_all(&[0xEE]).await.unwrap();
 
         let mut buf = [0u8; 1];
-        assert_eq!(sock.read(&mut buf).await.unwrap(), 0, "expected clean close");
+        assert_eq!(
+            sock.read(&mut buf).await.unwrap(),
+            0,
+            "expected clean close"
+        );
     }
 
     #[tokio::test]
@@ -1179,7 +1190,11 @@ mod tests {
         // A zero-block .w3g is a file Warcraft III opens and instantly closes,
         // so the relay must close instead of serving one.
         let mut buf = [0u8; 1];
-        assert_eq!(sock.read(&mut buf).await.unwrap(), 0, "expected clean close");
+        assert_eq!(
+            sock.read(&mut buf).await.unwrap(),
+            0,
+            "expected clean close"
+        );
     }
 
     /// Serves with a short write timeout so the stall test stays fast.
@@ -1191,7 +1206,8 @@ mod tests {
             while let Ok((sock, _)) = listener.accept().await {
                 let shared = Arc::clone(&shared);
                 tokio::spawn(async move {
-                    let _ = serve_viewer_with(sock, shared, Duration::from_millis(200), false).await;
+                    let _ =
+                        serve_viewer_with(sock, shared, Duration::from_millis(200), false).await;
                 });
             }
         });
@@ -1208,9 +1224,7 @@ mod tests {
         // Shrink the client receive buffer before connecting: loopback
         // auto-tuning would otherwise buffer tens of megabytes and the server
         // would never actually block on write.
-        let std_sock = socket2::Socket::from(
-            std::net::TcpStream::connect(addr).unwrap(),
-        );
+        let std_sock = socket2::Socket::from(std::net::TcpStream::connect(addr).unwrap());
         let _ = std_sock.set_recv_buffer_size(8192);
         let _ = std_sock.set_nonblocking(true);
         let mut sock = TcpStream::from_std(std_sock.into()).unwrap();
@@ -1245,7 +1259,7 @@ mod tests {
         // reading until the FIN shows up.
         let mut drained = 0usize;
         let mut buf = [0u8; 4096];
-        let fin = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 match sock.read(&mut buf).await {
                     Ok(0) => break,
@@ -1256,7 +1270,6 @@ mod tests {
         })
         .await
         .expect("server must close a stalled viewer");
-        let _ = fin;
         assert!(drained > 0, "frames queued before the stall must flush");
     }
 }

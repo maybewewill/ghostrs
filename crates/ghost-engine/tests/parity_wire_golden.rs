@@ -22,7 +22,11 @@ fn parity_wire_b1_map_transfer_packets_use_host_pid() {
 
     let start_pkt = rxs[0].try_recv().expect("START_DOWNLOAD packet");
     assert_eq!(start_pkt[1], ids::START_DOWNLOAD);
-    assert_eq!(start_pkt[4], st.host_pid(), "START_DOWNLOAD fromPID must be host_pid()");
+    assert_eq!(
+        start_pkt[4],
+        st.host_pid(),
+        "START_DOWNLOAD fromPID must be host_pid()"
+    );
     assert_ne!(start_pkt[4], 255, "START_DOWNLOAD must not use 255");
 
     // 2. Map part packet
@@ -30,19 +34,30 @@ fn parity_wire_b1_map_transfer_packets_use_host_pid() {
     st.pump_downloads();
     let part_pkt = rxs[0].try_recv().expect("MAP_PART packet");
     assert_eq!(part_pkt[1], ids::MAP_PART);
-    assert_eq!(part_pkt[4], st.host_pid(), "MAP_PART fromPID must be host_pid()");
+    assert_eq!(
+        part_pkt[4],
+        st.host_pid(),
+        "MAP_PART fromPID must be host_pid()"
+    );
     assert_eq!(part_pkt[5], 1, "MAP_PART toPID must be player PID 1");
 }
 
 #[test]
 fn parity_wire_b2_max_action_payload_is_1452() {
-    assert_eq!(MAX_ACTION_PAYLOAD, 1452, "Wire parity: MAX_ACTION_PAYLOAD must be 1452 bytes (GHost++ game_base.cpp:1373)");
+    assert_eq!(
+        MAX_ACTION_PAYLOAD, 1452,
+        "Wire parity: MAX_ACTION_PAYLOAD must be 1452 bytes (GHost++ game_base.cpp:1373)"
+    );
 }
 
 #[test]
 fn parity_wire_b3_countdown_10_steps_5_seconds() {
     assert_eq!(COUNTDOWN_STEPS, 10, "Countdown must have 10 steps");
-    assert_eq!(COUNTDOWN_TOTAL, Duration::from_millis(5000), "Countdown duration must be 5.0 seconds");
+    assert_eq!(
+        COUNTDOWN_TOTAL,
+        Duration::from_millis(5000),
+        "Countdown duration must be 5.0 seconds"
+    );
 
     let (mut st, mut rxs) = seated_game(2);
     for rx in &mut rxs {
@@ -56,7 +71,10 @@ fn parity_wire_b3_countdown_10_steps_5_seconds() {
     assert!(sent.contains(&ids::CHAT_FROM_HOST));
 
     // Announce steps down to 1
-    if let GamePhase::Countdown { ref mut started_at, .. } = st.phase {
+    if let GamePhase::Countdown {
+        ref mut started_at, ..
+    } = st.phase
+    {
         *started_at = std::time::Instant::now() - Duration::from_millis(4500);
     }
     st.on_tick(0);
@@ -80,7 +98,11 @@ fn parity_wire_b4_hcl_is_encoded_at_begin_loading_not_start_countdown() {
 
     // Countdown ends and begin_loading is called: HCL is now encoded into slot handicaps!
     st.begin_loading();
-    assert_ne!(st.slots.as_wire()[0].handicap, 100, "Slot handicap must be encoded with HCL at begin_loading");
+    assert_ne!(
+        st.slots.as_wire()[0].handicap,
+        100,
+        "Slot handicap must be encoded with HCL at begin_loading"
+    );
 }
 
 #[test]
@@ -119,8 +141,16 @@ fn parity_wire_b5_b6_replay_timeslots_use_0x1f_and_0x1e_without_crc() {
     expected_ts1.extend_from_slice(&100u16.to_le_bytes());
     expected_ts1.extend_from_slice(&raw1);
 
-    assert!(body.windows(expected_ts2.len()).any(|w| w == expected_ts2.as_slice()), "Must contain 0x1E timeslot2 without CRC");
-    assert!(body.windows(expected_ts1.len()).any(|w| w == expected_ts1.as_slice()), "Must contain 0x1F timeslot without CRC");
+    assert!(
+        body.windows(expected_ts2.len())
+            .any(|w| w == expected_ts2.as_slice()),
+        "Must contain 0x1E timeslot2 without CRC"
+    );
+    assert!(
+        body.windows(expected_ts1.len())
+            .any(|w| w == expected_ts1.as_slice()),
+        "Must contain 0x1F timeslot without CRC"
+    );
 }
 
 #[test]
@@ -137,7 +167,10 @@ fn parity_wire_b7_replay_host_pid_matches_virtual_host_pid() {
     // The host record at start of body is [16, 1, 0, 0, 0x00, host_pid, ...]
     assert_eq!(&body[0..4], &[16, 1, 0, 0], "Unknown 4.0 prefix");
     assert_eq!(body[4], 0x00, "Host record RecordID must be 0x00");
-    assert_eq!(body[5], vhost_pid, "HostRecord host PID must match virtual host PID");
+    assert_eq!(
+        body[5], vhost_pid,
+        "HostRecord host PID must match virtual host PID"
+    );
 }
 
 #[test]
@@ -155,12 +188,21 @@ fn parity_wire_b8_loading_leavers_placed_between_0x1b_and_0x1c() {
     let (body, _) = replay.finish().expect("replay finish");
 
     // Marker sequence: 0x1B (second start block), followed by loading leaver (0x17), followed by 0x1C (third start block)
-    let b1_pos = body.windows(5).position(|w| w == [0x1B, 1, 0, 0, 0]).expect("0x1B block present");
-    let b2_pos = body.windows(5).position(|w| w == [0x1C, 1, 0, 0, 0]).expect("0x1C block present");
+    let b1_pos = body
+        .windows(5)
+        .position(|w| w == [0x1B, 1, 0, 0, 0])
+        .expect("0x1B block present");
+    let b2_pos = body
+        .windows(5)
+        .position(|w| w == [0x1C, 1, 0, 0, 0])
+        .expect("0x1C block present");
 
     assert!(b1_pos < b2_pos, "0x1B must precede 0x1C");
     let between = &body[b1_pos + 5..b2_pos];
-    assert!(!between.is_empty(), "Loading leaver must be placed between 0x1B and 0x1C");
+    assert!(
+        !between.is_empty(),
+        "Loading leaver must be placed between 0x1B and 0x1C"
+    );
     assert_eq!(between[0], 0x17, "Loading leaver record ID must be 0x17");
     assert_eq!(between[5], 2, "Loading leaver PID must be 2");
 }
@@ -186,7 +228,10 @@ fn parity_wire_b13_pings_broadcast_only_in_lobby_countdown_loading() {
     }
     st.on_tick(0);
     let sent = drain_ids(&mut rxs[0]);
-    assert!(!sent.contains(&ids::PING_FROM_HOST), "Ping packets must not be broadcast during Playing phase");
+    assert!(
+        !sent.contains(&ids::PING_FROM_HOST),
+        "Ping packets must not be broadcast during Playing phase"
+    );
 }
 
 #[test]
@@ -200,19 +245,34 @@ fn parity_wire_p1_2_replay_contains_real_statstring() {
 
     // Game name is "test" followed by NUL, then the stat string followed by NUL
     let game_name_bytes = b"test\0";
-    let name_pos = body.windows(game_name_bytes.len()).position(|w| w == game_name_bytes).expect("game name in replay");
+    let name_pos = body
+        .windows(game_name_bytes.len())
+        .position(|w| w == game_name_bytes)
+        .expect("game name in replay");
     let after_name = &body[name_pos + game_name_bytes.len()..];
 
     // First byte of stat string should be the null (4.0) byte in ReplayBody, followed by encoded stat string
     assert_eq!(after_name[0], 0, "null byte (4.0) preceding stat string");
     let stat_slice = &after_name[1..];
-    let stat_len = stat_slice.iter().position(|&b| b == 0).expect("stat string terminator");
+    let stat_len = stat_slice
+        .iter()
+        .position(|&b| b == 0)
+        .expect("stat string terminator");
     let stat_bytes = &stat_slice[..stat_len];
 
-    assert!(!stat_bytes.is_empty(), "stat string in replay must not be empty");
-    assert!(!stat_bytes.contains(&0), "encoded stat string must not contain null bytes");
+    assert!(
+        !stat_bytes.is_empty(),
+        "stat string in replay must not be empty"
+    );
+    assert!(
+        !stat_bytes.contains(&0),
+        "encoded stat string must not contain null bytes"
+    );
     let decoded = ghost_protocol::decode_statstring(stat_bytes);
-    assert!(decoded.len() >= 14, "decoded stat string has valid structure");
+    assert!(
+        decoded.len() >= 14,
+        "decoded stat string has valid structure"
+    );
 }
 
 #[test]
@@ -228,7 +288,11 @@ fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
     assert_eq!(pkt[1], ids::PLAYER_LEAVE_OTHERS);
     assert_eq!(pkt[4], 1, "leaving PID");
     let code = u32::from_le_bytes([pkt[5], pkt[6], pkt[7], pkt[8]]);
-    assert_eq!(code, ids::PLAYERLEAVE_LOBBY, "Lobby leave must send PLAYERLEAVE_LOBBY (13)");
+    assert_eq!(
+        code,
+        ids::PLAYERLEAVE_LOBBY,
+        "Lobby leave must send PLAYERLEAVE_LOBBY (13)"
+    );
 
     // 2. Loading leaver -> reason=1, result=PLAYERLEAVE_DISCONNECT (1) in replay loading block & wire
     let (mut st, mut rxs) = seated_game(2);
@@ -243,7 +307,11 @@ fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
     assert_eq!(pkt[1], ids::PLAYER_LEAVE_OTHERS);
     assert_eq!(pkt[4], 2, "leaving PID");
     let code = u32::from_le_bytes([pkt[5], pkt[6], pkt[7], pkt[8]]);
-    assert_eq!(code, ids::PLAYERLEAVE_DISCONNECT, "Loading disconnect must send PLAYERLEAVE_DISCONNECT (1)");
+    assert_eq!(
+        code,
+        ids::PLAYERLEAVE_DISCONNECT,
+        "Loading disconnect must send PLAYERLEAVE_DISCONNECT (1)"
+    );
 
     // 3. Desync drop -> PLAYERLEAVE_LOST (7) in wire and replay
     let (mut st, mut rxs) = seated_game(3);
@@ -252,9 +320,15 @@ fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
         let _ = drain_ids(rx);
     }
     // Player 1 & 2 send checksum 0xAAAA, Player 3 sends 0xBBBB
-    let mut p1 = BytesMut::new(); p1.put_u8(0); p1.put_u32_le(0xAAAA);
-    let mut p2 = BytesMut::new(); p2.put_u8(0); p2.put_u32_le(0xAAAA);
-    let mut p3 = BytesMut::new(); p3.put_u8(0); p3.put_u32_le(0xBBBB);
+    let mut p1 = BytesMut::new();
+    p1.put_u8(0);
+    p1.put_u32_le(0xAAAA);
+    let mut p2 = BytesMut::new();
+    p2.put_u8(0);
+    p2.put_u32_le(0xAAAA);
+    let mut p3 = BytesMut::new();
+    p3.put_u8(0);
+    p3.put_u32_le(0xBBBB);
     st.handle_keepalive(1, &p1.freeze());
     st.handle_keepalive(2, &p2.freeze());
     st.handle_keepalive(3, &p3.freeze());
@@ -272,7 +346,11 @@ fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
     assert_eq!(pkt[1], ids::PLAYER_LEAVE_OTHERS);
     assert_eq!(pkt[4], 3, "desynced PID 3");
     let code = u32::from_le_bytes([pkt[5], pkt[6], pkt[7], pkt[8]]);
-    assert_eq!(code, ids::PLAYERLEAVE_LOST, "Desync drop must send PLAYERLEAVE_LOST (7)");
+    assert_eq!(
+        code,
+        ids::PLAYERLEAVE_LOST,
+        "Desync drop must send PLAYERLEAVE_LOST (7)"
+    );
 }
 
 #[test]
@@ -288,12 +366,21 @@ fn parity_wire_p1_7_replay_host_pid_and_name() {
 
     // Header structure: 4 bytes unknown + 1 byte RecordID (0) + 1 byte hostPID + hostName\0
     assert_eq!(body[4], 0, "Host record ID is 0");
-    assert_eq!(body[5], vhost_pid, "Host PID in replay header must match real host PID");
+    assert_eq!(
+        body[5], vhost_pid,
+        "Host PID in replay header must match real host PID"
+    );
 
     let name_slice = &body[6..];
-    let name_len = name_slice.iter().position(|&b| b == 0).expect("host name null terminator");
+    let name_len = name_slice
+        .iter()
+        .position(|&b| b == 0)
+        .expect("host name null terminator");
     let host_name = std::str::from_utf8(&name_slice[..name_len]).unwrap();
-    assert_eq!(host_name, &st.cfg.virtual_host_name, "Host name in replay must match virtual host name");
+    assert_eq!(
+        host_name, &st.cfg.virtual_host_name,
+        "Host name in replay must match virtual host name"
+    );
 }
 
 #[test]
@@ -331,9 +418,6 @@ fn parity_wire_p1_8_relay_receives_in_game_chat_and_game_over() {
         other => panic!("expected ViewerChat, got {:?}", other),
     }
 
-
-
-
     // 2. Host chat (send_chat_all) forwarded to relay
     st.send_chat_all("host message");
     let cmd = relay_rx.try_recv().expect("relay received host chat");
@@ -358,7 +442,10 @@ fn parity_wire_p1_8_relay_receives_in_game_chat_and_game_over() {
             break;
         }
     }
-    assert!(got_game_over, "Relay must receive GameOver when all players leave / game ends");
+    assert!(
+        got_game_over,
+        "Relay must receive GameOver when all players leave / game ends"
+    );
 }
 
 #[test]
@@ -382,13 +469,19 @@ fn parity_wire_p1_9_replay_chat_preserves_flag_and_extra() {
     // REPLAY_CHATMESSAGE = 0x20 in blocks
     // Format: 0x20 (RecordID), PID(1), length(2 LE), flag(1), extra(4 LE), message\0
     let msg_bytes = b"allied chat message\0";
-    let pos = body.windows(msg_bytes.len()).position(|w| w == msg_bytes).expect("message found in replay");
+    let pos = body
+        .windows(msg_bytes.len())
+        .position(|w| w == msg_bytes)
+        .expect("message found in replay");
     let extra_bytes = &body[pos - 4..pos];
     let flag = body[pos - 5];
     let pid = body[pos - 8];
 
     assert_eq!(pid, 1, "chat message PID is 1");
     assert_eq!(flag, 0x20, "chat message flag preserved (0x20)");
-    assert_eq!(extra_bytes, &[2, 0, 0, 0], "extra flags (scope) preserved in replay chat");
+    assert_eq!(
+        extra_bytes,
+        &[2, 0, 0, 0],
+        "extra flags (scope) preserved in replay chat"
+    );
 }
-

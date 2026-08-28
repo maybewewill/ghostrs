@@ -1,6 +1,6 @@
-use std::time::Duration;
-use ghost_protocol::dotatv::{encode_client_chat, decode_chat, ids as dotatv_ids};
+use ghost_protocol::dotatv::{decode_chat, encode_client_chat, ids as dotatv_ids};
 use ghost_spectator::{RelayConfig, spawn_relay};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -30,7 +30,10 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
 
     // Viewer 1 sends a DotaTV client chat frame (0xFD, 0x81)
     let chat_frame = encode_client_chat("Hello from viewer 1!").expect("must encode client chat");
-    viewer1.write_all(&chat_frame).await.expect("must write chat");
+    viewer1
+        .write_all(&chat_frame)
+        .await
+        .expect("must write chat");
     viewer1.flush().await.expect("must flush");
 
     // Viewer 2 should receive the broadcasted chat message (0xFD, 0x80)
@@ -39,7 +42,9 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
 
     for _ in 0..10 {
         tokio::time::sleep(Duration::from_millis(50)).await;
-        if let Ok(n) = tokio::time::timeout(Duration::from_millis(200), viewer2.read(&mut buf)).await {
+        if let Ok(n) =
+            tokio::time::timeout(Duration::from_millis(200), viewer2.read(&mut buf)).await
+        {
             let n = n.unwrap_or(0);
             if n >= 4 {
                 // Find any 0xFD 0x80 packet in received stream
@@ -48,13 +53,14 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
                     if buf[offset] == 0xFD && buf[offset + 1] == dotatv_ids::CHAT {
                         let len = u16::from_le_bytes([buf[offset + 2], buf[offset + 3]]) as usize;
                         if offset + len <= n {
-                            let payload = bytes::Bytes::copy_from_slice(&buf[offset + 4..offset + len]);
-                            if let Ok(chat) = decode_chat(&payload) {
-                                if chat.text == "Hello from viewer 1!" {
-                                    assert!(chat.sender.starts_with("Viewer-"));
-                                    received_chat = true;
-                                    break;
-                                }
+                            let payload =
+                                bytes::Bytes::copy_from_slice(&buf[offset + 4..offset + len]);
+                            if let Ok(chat) = decode_chat(&payload)
+                                && chat.text == "Hello from viewer 1!"
+                            {
+                                assert!(chat.sender.starts_with("Viewer-"));
+                                received_chat = true;
+                                break;
                             }
                         }
                     }
@@ -67,5 +73,8 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
         }
     }
 
-    assert!(received_chat, "viewer2 must receive broadcasted chat from viewer1");
+    assert!(
+        received_chat,
+        "viewer2 must receive broadcasted chat from viewer1"
+    );
 }

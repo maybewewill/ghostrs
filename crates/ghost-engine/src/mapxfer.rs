@@ -63,7 +63,11 @@ impl GameState {
             return;
         }
         if self.cfg.allow_downloads == 2 {
-            let allowed = self.players.by_pid(pid).map(|p| p.download_allowed).unwrap_or(false);
+            let allowed = self
+                .players
+                .by_pid(pid)
+                .map(|p| p.download_allowed)
+                .unwrap_or(false);
             if !allowed {
                 tracing::info!(
                     pid,
@@ -143,25 +147,30 @@ impl GameState {
                     && !p.reserved
                     && self.cfg.autokick_ping > 0
                     && p.ping_history.len() >= 3
+                    && let Some(avg) = p.average_ping()
+                    && avg > self.cfg.autokick_ping
                 {
-                    if let Some(avg) = p.average_ping() {
-                        if avg > self.cfg.autokick_ping {
-                            tracing::info!(
-                                name = %p.name,
-                                avg_ping = avg,
-                                limit = self.cfg.autokick_ping,
-                                "autokicking player due to high ping"
-                            );
-                            kick_info = Some((
-                                p.pid,
-                                format!("autokicked for high ping ({avg}ms > {}ms)", self.cfg.autokick_ping),
-                            ));
-                        }
-                    }
+                    tracing::info!(
+                        name = %p.name,
+                        avg_ping = avg,
+                        limit = self.cfg.autokick_ping,
+                        "autokicking player due to high ping"
+                    );
+                    kick_info = Some((
+                        p.pid,
+                        format!(
+                            "autokicked for high ping ({avg}ms > {}ms)",
+                            self.cfg.autokick_ping
+                        ),
+                    ));
                 }
             }
             if let Some((kpid, reason)) = kick_info {
-                self.kick_player(kpid, &reason, ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT);
+                self.kick_player(
+                    kpid,
+                    &reason,
+                    ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT,
+                );
             }
         }
     }
@@ -171,9 +180,18 @@ impl GameState {
             return;
         }
         tracing::info!(conn_id, "drop request while lagging, dropping laggers");
-        let lagger_pids: Vec<u8> = self.players.iter().filter(|p| p.lagging && p.left.is_none()).map(|p| p.pid).collect();
+        let lagger_pids: Vec<u8> = self
+            .players
+            .iter()
+            .filter(|p| p.lagging && p.left.is_none())
+            .map(|p| p.pid)
+            .collect();
         for lpid in lagger_pids {
-            self.kick_player(lpid, "was dropped by vote", ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT);
+            self.kick_player(
+                lpid,
+                "was dropped by vote",
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT,
+            );
         }
     }
 
@@ -239,27 +257,23 @@ impl GameState {
         self.downloads.retain(|d| {
             if d.acked_upto >= total {
                 let elapsed_secs = d.started.elapsed().as_secs();
-                tracing::info!(
-                    pid = d.pid,
-                    secs = elapsed_secs,
-                    "map download finished"
-                );
-                if let Some(s) = &store {
-                    if let Some(p) = players.by_pid(d.pid) {
-                        let ip_str = format!(
-                            "{}.{}.{}.{}",
-                            p.external_ip[0], p.external_ip[1], p.external_ip[2], p.external_ip[3]
-                        );
-                        s.record_download(
-                            &map_path,
-                            map_size,
-                            &p.name,
-                            &ip_str,
-                            if p.spoofed { 1 } else { 0 },
-                            total as u64,
-                            elapsed_secs,
-                        );
-                    }
+                tracing::info!(pid = d.pid, secs = elapsed_secs, "map download finished");
+                if let Some(s) = &store
+                    && let Some(p) = players.by_pid(d.pid)
+                {
+                    let ip_str = format!(
+                        "{}.{}.{}.{}",
+                        p.external_ip[0], p.external_ip[1], p.external_ip[2], p.external_ip[3]
+                    );
+                    s.record_download(
+                        &map_path,
+                        map_size,
+                        &p.name,
+                        &ip_str,
+                        if p.spoofed { 1 } else { 0 },
+                        total as u64,
+                        elapsed_secs,
+                    );
                 }
                 false
             } else {
@@ -408,9 +422,15 @@ mod tests {
 
         // Next pump_downloads must send map part starting from 1442
         st.pump_downloads();
-        let part_pkt = rxs[0].try_recv().expect("must receive MAP_PART after rewind");
+        let part_pkt = rxs[0]
+            .try_recv()
+            .expect("must receive MAP_PART after rewind");
         assert_eq!(part_pkt[1], ids::MAP_PART);
-        let start_offset = u32::from_le_bytes([part_pkt[10], part_pkt[11], part_pkt[12], part_pkt[13]]);
-        assert_eq!(start_offset, 1442, "MAP_PART must be resent starting from rewound offset");
+        let start_offset =
+            u32::from_le_bytes([part_pkt[10], part_pkt[11], part_pkt[12], part_pkt[13]]);
+        assert_eq!(
+            start_offset, 1442,
+            "MAP_PART must be resent starting from rewound offset"
+        );
     }
 }

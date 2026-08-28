@@ -182,7 +182,12 @@ impl GameState {
             ids::MAP_PART_OK => self.handle_map_part_ok(conn_id, &frame.payload),
             ids::MAP_PART_NOT_OK => self.handle_map_part_not_ok(conn_id, &frame.payload),
             ids::DROP_REQ => self.handle_drop_request(conn_id),
-            other => tracing::warn!(conn_id, id = format!("0x{other:02X}"), len = frame.payload.len(), "unknown w3gs packet id"),
+            other => tracing::warn!(
+                conn_id,
+                id = format!("0x{other:02X}"),
+                len = frame.payload.len(),
+                "unknown w3gs packet id"
+            ),
         }
     }
 
@@ -287,7 +292,6 @@ pub mod tests_support {
             matchmaking: false,
         }
     }
-
 
     pub fn reqjoin_bytes(name: &str) -> Bytes {
         let mut b = BytesMut::new();
@@ -466,10 +470,7 @@ mod tests {
                 "player must not be dropped before reaching MAX_CONSECUTIVE_DROPS"
             );
         }
-        assert_eq!(
-            st.players.by_pid(1).unwrap().consecutive_send_failures,
-            99
-        );
+        assert_eq!(st.players.by_pid(1).unwrap().consecutive_send_failures, 99);
 
         st.send_to(1, packet);
         assert!(
@@ -495,18 +496,12 @@ mod tests {
         for _ in 0..50 {
             st.send_to(1, packet.clone());
         }
-        assert_eq!(
-            st.players.by_pid(1).unwrap().consecutive_send_failures,
-            50
-        );
+        assert_eq!(st.players.by_pid(1).unwrap().consecutive_send_failures, 50);
 
         let _ = rx.try_recv();
 
         st.send_to(1, packet.clone());
-        assert_eq!(
-            st.players.by_pid(1).unwrap().consecutive_send_failures,
-            0
-        );
+        assert_eq!(st.players.by_pid(1).unwrap().consecutive_send_failures, 0);
         assert!(st.players.by_pid(1).unwrap().left.is_none());
     }
 

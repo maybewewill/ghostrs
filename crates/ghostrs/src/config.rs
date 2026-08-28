@@ -81,7 +81,6 @@ pub struct Config {
     pub maps: HashMap<String, ghost_engine::MapOverride>,
 }
 
-
 fn default_war3_path() -> String {
     "war3".into()
 }
@@ -488,9 +487,7 @@ impl Config {
                 udp_broadcast_target: bot.udp_broadcast_target.unwrap_or_default(),
             },
             bnet: BnetConfig {
-                server_alias: bnet
-                    .server_alias
-                    .unwrap_or_else(|| bnet.server.clone()),
+                server_alias: bnet.server_alias.unwrap_or_else(|| bnet.server.clone()),
                 pvpgn_realm_name: bnet.pvpgn_realm_name.unwrap_or_default(),
                 server: bnet.server,
                 port: bnet.port,
@@ -535,7 +532,6 @@ impl Config {
             maps,
         })
     }
-
 
     pub fn parse(s: &str) -> anyhow::Result<Self> {
         let mut map = HashMap::new();
@@ -695,7 +691,6 @@ impl Config {
     }
 }
 
-
 fn parse_int<T: std::str::FromStr>(
     map: &HashMap<String, String>,
     key: &str,
@@ -830,23 +825,35 @@ udp_broadcast_target = "13.36.52.2"
 "#;
         let c = Config::from_toml(toml_custom).unwrap();
         assert_eq!(c.bot.udp_broadcast_target, "13.36.52.2");
-        assert_eq!(c.bot.resolved_udp_broadcast_target(), std::net::Ipv4Addr::new(13, 36, 52, 2));
+        assert_eq!(
+            c.bot.resolved_udp_broadcast_target(),
+            std::net::Ipv4Addr::new(13, 36, 52, 2)
+        );
 
         let toml_empty = r#"
 [bot]
 udp_broadcast_target = ""
 "#;
         let c_empty = Config::from_toml(toml_empty).unwrap();
-        assert_eq!(c_empty.bot.resolved_udp_broadcast_target(), std::net::Ipv4Addr::BROADCAST);
+        assert_eq!(
+            c_empty.bot.resolved_udp_broadcast_target(),
+            std::net::Ipv4Addr::BROADCAST
+        );
 
         let toml_invalid = r#"
 [bot]
 udp_broadcast_target = "invalid_subnet"
 "#;
         let c_invalid = Config::from_toml(toml_invalid).unwrap();
-        assert_eq!(c_invalid.bot.resolved_udp_broadcast_target(), std::net::Ipv4Addr::BROADCAST);
+        assert_eq!(
+            c_invalid.bot.resolved_udp_broadcast_target(),
+            std::net::Ipv4Addr::BROADCAST
+        );
 
         let c_default = Config::from_toml("").unwrap();
-        assert_eq!(c_default.bot.resolved_udp_broadcast_target(), std::net::Ipv4Addr::BROADCAST);
+        assert_eq!(
+            c_default.bot.resolved_udp_broadcast_target(),
+            std::net::Ipv4Addr::BROADCAST
+        );
     }
 }

@@ -16,7 +16,10 @@ fn test_m1_map_flags_wire_decomposition() {
         MAPFLAG_TEAMSTOGETHER | MAPFLAG_FIXEDTEAMS,
     );
     // Wire flags: FAST (0x02) | DEFAULT (0x800) | TEAMSTOGETHER (0x4000) | FIXEDTEAMS (0x60000) = 0x00064802
-    assert_eq!(flags_3, 0x0000_0002 | 0x0000_0800 | 0x0000_4000 | 0x0006_0000);
+    assert_eq!(
+        flags_3,
+        0x0000_0002 | 0x0000_0800 | 0x0000_4000 | 0x0006_0000
+    );
 
     // flags = MAPFLAG_RANDOMRACES (16)
     let flags_races = calculate_game_flags(

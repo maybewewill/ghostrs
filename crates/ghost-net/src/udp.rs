@@ -44,4 +44,3 @@ mod tests {
         assert_eq!(broadcaster.target(), SocketAddrV4::new(custom_ip, 6112));
     }
 }
-

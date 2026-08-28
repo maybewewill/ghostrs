@@ -38,7 +38,10 @@ fn parity_c1_start_and_abort_restricted_to_owner() {
     // Owner connects and issues !start -> allowed
     let (tx_owner, _rx_owner) = mpsc::channel(64);
     st.add_conn(99, PlayerLink::for_test(tx_owner), [127, 0, 0, 1]);
-    st.on_frame(99, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("RootAdmin"))));
+    st.on_frame(
+        99,
+        AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("RootAdmin"))),
+    );
 
     // Record pings for all players so start check passes
     for p in st.players.iter_mut() {
@@ -49,7 +52,10 @@ fn parity_c1_start_and_abort_restricted_to_owner() {
 
     let chat_owner = make_chat_to_host(3, "!start");
     st.handle_chat_to_host(99, &chat_owner);
-    assert!(matches!(st.phase, GamePhase::Countdown { .. }), "Owner can start game");
+    assert!(
+        matches!(st.phase, GamePhase::Countdown { .. }),
+        "Owner can start game"
+    );
 }
 
 #[test]
@@ -66,11 +72,18 @@ fn parity_c2_start_without_force_checks_downloads_and_leaver_cooldown() {
 
     // !start without force fails
     st.run_command(1, "slash", ChatCommand::Start { force: false });
-    assert_eq!(st.phase, GamePhase::Lobby, "Start without force must reject while player downloads");
+    assert_eq!(
+        st.phase,
+        GamePhase::Lobby,
+        "Start without force must reject while player downloads"
+    );
 
     // !start force succeeds
     st.run_command(1, "slash", ChatCommand::Start { force: true });
-    assert!(matches!(st.phase, GamePhase::Countdown { .. }), "Start with force must bypass download check");
+    assert!(
+        matches!(st.phase, GamePhase::Countdown { .. }),
+        "Start with force must bypass download check"
+    );
 
     // Abort
     st.run_command(1, "slash", ChatCommand::Abort);
@@ -81,10 +94,17 @@ fn parity_c2_start_without_force_checks_downloads_and_leaver_cooldown() {
     st.last_player_left_time = Some(std::time::Instant::now());
 
     st.run_command(1, "slash", ChatCommand::Start { force: false });
-    assert_eq!(st.phase, GamePhase::Lobby, "Start without force must reject if a player left < 2s ago");
+    assert_eq!(
+        st.phase,
+        GamePhase::Lobby,
+        "Start without force must reject if a player left < 2s ago"
+    );
 
     st.run_command(1, "slash", ChatCommand::Start { force: true });
-    assert!(matches!(st.phase, GamePhase::Countdown { .. }), "Start with force must bypass leaver cooldown");
+    assert!(
+        matches!(st.phase, GamePhase::Countdown { .. }),
+        "Start with force must bypass leaver cooldown"
+    );
 }
 
 #[test]
@@ -104,7 +124,10 @@ fn parity_c3_autokick_on_high_ping() {
 
     // Player 2 must be marked as left due to autokick
     let p2 = st.players.by_pid(2).unwrap();
-    assert!(p2.left.is_some(), "Player 2 must be autokicked for high ping");
+    assert!(
+        p2.left.is_some(),
+        "Player 2 must be autokicked for high ping"
+    );
     assert!(p2.left.as_ref().unwrap().contains("autokicked"));
 }
 
@@ -117,10 +140,16 @@ fn parity_c5_reserved_slots_enforced_on_join() {
     // 1. Regular player "RegularJoe" joins
     let (tx1, _rx1) = mpsc::channel(64);
     st.add_conn(1, PlayerLink::for_test(tx1), [127, 0, 0, 1]);
-    st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("RegularJoe"))));
+    st.on_frame(
+        1,
+        AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("RegularJoe"))),
+    );
 
     // RegularJoe must NOT be in Slot 0 (it is held for VIPPlayer)
-    let p1 = st.players.by_name_partial("RegularJoe").expect("RegularJoe seated");
+    let p1 = st
+        .players
+        .by_name_partial("RegularJoe")
+        .expect("RegularJoe seated");
     let p1_sid = st.slots.sid_of_pid(p1.pid).unwrap();
     assert_ne!(p1_sid, 0, "RegularJoe must not take reserved Slot 0");
     assert_eq!(p1_sid, 1, "RegularJoe gets Slot 1");
@@ -128,9 +157,15 @@ fn parity_c5_reserved_slots_enforced_on_join() {
     // 2. VIPPlayer joins -> must get Slot 0!
     let (tx2, _rx2) = mpsc::channel(64);
     st.add_conn(2, PlayerLink::for_test(tx2), [127, 0, 0, 1]);
-    st.on_frame(2, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("VIPPlayer"))));
+    st.on_frame(
+        2,
+        AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("VIPPlayer"))),
+    );
 
-    let p2 = st.players.by_name_partial("VIPPlayer").expect("VIPPlayer seated");
+    let p2 = st
+        .players
+        .by_name_partial("VIPPlayer")
+        .expect("VIPPlayer seated");
     let p2_sid = st.slots.sid_of_pid(p2.pid).unwrap();
     assert_eq!(p2_sid, 0, "VIPPlayer must be seated in reserved Slot 0");
     assert!(p2.reserved, "VIPPlayer must have reserved flag set");
@@ -167,7 +202,10 @@ fn parity_c8_in_game_commands_openall_closeall_votekick_lock() {
 
     // Vote reached (2 of 2 needed votes)
     st.run_command(2, "P2", ChatCommand::Yes);
-    assert!(st.players.by_pid(2).unwrap().left.is_some(), "Player 2 kicked via votekick");
+    assert!(
+        st.players.by_pid(2).unwrap().left.is_some(),
+        "Player 2 kicked via votekick"
+    );
 }
 
 #[test]
@@ -182,26 +220,54 @@ fn test_p2_1_kick_marks_player_left_without_sending_0x1c() {
     let (mut st, mut rxs) = seated_game(2);
     st.cfg.owner = "slash".into();
     st.run_command(1, "slash", ChatCommand::Kick("P2".into()));
-    assert!(!drain_ids(&mut rxs[1]).contains(&kick_id), "!kick must not send 0x1C");
-    assert!(st.players.by_pid(2).unwrap().left.is_some(), "!kick must mark player left");
+    assert!(
+        !drain_ids(&mut rxs[1]).contains(&kick_id),
+        "!kick must not send 0x1C"
+    );
+    assert!(
+        st.players.by_pid(2).unwrap().left.is_some(),
+        "!kick must mark player left"
+    );
 
     let (mut st2, mut rxs2) = seated_game(2);
     st2.cfg.owner = "slash".into();
-    st2.run_command(1, "slash", ChatCommand::Ban { name: "P2".into(), reason: "bad".into() });
-    assert!(!drain_ids(&mut rxs2[1]).contains(&kick_id), "!ban must not send 0x1C");
-    assert!(st2.players.by_pid(2).unwrap().left.is_some(), "!ban must mark player left");
+    st2.run_command(
+        1,
+        "slash",
+        ChatCommand::Ban {
+            name: "P2".into(),
+            reason: "bad".into(),
+        },
+    );
+    assert!(
+        !drain_ids(&mut rxs2[1]).contains(&kick_id),
+        "!ban must not send 0x1C"
+    );
+    assert!(
+        st2.players.by_pid(2).unwrap().left.is_some(),
+        "!ban must mark player left"
+    );
 
     let (mut st3, mut rxs3) = seated_game(2);
     st3.run_command(1, "slash", ChatCommand::VoteKick("P2".into()));
     st3.run_command(2, "P2", ChatCommand::Yes);
-    assert!(!drain_ids(&mut rxs3[1]).contains(&kick_id), "votekick must not send 0x1C");
+    assert!(
+        !drain_ids(&mut rxs3[1]).contains(&kick_id),
+        "votekick must not send 0x1C"
+    );
 
     let (mut st4, mut rxs4) = seated_game(2);
     st4.lagging = true;
     st4.players.by_pid_mut(2).unwrap().lagging = true;
     st4.handle_drop_request(1);
-    assert!(!drain_ids(&mut rxs4[1]).contains(&kick_id), "drop must not send 0x1C");
-    assert!(st4.players.by_pid(2).unwrap().left.is_some(), "drop must mark lagger left");
+    assert!(
+        !drain_ids(&mut rxs4[1]).contains(&kick_id),
+        "drop must not send 0x1C"
+    );
+    assert!(
+        st4.players.by_pid(2).unwrap().left.is_some(),
+        "drop must mark lagger left"
+    );
 }
 
 #[test]
@@ -209,13 +275,17 @@ fn test_p2_3_lobby_timeout_without_reserved_player() {
     let (mut st, _rxs) = seated_game(2);
     st.cfg.lobby_time_limit = 10; // 10 minutes
     st.autostart_players = None;
-    
+
     // Simulate time passing: set last_reserved_seen to 11 minutes ago
     st.last_reserved_seen = std::time::Instant::now() - std::time::Duration::from_secs(11 * 60);
-    
+
     // No player is reserved -> on_tick triggers lobby timeout
     st.on_tick(0);
-    assert_eq!(st.phase, GamePhase::Over, "Lobby must transition to GamePhase::Over when time limit expires without reserved player");
+    assert_eq!(
+        st.phase,
+        GamePhase::Over,
+        "Lobby must transition to GamePhase::Over when time limit expires without reserved player"
+    );
 
     // If reserved player is present, timeout does NOT trigger
     let (mut st2, _rxs2) = seated_game(2);
@@ -224,7 +294,11 @@ fn test_p2_3_lobby_timeout_without_reserved_player() {
     st2.players.by_pid_mut(1).unwrap().reserved = true;
     st2.last_reserved_seen = std::time::Instant::now() - std::time::Duration::from_secs(11 * 60);
     st2.on_tick(0);
-    assert_eq!(st2.phase, GamePhase::Lobby, "Reserved player resets last_reserved_seen, so lobby stays active");
+    assert_eq!(
+        st2.phase,
+        GamePhase::Lobby,
+        "Reserved player resets last_reserved_seen, so lobby stays active"
+    );
 
     // If autostart_players > 0, lobby time limit is ignored (per GHost++ game_base.cpp:726)
     let (mut st3, _rxs3) = seated_game(2);
@@ -232,7 +306,11 @@ fn test_p2_3_lobby_timeout_without_reserved_player() {
     st3.autostart_players = Some(5);
     st3.last_reserved_seen = std::time::Instant::now() - std::time::Duration::from_secs(11 * 60);
     st3.on_tick(0);
-    assert_eq!(st3.phase, GamePhase::Lobby, "When autostart_players > 0, lobby time limit is not enforced");
+    assert_eq!(
+        st3.phase,
+        GamePhase::Lobby,
+        "When autostart_players > 0, lobby time limit is not enforced"
+    );
 }
 
 #[tokio::test]
@@ -244,7 +322,10 @@ async fn parity_d1_game_and_download_logging_in_store() {
     let mut st = GameState::new(cfg);
     let (tx1, _rx1) = mpsc::channel(64);
     st.add_conn(1, PlayerLink::for_test(tx1), [192, 168, 1, 50]);
-    st.on_frame(1, AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Alice"))));
+    st.on_frame(
+        1,
+        AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Alice"))),
+    );
 
     // 1. Simulate finished download -> records in store
     st.cfg.map.size = 1000;
@@ -280,7 +361,10 @@ async fn parity_d1_game_and_download_logging_in_store() {
 
     // 3. Query stats from store to verify persistence
     tokio::time::sleep(Duration::from_millis(50)).await;
-    let stats = store.get_dota_stats("Alice").await.expect("DotA stats found in store");
+    let stats = store
+        .get_dota_stats("Alice")
+        .await
+        .expect("DotA stats found in store");
     assert_eq!(stats.games, 1);
     assert_eq!(stats.kills, 12);
     assert_eq!(stats.deaths, 2);
@@ -331,10 +415,13 @@ fn test_p2_7_allow_downloads_modes() {
     st0.cfg.map.data = Some(std::sync::Arc::new(vec![0; 100_000]));
     let mut report0 = BytesMut::new();
     report0.put_u32_le(0); // 4 bytes unknown
-    report0.put_u8(1);     // 1 byte size_flag
+    report0.put_u8(1); // 1 byte size_flag
     report0.put_u32_le(0); // 4 bytes map size
     st0.handle_map_size(2, &report0.freeze());
-    assert!(st0.players.by_pid(2).is_none(), "Player without map must be kicked and reaped in mode 0");
+    assert!(
+        st0.players.by_pid(2).is_none(),
+        "Player without map must be kicked and reaped in mode 0"
+    );
 
     // Mode 2: permission-based downloads
     let (mut st2, _rxs2) = seated_game(2);
@@ -347,13 +434,21 @@ fn test_p2_7_allow_downloads_modes() {
     report2.put_u32_le(0);
     let report2_bytes = report2.freeze();
     st2.handle_map_size(2, &report2_bytes);
-    assert_eq!(st2.downloads.len(), 0, "Download should not start without permission");
+    assert_eq!(
+        st2.downloads.len(),
+        0,
+        "Download should not start without permission"
+    );
 
     // Grant permission via !download
     st2.run_command(1, "slash", ChatCommand::Download("P2".into()));
     assert!(st2.players.by_pid(2).unwrap().download_allowed);
     st2.handle_map_size(2, &report2_bytes);
-    assert_eq!(st2.downloads.len(), 1, "Download should start after permission granted");
+    assert_eq!(
+        st2.downloads.len(),
+        1,
+        "Download should start after permission granted"
+    );
 }
 
 #[test]
@@ -373,7 +468,10 @@ fn test_p2_7_mute_lobby_and_announcements() {
     // Player 2 sends normal chat -> not broadcast to Player 1
     let chat = make_chat_to_host(2, "Hello everyone");
     st.handle_chat_to_host(2, &chat);
-    assert!(rxs[0].try_recv().is_err(), "Chat should not be broadcast while lobby is muted");
+    assert!(
+        rxs[0].try_recv().is_err(),
+        "Chat should not be broadcast while lobby is muted"
+    );
 
     // Unmute lobby
     st.run_command(1, "slash", ChatCommand::MuteLobby(Some(false)));
@@ -403,17 +501,29 @@ fn test_p2_8_in_game_and_lobby_commands() {
 
     // !fakeplayer
     st.run_command(1, "slash", ChatCommand::FakePlayer);
-    assert!(st.fake_player_pid.is_some(), "Fake player should be seated in lobby");
+    assert!(
+        st.fake_player_pid.is_some(),
+        "Fake player should be seated in lobby"
+    );
     st.run_command(1, "slash", ChatCommand::FakePlayer);
-    assert!(st.fake_player_pid.is_none(), "Fake player should be removed");
+    assert!(
+        st.fake_player_pid.is_none(),
+        "Fake player should be removed"
+    );
 
     // Re-add fake player and test pause/resume in game
     st.run_command(1, "slash", ChatCommand::FakePlayer);
     st.begin_playing();
     st.run_command(1, "slash", ChatCommand::FpPause);
-    assert_eq!(st.actions.last().unwrap().data, bytes::Bytes::from_static(&[0x01]));
+    assert_eq!(
+        st.actions.last().unwrap().data,
+        bytes::Bytes::from_static(&[0x01])
+    );
     st.run_command(1, "slash", ChatCommand::FpResume);
-    assert_eq!(st.actions.last().unwrap().data, bytes::Bytes::from_static(&[0x02]));
+    assert_eq!(
+        st.actions.last().unwrap().data,
+        bytes::Bytes::from_static(&[0x02])
+    );
 
     // !from
     st.run_command(1, "slash", ChatCommand::From);
@@ -425,7 +535,14 @@ fn test_p2_8_in_game_and_lobby_commands() {
     assert!(st.local_admin_messages);
 
     // !sendlan
-    st.run_command(1, "slash", ChatCommand::SendLan { ip: "192.168.1.100".into(), port: Some(6112) });
+    st.run_command(
+        1,
+        "slash",
+        ChatCommand::SendLan {
+            ip: "192.168.1.100".into(),
+            port: Some(6112),
+        },
+    );
 
     // !pub / !priv in lobby
     st.phase = GamePhase::Lobby;
@@ -449,6 +566,8 @@ fn test_p2_8_in_game_and_lobby_commands() {
     // Unknown command reply
     let _ = drain_ids(&mut rxs[0]);
     st.run_command(1, "slash", ChatCommand::Unknown("foobar".into()));
-    let reply = rxs[0].try_recv().expect("Caller must receive unknown command reply");
+    let reply = rxs[0]
+        .try_recv()
+        .expect("Caller must receive unknown command reply");
     assert!(reply.windows(7).any(|w| w == b"Unknown"));
 }

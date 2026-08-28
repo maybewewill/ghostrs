@@ -46,4 +46,3 @@ pub const PLAYERLEAVE_DRAW: u32 = 10;
 pub const PLAYERLEAVE_OBSERVER: u32 = 11;
 pub const PLAYERLEAVE_LOBBY: u32 = 13;
 pub const PLAYERLEAVE_GPROXY: u32 = 100;
-

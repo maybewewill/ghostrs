@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -106,7 +108,6 @@ fn chat_bytes(from_pid: u8, msg: &str) -> Bytes {
         .encode_with(0xF7)
         .unwrap()
 }
-
 
 async fn run_client(
     addr: String,
@@ -276,7 +277,12 @@ async fn read_n(sock: &mut TcpStream, n: usize) -> std::io::Result<Vec<u8>> {
     Ok(out)
 }
 
-async fn run_viewer(tv_addr: String, delay: Duration, duration: Duration, m: Arc<Mutex<TvMetrics>>) {
+async fn run_viewer(
+    tv_addr: String,
+    delay: Duration,
+    duration: Duration,
+    m: Arc<Mutex<TvMetrics>>,
+) {
     tokio::time::sleep(delay).await;
 
     // 1. Bootstrap: mode 0 + start index 0 -> u32 resume index, u32 file len, file.
@@ -358,7 +364,8 @@ async fn run_viewer(tv_addr: String, delay: Duration, duration: Duration, m: Arc
             let _crc = u32::from_le_bytes(hdr[4..8].try_into().unwrap());
             let payload = read_n(&mut sock, comp_len).await.ok()?;
             Some(payload)
-        }).await;
+        })
+        .await;
         match gap {
             Ok(Some(payload)) => {
                 let now = Instant::now();
@@ -366,7 +373,9 @@ async fn run_viewer(tv_addr: String, delay: Duration, duration: Duration, m: Arc
                 last_frame = now;
                 frames += 1;
                 bytes += (8 + payload.len()) as u64;
-                if now >= deadline { break; }
+                if now >= deadline {
+                    break;
+                }
             }
             Ok(None) | Err(_) => break, // timeout or clean close
         }
@@ -531,7 +540,6 @@ async fn main() -> anyhow::Result<()> {
     }
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

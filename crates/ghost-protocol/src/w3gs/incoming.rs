@@ -270,7 +270,8 @@ mod tests {
         assert_eq!(decode_map_part_not_ok(&payload_6b).unwrap(), 1);
 
         // 10-byte payload variant (with 4-byte unknown field before offset)
-        let payload_10b = Bytes::from_static(&[0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00]);
+        let payload_10b =
+            Bytes::from_static(&[0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00]);
         assert_eq!(decode_map_part_not_ok(&payload_10b).unwrap(), 0x1234);
 
         // Short payload

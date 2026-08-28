@@ -32,4 +32,3 @@ pub use state::{GameConfig, GamePhase, GameState, MapInfo};
 pub use stats_dota::{DotAPlayerStats, StatsDotA};
 pub use stats_w3mmd::StatsW3MMD;
 pub use tick::TickScheduler;
-

@@ -77,7 +77,6 @@ pub struct Supervisor {
     current_game_created_at: Option<std::time::Instant>,
 }
 
-
 impl Supervisor {
     pub async fn run(
         cfg: Config,
@@ -117,7 +116,8 @@ impl Supervisor {
         // Warcraft 3 client listens on UDP port 6112 for LAN game broadcasts
         const WAR3_LAN_UDP_PORT: u16 = 6112;
         let target_ip = cfg.bot.resolved_udp_broadcast_target();
-        let udp_broadcaster = match UdpBroadcaster::bind_target(target_ip, WAR3_LAN_UDP_PORT).await {
+        let udp_broadcaster = match UdpBroadcaster::bind_target(target_ip, WAR3_LAN_UDP_PORT).await
+        {
             Ok(u) => {
                 tracing::info!(target = %target_ip, "LAN UDP broadcaster bound");
                 Some(u)
@@ -172,7 +172,6 @@ impl Supervisor {
             current_game_created_at: None,
         };
 
-
         for name in host_on_start {
             let owner = sup.cfg.bnet.username.clone();
             sup.create_game(&name, &owner, ghost_protocol::GameVisibility::Public);
@@ -189,15 +188,13 @@ impl Supervisor {
 
         let mut lan_timer = tokio::time::interval(Duration::from_secs(3));
         let mut cleanup_timer = tokio::time::interval(Duration::from_secs(1));
-        if let Some(s) = start_after {
-            if let Some(g) = self.current_game.clone() {
-                let username = self.cfg.bnet.username.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(s)).await;
-                    tracing::info!("--start-after elapsed ({s}s), starting the game");
-                    g.send(GameCmd::Start { by: username });
-                });
-            }
+        if let (Some(s), Some(g)) = (start_after, self.current_game.clone()) {
+            let username = self.cfg.bnet.username.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(s)).await;
+                tracing::info!("--start-after elapsed ({s}s), starting the game");
+                g.send(GameCmd::Start { by: username });
+            });
         }
 
         loop {
@@ -241,17 +238,17 @@ impl Supervisor {
                 Some(ev) = self.game_event_rx.recv() => {
                     match ev {
                         ghost_engine::GameEvent::LobbyStatus { host_counter, slots_open, slots_total, human_players } => {
-                            if let Some(g) = self.games.iter_mut().find(|g| g.host_counter == host_counter) {
-                                if let Some(adv) = &mut g.advert {
-                                    adv.slots_open = slots_open;
-                                    adv.slots_total = slots_total;
-                                }
+                            if let Some(g) = self.games.iter_mut().find(|g| g.host_counter == host_counter)
+                                && let Some(adv) = &mut g.advert
+                            {
+                                adv.slots_open = slots_open;
+                                adv.slots_total = slots_total;
                             }
-                            if let Some(adv) = &mut self.current_game_advert {
-                                if adv.host_counter == host_counter {
-                                    adv.slots_open = slots_open;
-                                    adv.slots_total = slots_total;
-                                }
+                            if let Some(adv) = &mut self.current_game_advert
+                                && adv.host_counter == host_counter
+                            {
+                                adv.slots_open = slots_open;
+                                adv.slots_total = slots_total;
                             }
                             self.bnet.send(ghost_bnet::BnetCmd::RefreshGame {
                                 players: human_players,
@@ -263,14 +260,15 @@ impl Supervisor {
             }
         }
 
-
         Ok(())
     }
 
     async fn broadcast_lan_game(&self) {
         if let Some(u) = &self.udp_broadcaster {
             for g in &self.games {
-                if g.in_lobby && let Some(adv) = &g.advert {
+                if g.in_lobby
+                    && let Some(adv) = &g.advert
+                {
                     let uptime = g.created_at.elapsed().as_secs() as u32;
                     if let Ok(pkt) = game_info(
                         self.cfg.bot.tft,
@@ -289,8 +287,11 @@ impl Supervisor {
                     }
                 }
             }
-            if self.games.is_empty() && let Some(adv) = &self.current_game_advert {
-                let uptime = self.current_game_created_at
+            if self.games.is_empty()
+                && let Some(adv) = &self.current_game_advert
+            {
+                let uptime = self
+                    .current_game_created_at
                     .map(|t| t.elapsed().as_secs() as u32)
                     .unwrap_or(0);
                 if let Ok(pkt) = game_info(
@@ -312,8 +313,17 @@ impl Supervisor {
         }
     }
 
-    fn handle_new_connection(&mut self, conn_id: u64, stream: TcpStream, peer: SocketAddr, local_port: u16) {
-        let target_game = self.port_to_game.get(&local_port).cloned()
+    fn handle_new_connection(
+        &mut self,
+        conn_id: u64,
+        stream: TcpStream,
+        peer: SocketAddr,
+        local_port: u16,
+    ) {
+        let target_game = self
+            .port_to_game
+            .get(&local_port)
+            .cloned()
             .or_else(|| self.current_game.clone());
 
         if let Some(game) = target_game {
@@ -335,14 +345,12 @@ impl Supervisor {
     }
 
     fn handle_reconnect_connection(&mut self, conn_id: u64, stream: TcpStream, peer: SocketAddr) {
-        let mut candidate_games: Vec<GameHandle> = Vec::new();
-        for g in &self.games {
-            candidate_games.push(g.handle.clone());
-        }
-        if candidate_games.is_empty() {
-            if let Some(ref g) = self.current_game {
-                candidate_games.push(g.clone());
-            }
+        let mut candidate_games: Vec<GameHandle> =
+            self.games.iter().map(|g| g.handle.clone()).collect();
+        if candidate_games.is_empty()
+            && let Some(ref g) = self.current_game
+        {
+            candidate_games.push(g.clone());
         }
 
         if candidate_games.is_empty() {
@@ -360,7 +368,10 @@ impl Supervisor {
                 use tokio::io::AsyncReadExt;
                 while buf.len() < 13 {
                     let mut temp = [0u8; 128];
-                    let n = stream.read(&mut temp).await.map_err(|e| anyhow::anyhow!(e))?;
+                    let n = stream
+                        .read(&mut temp)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
                     if n == 0 {
                         return Err(anyhow::anyhow!("peer closed before sending GPS_RECONNECT"));
                     }
@@ -436,7 +447,10 @@ impl Supervisor {
                 tracing::info!("received Battle.net friends list ({} friends)", fl.len());
             }
             BnetEvent::ClanList(cl) => {
-                tracing::info!("received Battle.net clan member list ({} members)", cl.len());
+                tracing::info!(
+                    "received Battle.net clan member list ({} members)",
+                    cl.len()
+                );
             }
             BnetEvent::ClanInviteReceived {
                 clan_name,
@@ -545,15 +559,24 @@ impl Supervisor {
             "unhost" => {
                 let target_name = parts.collect::<Vec<_>>().join(" ");
                 if !target_name.is_empty() {
-                    if let Some(idx) = self.games.iter().position(|g| g.name.eq_ignore_ascii_case(&target_name)) {
+                    if let Some(idx) = self
+                        .games
+                        .iter()
+                        .position(|g| g.name.eq_ignore_ascii_case(&target_name))
+                    {
                         let g = self.games.remove(idx);
                         g.handle.send(GameCmd::Unhost);
                         self.release_port(g.port);
                         self.port_to_game.remove(&g.port);
                         self.bnet.send(BnetCmd::UnhostGame);
-                        self.bnet.send(BnetCmd::SendChat(format!("/w {user} Game [{}] unhosted", g.name)));
+                        self.bnet.send(BnetCmd::SendChat(format!(
+                            "/w {user} Game [{}] unhosted",
+                            g.name
+                        )));
                     } else {
-                        self.bnet.send(BnetCmd::SendChat(format!("/w {user} No game matching [{target_name}]")));
+                        self.bnet.send(BnetCmd::SendChat(format!(
+                            "/w {user} No game matching [{target_name}]"
+                        )));
                     }
                 } else if let Some(idx) = self.games.iter().position(|g| g.in_lobby) {
                     let g = self.games.remove(idx);
@@ -561,7 +584,10 @@ impl Supervisor {
                     self.release_port(g.port);
                     self.port_to_game.remove(&g.port);
                     self.bnet.send(BnetCmd::UnhostGame);
-                    self.bnet.send(BnetCmd::SendChat(format!("/w {user} Game [{}] unhosted", g.name)));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Game [{}] unhosted",
+                        g.name
+                    )));
                 } else if let Some(g) = self.current_game.take() {
                     g.send(GameCmd::Unhost);
                     self.current_game_name = None;
@@ -649,15 +675,17 @@ impl Supervisor {
             "addadmin" => {
                 if let Some(target) = parts.next() {
                     self.store.add_admin(target, "");
-                    self.bnet
-                        .send(BnetCmd::SendChat(format!("/w {user} Added admin [{target}]")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Added admin [{target}]"
+                    )));
                 }
             }
             "deladmin" => {
                 if let Some(target) = parts.next() {
                     self.store.remove_admin(target);
-                    self.bnet
-                        .send(BnetCmd::SendChat(format!("/w {user} Removed admin [{target}]")));
+                    self.bnet.send(BnetCmd::SendChat(format!(
+                        "/w {user} Removed admin [{target}]"
+                    )));
                 }
             }
             "checkadmin" => {
@@ -682,12 +710,14 @@ impl Supervisor {
             }
             "countadmins" => {
                 let count = self.cfg.bnet.root_admins.len();
-                self.bnet
-                    .send(BnetCmd::SendChat(format!("/w {user} Root admins configured: {count}")));
+                self.bnet.send(BnetCmd::SendChat(format!(
+                    "/w {user} Root admins configured: {count}"
+                )));
             }
             "countbans" => {
-                self.bnet
-                    .send(BnetCmd::SendChat(format!("/w {user} Bans stored in SQLite database.")));
+                self.bnet.send(BnetCmd::SendChat(format!(
+                    "/w {user} Bans stored in SQLite database."
+                )));
             }
             "delban" => {
                 if let Some(target) = parts.next() {
@@ -710,9 +740,8 @@ impl Supervisor {
                     list.push(format!("{} [port:{}, {}]", g.name, g.port, status));
                 }
                 if list.is_empty() {
-                    self.bnet.send(BnetCmd::SendChat(format!(
-                        "/w {user} No active games."
-                    )));
+                    self.bnet
+                        .send(BnetCmd::SendChat(format!("/w {user} No active games.")));
                 } else {
                     self.bnet.send(BnetCmd::SendChat(format!(
                         "/w {user} Active games ({count}): {}",
@@ -742,8 +771,9 @@ impl Supervisor {
                 )));
             }
             "dbstatus" => {
-                self.bnet
-                    .send(BnetCmd::SendChat(format!("/w {user} Database WAL mode active, connected.")));
+                self.bnet.send(BnetCmd::SendChat(format!(
+                    "/w {user} Database WAL mode active, connected."
+                )));
             }
             "exit" | "quit" => {
                 self.bnet
@@ -762,8 +792,9 @@ impl Supervisor {
             }
             "accept" => {
                 self.bnet.send(BnetCmd::ClanAcceptInvite(true));
-                self.bnet
-                    .send(BnetCmd::SendChat(format!("/w {user} Accepted clan invitation.")));
+                self.bnet.send(BnetCmd::SendChat(format!(
+                    "/w {user} Accepted clan invitation."
+                )));
             }
             "invite" => {
                 if let Some(target) = parts.next() {
@@ -820,7 +851,8 @@ impl Supervisor {
             }
             "remove" => {
                 if let Some(target) = parts.next() {
-                    self.bnet.send(BnetCmd::ClanRemoveMember(target.to_string()));
+                    self.bnet
+                        .send(BnetCmd::ClanRemoveMember(target.to_string()));
                     self.bnet.send(BnetCmd::SendChat(format!(
                         "/w {user} Removed [{target}] from clan."
                     )));
@@ -835,8 +867,9 @@ impl Supervisor {
             }
             "disable" => {
                 self.autohost = None;
-                self.bnet
-                    .send(BnetCmd::SendChat(format!("/w {user} Bot hosting disabled.")));
+                self.bnet.send(BnetCmd::SendChat(format!(
+                    "/w {user} Bot hosting disabled."
+                )));
             }
             "enable" => {
                 self.bnet
@@ -870,12 +903,7 @@ impl Supervisor {
                     let gname = parts.collect::<Vec<_>>().join(" ");
                     if !gname.is_empty() {
                         let server = self.cfg.bnet.server.clone();
-                        self.create_game_with_creator(
-                            &gname,
-                            owner,
-                            &server,
-                            visibility,
-                        );
+                        self.create_game_with_creator(&gname, owner, &server, visibility);
                         self.bnet.send(BnetCmd::SendChat(format!(
                             "/w {user} Hosted game [{gname}] for [{owner}]."
                         )));
@@ -945,9 +973,17 @@ impl Supervisor {
             .or_else(|_| std::fs::read("maps/blizzard.j"))
             .ok();
 
-        let map_override = self.selected_map_file.as_ref()
+        let map_override = self
+            .selected_map_file
+            .as_ref()
             .and_then(|f| self.cfg.maps.get(f))
-            .or_else(|| self.cfg.bot.default_map.as_ref().and_then(|f| self.cfg.maps.get(f)))
+            .or_else(|| {
+                self.cfg
+                    .bot
+                    .default_map
+                    .as_ref()
+                    .and_then(|f| self.cfg.maps.get(f))
+            })
             .or_else(|| self.cfg.maps.get(game_name));
 
         for candidate_filename in &candidate_filenames {
@@ -959,8 +995,12 @@ impl Supervisor {
 
             for path in &candidate_paths {
                 if path.exists()
-                    && let Ok(parsed) =
-                        ParsedMap::load_mpq_with_override(path, common_j.as_deref(), blizzard_j.as_deref(), map_override)
+                    && let Ok(parsed) = ParsedMap::load_mpq_with_override(
+                        path,
+                        common_j.as_deref(),
+                        blizzard_j.as_deref(),
+                        map_override,
+                    )
                 {
                     tracing::info!(
                         path = %path.display(),
@@ -1051,11 +1091,12 @@ impl Supervisor {
             }
         };
 
-        if !self.active_listeners.contains_key(&port) {
-            if let Ok(bind_addr) = format!("{}:{}", self.cfg.bot.bind_address, port).parse::<SocketAddr>() {
-                let task = spawn_listener_tagged(bind_addr, port, self.listener_tx.clone());
-                self.active_listeners.insert(port, task);
-            }
+        if !self.active_listeners.contains_key(&port)
+            && let Ok(bind_addr) =
+                format!("{}:{}", self.cfg.bot.bind_address, port).parse::<SocketAddr>()
+        {
+            let task = spawn_listener_tagged(bind_addr, port, self.listener_tx.clone());
+            self.active_listeners.insert(port, task);
         }
 
         let advert_map = MapAdvert {
@@ -1072,7 +1113,8 @@ impl Supervisor {
             flags: map_info.flags,
         };
 
-        let stat_string = ghost_bnet::encode_lan_statstring(&advert_map, name, &self.cfg.game.virtual_host_name);
+        let stat_string =
+            ghost_bnet::encode_lan_statstring(&advert_map, name, &self.cfg.game.virtual_host_name);
 
         let game_cfg = GameConfig {
             name: name.to_string(),
@@ -1108,7 +1150,6 @@ impl Supervisor {
             max_score: 0.0,
             matchmaking: false,
         };
-
 
         let (handle, join) = spawn_game(game_cfg);
         handle.send(GameCmd::CreateVirtualHost);
@@ -1341,13 +1382,20 @@ mod tests {
         };
 
         match ev {
-            ghost_engine::GameEvent::LobbyStatus { slots_open, slots_total, .. } => {
+            ghost_engine::GameEvent::LobbyStatus {
+                slots_open,
+                slots_total,
+                ..
+            } => {
                 adv.slots_open = slots_open;
                 adv.slots_total = slots_total;
             }
         }
 
-        assert_eq!(adv.slots_open, 7, "slots_open must dynamically update in ActiveLobbyAdvert");
+        assert_eq!(
+            adv.slots_open, 7,
+            "slots_open must dynamically update in ActiveLobbyAdvert"
+        );
         assert_eq!(adv.slots_total, 10, "slots_total must match");
     }
 
@@ -1385,7 +1433,9 @@ mod tests {
         // 4. !shaman
         sup.handle_chat_command("admin", "!shaman player1");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
-        assert!(matches!(cmd, ghost_bnet::BnetCmd::ClanChangeRank { account, rank: 3 } if account == "player1"));
+        assert!(
+            matches!(cmd, ghost_bnet::BnetCmd::ClanChangeRank { account, rank: 3 } if account == "player1")
+        );
         let _ = bnet_cmd_rx.try_recv();
 
         // 5. !motd
@@ -1465,4 +1515,3 @@ mod tests {
         assert_eq!(sup.games[1].port, 6113);
     }
 }
-

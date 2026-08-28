@@ -48,7 +48,6 @@ pub fn encode_lan_statstring(map: &MapAdvert, _game_name: &str, host_name: &str)
     encode_statstring(&raw)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,4 +98,3 @@ mod tests {
         assert_eq!(&bnet_dec[lan_dec.len()..], &sha1);
     }
 }
-

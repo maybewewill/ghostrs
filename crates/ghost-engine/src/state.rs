@@ -81,14 +81,14 @@ impl MapInfo {
         if self.width == 0 || self.height == 0 {
             return Err("invalid map dimensions: width and height must be > 0".into());
         }
-        if let Some(ref data) = self.data {
-            if self.size != data.len() as u32 {
-                return Err(format!(
-                    "invalid map_size [{}]: size mismatch with actual map data [{}]",
-                    self.size,
-                    data.len()
-                ));
-            }
+        if let Some(ref data) = self.data
+            && self.size != data.len() as u32
+        {
+            return Err(format!(
+                "invalid map_size [{}]: size mismatch with actual map data [{}]",
+                self.size,
+                data.len()
+            ));
         }
         Ok(())
     }
@@ -158,7 +158,6 @@ pub struct GameConfig {
 }
 
 /// GHost++ steps the countdown every 500 ms (`game_base.cpp:707`), starting at 10 down to 1 (5.0s in total).
-
 pub const COUNTDOWN_STEP: Duration = Duration::from_millis(500);
 pub const COUNTDOWN_STEPS: u8 = 10;
 pub const COUNTDOWN_TOTAL: Duration = Duration::from_millis(500 * COUNTDOWN_STEPS as u64);
@@ -270,7 +269,6 @@ impl GameState {
         let mut replay = ghost_spectator::ReplayBody::new(255, &cfg.virtual_host_name);
         replay.set_game(&cfg.name, &replay_stat_string, cfg.map.game_type);
         Self {
-
             phase: GamePhase::Lobby,
             slots,
             players: PlayerTable::new(),
@@ -299,7 +297,9 @@ impl GameState {
             store: cfg.store.clone(),
             jitter_histogram: [0; 5],
             last_jitter_report: Instant::now(),
-            dota: if cfg.map.map_type == "dota" || (cfg.map.map_type.is_empty() && cfg.name.to_lowercase().contains("dota")) {
+            dota: if cfg.map.map_type == "dota"
+                || (cfg.map.map_type.is_empty() && cfg.name.to_lowercase().contains("dota"))
+            {
                 Some(crate::stats_dota::StatsDotA::new(cfg.name.clone()))
             } else {
                 None
@@ -481,12 +481,20 @@ impl GameState {
             r.send_chat(&self.cfg.virtual_host_name, message);
         }
         if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
-            let msg = if message.len() > 254 { &message[..254] } else { message };
+            let msg = if message.len() > 254 {
+                &message[..254]
+            } else {
+                message
+            };
             if let Ok(b) = outgoing::chat_from_host(from, &pids, 0x10, &[], msg) {
                 self.broadcast(b);
             }
         } else {
-            let msg = if message.len() > 127 { &message[..127] } else { message };
+            let msg = if message.len() > 127 {
+                &message[..127]
+            } else {
+                message
+            };
             let extra: [u8; 4] = [0, 0, 0, 0];
             if let Some(rep) = self.replay.as_mut() {
                 rep.add_chat(from, 0x20, 0, msg);
@@ -635,7 +643,9 @@ impl GameState {
         self.virtual_host_pid = 255;
         self.players.remove_pid(pid);
         // PLAYERLEAVE_LOBBY == 13, matching game_base.cpp:4721.
-        self.broadcast(outgoing::player_leave_others(pid, ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY));
+        self.broadcast(outgoing::player_leave_others(
+            pid,
+            ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
+        ));
     }
 }
-

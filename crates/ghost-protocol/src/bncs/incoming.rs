@@ -498,7 +498,7 @@ mod tests {
     fn clan_creation_and_invitation_decode() {
         let mut payload = Vec::new();
         payload.extend_from_slice(&[0, 0, 0, 0]); // cookie
-        payload.extend_from_slice(&[b'T', b'E', b'S', b'T']); // tag
+        payload.extend_from_slice(b"TEST"); // tag
         payload.extend_from_slice(b"MyClan\0");
         payload.extend_from_slice(b"InviterGuy\0");
 
@@ -507,7 +507,8 @@ mod tests {
         assert_eq!(invite.clan_name, "MyClan");
         assert_eq!(invite.inviter_name, "InviterGuy");
 
-        let resp_invite = decode_claninvitationresponse(&payload).expect("response decode succeeds");
+        let resp_invite =
+            decode_claninvitationresponse(&payload).expect("response decode succeeds");
         assert_eq!(&resp_invite.tag, b"TEST");
         assert_eq!(resp_invite.clan_name, "MyClan");
         assert_eq!(resp_invite.inviter_name, "InviterGuy");

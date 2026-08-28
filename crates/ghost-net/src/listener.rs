@@ -51,7 +51,11 @@ pub fn spawn_listener_tagged(
                     continue;
                 }
             };
-            if out.send((next_conn_id(), stream, peer, port)).await.is_err() {
+            if out
+                .send((next_conn_id(), stream, peer, port))
+                .await
+                .is_err()
+            {
                 return Ok(()); // owner shut down
             }
         }

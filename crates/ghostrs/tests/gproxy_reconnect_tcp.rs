@@ -1,9 +1,9 @@
-use std::time::Duration;
 use bytes::{BufMut, Bytes, BytesMut};
 use ghost_protocol::gps;
 use ghost_protocol::w3gs::ids as w3gs_ids;
 use ghostrs::Config;
 use ghostrs::Supervisor;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -82,7 +82,9 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     let mut got_init = false;
 
     for _ in 0..10 {
-        if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(100), player_sock.read(&mut init_buf)).await {
+        if let Ok(Ok(n)) =
+            tokio::time::timeout(Duration::from_millis(100), player_sock.read(&mut init_buf)).await
+        {
             let mut offset = 0;
             while offset + 14 <= n {
                 if init_buf[offset] == 0xF8 && init_buf[offset + 1] == gps::ids::INIT {
@@ -130,14 +132,20 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     let mut reply_buf = vec![0u8; 1024];
     let mut reconnected = false;
     for _ in 0..10 {
-        if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(100), reconn_sock.read(&mut reply_buf)).await {
-            if n >= 4 && reply_buf[0] == 0xF8 && (reply_buf[1] == gps::ids::RECONNECT || reply_buf[1] == gps::ids::ACK) {
-                reconnected = true;
-                break;
-            }
+        if let Ok(Ok(n)) =
+            tokio::time::timeout(Duration::from_millis(100), reconn_sock.read(&mut reply_buf)).await
+            && n >= 4
+            && reply_buf[0] == 0xF8
+            && (reply_buf[1] == gps::ids::RECONNECT || reply_buf[1] == gps::ids::ACK)
+        {
+            reconnected = true;
+            break;
         }
     }
-    assert!(reconnected, "must receive GPS_RECONNECT/ACK on reconnect socket");
+    assert!(
+        reconnected,
+        "must receive GPS_RECONNECT/ACK on reconnect socket"
+    );
 
     // 8. Test invalid key on a separate connection -> rejected
     let mut bad_sock = TcpStream::connect(format!("127.0.0.1:{reconnect_port}"))
@@ -156,10 +164,10 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
 
     let mut bad_buf = vec![0u8; 1024];
     let mut got_reject = false;
-    if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(300), bad_sock.read(&mut bad_buf)).await {
-        if n >= 4 && bad_buf[0] == 0xF8 && bad_buf[1] == gps::ids::REJECT {
-            got_reject = true;
-        } else if n == 0 {
+    if let Ok(Ok(n)) =
+        tokio::time::timeout(Duration::from_millis(300), bad_sock.read(&mut bad_buf)).await
+    {
+        if (n >= 4 && bad_buf[0] == 0xF8 && bad_buf[1] == gps::ids::REJECT) || n == 0 {
             got_reject = true;
         }
     } else {

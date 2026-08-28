@@ -29,7 +29,11 @@ fn crc_table() -> [u32; 256] {
     for i in 0..256u32 {
         let mut c = i;
         for _ in 0..8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
         }
         table[i as usize] = c;
     }
@@ -433,7 +437,7 @@ mod tests {
     fn nothing_is_published_until_flush() {
         let mut s = DotaTvStream::for_126a();
 
-        s.push_body(&vec![0x11; 100]).unwrap();
+        s.push_body(&[0x11; 100]).unwrap();
         assert_eq!(s.chunk_count(), 0, "push alone must not publish");
         assert_eq!(s.pending_len(), 100);
 
@@ -506,7 +510,11 @@ mod tests {
                 "frame {i} compressed to {} bytes, guard caps at {CHUNK_SIZE}",
                 c.compressed.len()
             );
-            assert_eq!(inflate(&c.compressed).len(), c.valid_bytes as usize, "frame {i}");
+            assert_eq!(
+                inflate(&c.compressed).len(),
+                c.valid_bytes as usize,
+                "frame {i}"
+            );
         }
     }
 
@@ -521,7 +529,10 @@ mod tests {
         for i in 0..s.chunk_count() {
             rebuilt.extend_from_slice(&inflate(&s.chunk(i).unwrap().compressed));
         }
-        assert_eq!(rebuilt, body, "frames must cover the body with no gaps or filler");
+        assert_eq!(
+            rebuilt, body,
+            "frames must cover the body with no gaps or filler"
+        );
     }
 
     #[test]
@@ -621,7 +632,10 @@ mod tests {
             e.extend_from_slice(&live);
             e
         };
-        assert_eq!(resumed, expected, "resume must continue the byte stream exactly");
+        assert_eq!(
+            resumed, expected,
+            "resume must continue the byte stream exactly"
+        );
     }
 
     #[test]

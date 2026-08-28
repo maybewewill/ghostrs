@@ -71,11 +71,7 @@ pub fn set_mpq_seed(mpq_number: i32, new_seed: u32) -> u32 {
 /// Evaluates a Battle.net CheckRevision formula string across a slice of game binary paths.
 ///
 /// Returns the final checksum (register 'C') as `u32`.
-pub fn check_revision(
-    formula: &str,
-    files: &[&Path],
-    mpq_number: i32,
-) -> Result<u32, Error> {
+pub fn check_revision(formula: &str, files: &[&Path], mpq_number: i32) -> Result<u32, Error> {
     if files.is_empty() {
         return Err(Error::new(
             ErrorKind::InvalidInput,
@@ -85,7 +81,11 @@ pub fn check_revision(
 
     let (mut a, mut b, mut c, ops) = parse_formula(formula)?;
     let seed = get_mpq_seed(mpq_number);
-    let effective_seed = if seed != 0 { seed } else { DEFAULT_MPQ_SEEDS[1] };
+    let effective_seed = if seed != 0 {
+        seed
+    } else {
+        DEFAULT_MPQ_SEEDS[1]
+    };
 
     a ^= effective_seed;
 
@@ -295,10 +295,7 @@ mod tests {
 
         let formula = "A=3845581634 B=880823580 C=1363937103 4 A=A-S B=B-C C=C-A A=A-B";
         let checksum = check_revision_flat(formula, &f1, &f2, &f3, 1).expect("checksum computed");
-        assert_eq!(
-            checksum, 2_297_190_262,
-            "checksum drifted from reference"
-        );
+        assert_eq!(checksum, 2_297_190_262, "checksum drifted from reference");
 
         let _ = std::fs::remove_file(&f1);
         let _ = std::fs::remove_file(&f2);

@@ -24,7 +24,7 @@ pub use libinfo::{
 };
 pub use mpq_num::extract_mpq_number;
 pub use nls::{
-    NLS_G, NLS_I, NLS_PRIME_BYTES, NLS_SIGNATURE_KEY, NLS_SIG_N, NlsAccountCreatePacket,
+    NLS_G, NLS_I, NLS_PRIME_BYTES, NLS_SIG_N, NLS_SIGNATURE_KEY, NlsAccountCreatePacket,
     NlsAccountLogonPacket, NlsChangeProofPacket, NlsError, NlsSession, check_signature,
 };
 pub use oldauth::{double_hash_password, hash_password as oldauth_hash_password};

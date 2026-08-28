@@ -37,8 +37,14 @@ pub struct BnetConfig {
 pub enum BnetEvent {
     Connected,
     LoggedIn,
-    ChatMessage { user: String, text: String },
-    Whisper { user: String, text: String },
+    ChatMessage {
+        user: String,
+        text: String,
+    },
+    Whisper {
+        user: String,
+        text: String,
+    },
     FriendsList(Vec<ghost_protocol::bncs::incoming::FriendListEntry>),
     ClanList(Vec<ghost_protocol::bncs::incoming::ClanMemberEntry>),
     ClanInviteReceived {
@@ -78,7 +84,10 @@ pub enum BnetCmd {
     GetClanList,
     ClanInvitation(String),
     ClanRemoveMember(String),
-    ClanChangeRank { account: String, rank: u8 },
+    ClanChangeRank {
+        account: String,
+        rank: u8,
+    },
     ClanSetMotd(String),
     ClanAcceptInvite(bool),
     Shutdown,

@@ -230,9 +230,9 @@ pub fn kd_quick(
     decode_cd_key(cdkey, client_token, server_token)
 }
 
-fn decode_key_components(
-    cdkey: &str,
-) -> Result<(KeyType, u32, u32, u32, Option<[u8; 10]>), CdKeyError> {
+type DecodedKeyTuple = (KeyType, u32, u32, u32, Option<[u8; 10]>);
+
+fn decode_key_components(cdkey: &str) -> Result<DecodedKeyTuple, CdKeyError> {
     for c in cdkey.chars() {
         if !c.is_alphanumeric() && c != '-' && c != ' ' {
             return Err(CdKeyError::InvalidChar(c));
@@ -267,8 +267,8 @@ fn decode_13_char_key(key: &str) -> Result<(u32, u32, u32), CdKeyError> {
     }
 
     let mut accum: i32 = 3;
-    for i in 0..12 {
-        let val = (bytes[i] as char).to_ascii_lowercase() as u8;
+    for &b in bytes.iter().take(12) {
+        let val = (b as char).to_ascii_lowercase() as u8;
         let digit = (val - b'0') as i32;
         accum += digit ^ (accum * 2);
     }
@@ -300,9 +300,15 @@ fn decode_13_char_key(key: &str) -> Result<(u32, u32, u32), CdKeyError> {
     }
 
     let s = std::str::from_utf8(&bytes).map_err(|_| CdKeyError::ChecksumFailed)?;
-    let product = s[0..2].parse::<u32>().map_err(|_| CdKeyError::ChecksumFailed)?;
-    let value1 = s[2..9].parse::<u32>().map_err(|_| CdKeyError::ChecksumFailed)?;
-    let value2 = s[9..12].parse::<u32>().map_err(|_| CdKeyError::ChecksumFailed)?;
+    let product = s[0..2]
+        .parse::<u32>()
+        .map_err(|_| CdKeyError::ChecksumFailed)?;
+    let value1 = s[2..9]
+        .parse::<u32>()
+        .map_err(|_| CdKeyError::ChecksumFailed)?;
+    let value2 = s[9..12]
+        .parse::<u32>()
+        .map_err(|_| CdKeyError::ChecksumFailed)?;
 
     Ok((product, value1, value2))
 }

@@ -60,11 +60,19 @@ impl Decoder for DualCodec {
             {
                 Some(pos) => {
                     let skipped = src.split_to(pos);
-                    tracing::warn!(skipped_len = pos, skipped = format!("{skipped:02X?}"), "DualCodec skipped non-header bytes");
+                    tracing::warn!(
+                        skipped_len = pos,
+                        skipped = format!("{skipped:02X?}"),
+                        "DualCodec skipped non-header bytes"
+                    );
                 }
                 None => {
                     let skipped = src.split_to(src.len());
-                    tracing::warn!(skipped_len = skipped.len(), skipped = format!("{skipped:02X?}"), "DualCodec cleared non-header buffer");
+                    tracing::warn!(
+                        skipped_len = skipped.len(),
+                        skipped = format!("{skipped:02X?}"),
+                        "DualCodec cleared non-header buffer"
+                    );
                     return Ok(None);
                 }
             }

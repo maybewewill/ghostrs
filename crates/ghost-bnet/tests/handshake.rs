@@ -166,14 +166,28 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         p.put_u32_le(0);
         p.put_slice(b"IX86ver1.mpq\0");
         p.put_slice(b"A=47 B=1\0");
-        framed_write.send(Frame::new(ids::SID_AUTH_INFO, p.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_AUTH_INFO, p.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // 3. AUTH_CHECK
         let _ = framed_read.next().await.unwrap().unwrap();
         let mut p = BytesMut::new();
         p.put_u32_le(0);
         p.put_slice(b"passed\0");
-        framed_write.send(Frame::new(ids::SID_AUTH_CHECK, p.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_AUTH_CHECK, p.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // 4. AUTH_ACCOUNTLOGON
         let _ = framed_read.next().await.unwrap().unwrap();
@@ -181,7 +195,14 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         p.put_u32_le(0);
         p.put_slice(&[0u8; 32]);
         p.put_slice(&[0u8; 32]);
-        framed_write.send(Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_AUTH_ACCOUNTLOGON, p.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // 4b. AUTH_ACCOUNTLOGONPROOF
         let _ = framed_read.next().await.unwrap().unwrap();
@@ -189,7 +210,14 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         p.put_u32_le(0);
         p.put_slice(&[0u8; 20]);
         p.put_slice(b"\0");
-        framed_write.send(Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_AUTH_ACCOUNTLOGONPROOF, p.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Drain NETGAMEPORT, ENTERCHAT, FRIENDSLIST, CLANMEMBERLIST
         let _ = framed_read.next().await.unwrap().unwrap(); // NETGAMEPORT
@@ -198,7 +226,17 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         let _ = framed_read.next().await.unwrap().unwrap(); // CLANMEMBERLIST
 
         // Send ENTERCHAT reply
-        framed_write.send(Frame::new(ids::SID_ENTERCHAT, bytes::Bytes::from_static(b"Unique\0Stat\0Account\0")).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(
+                    ids::SID_ENTERCHAT,
+                    bytes::Bytes::from_static(b"Unique\0Stat\0Account\0"),
+                )
+                .encode_with(0xFF)
+                .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Send SID_FRIENDSLIST response
         let mut fl_payload = BytesMut::new();
@@ -208,7 +246,14 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         fl_payload.put_u8(2); // area
         fl_payload.put_slice(&[0; 4]);
         fl_payload.put_slice(b"Channel\0");
-        framed_write.send(Frame::new(ids::SID_FRIENDSLIST, fl_payload.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_FRIENDSLIST, fl_payload.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Send SID_CLANMEMBERLIST response
         let mut cl_payload = BytesMut::new();
@@ -218,7 +263,14 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         cl_payload.put_u8(2); // rank (Grunt)
         cl_payload.put_u8(1); // status (Online)
         cl_payload.put_slice(b"Location\0");
-        framed_write.send(Frame::new(ids::SID_CLANMEMBERLIST, cl_payload.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_CLANMEMBERLIST, cl_payload.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Send SID_CLANCREATIONINVITATION
         let mut invite_payload = BytesMut::new();
@@ -226,7 +278,14 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         invite_payload.put_slice(b"TAG1"); // tag
         invite_payload.put_slice(b"EpicClan\0");
         invite_payload.put_slice(b"ChiefBob\0");
-        framed_write.send(Frame::new(ids::SID_CLANCREATIONINVITATION, invite_payload.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_CLANCREATIONINVITATION, invite_payload.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Expect SID_CLANCREATIONINVITATION response from client after !accept
         let mut f_accept = framed_read.next().await.unwrap().unwrap();
@@ -238,7 +297,14 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         assert_eq!(f_accept.payload[f_accept.payload.len() - 1], 0x06); // accepted
 
         // Send SID_CHECKAD
-        framed_write.send(Frame::new(ids::SID_CHECKAD, bytes::Bytes::new()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_CHECKAD, bytes::Bytes::new())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Expect SID_CHECKAD response from client
         let mut f_checkad = framed_read.next().await.unwrap().unwrap();
@@ -248,25 +314,53 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         assert_eq!(f_checkad.id, ids::SID_CHECKAD);
 
         // Send SID_WARDEN
-        framed_write.send(Frame::new(ids::SID_WARDEN, bytes::Bytes::from_static(b"warden_check")).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_WARDEN, bytes::Bytes::from_static(b"warden_check"))
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Send SID_CLANCHANGERANK response (status 0 = success)
         let mut rank_payload = BytesMut::new();
         rank_payload.put_slice(&[0; 4]); // cookie
         rank_payload.put_u8(0); // status
-        framed_write.send(Frame::new(ids::SID_CLANCHANGERANK, rank_payload.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_CLANCHANGERANK, rank_payload.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Send SID_CLANREMOVEMEMBER response (status 0 = success)
         let mut rem_payload = BytesMut::new();
         rem_payload.put_slice(&[0; 4]);
         rem_payload.put_u8(0);
-        framed_write.send(Frame::new(ids::SID_CLANREMOVEMEMBER, rem_payload.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_CLANREMOVEMEMBER, rem_payload.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         // Send SID_CLANSETMOTD response (status 0 = success)
         let mut motd_payload = BytesMut::new();
         motd_payload.put_slice(&[0; 4]);
         motd_payload.put_u8(0);
-        framed_write.send(Frame::new(ids::SID_CLANSETMOTD, motd_payload.freeze()).encode_with(0xFF).unwrap()).await.unwrap();
+        framed_write
+            .send(
+                Frame::new(ids::SID_CLANSETMOTD, motd_payload.freeze())
+                    .encode_with(0xFF)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
     });
 
     let (events_tx, mut events_rx) = mpsc::channel(32);
@@ -334,7 +428,11 @@ async fn test_p2_6_bnet_client_handles_clan_friends_warden_checkad() {
         .expect("clan invite event")
         .expect("event");
     match ev_inv {
-        BnetEvent::ClanInviteReceived { clan_name, inviter, creation } => {
+        BnetEvent::ClanInviteReceived {
+            clan_name,
+            inviter,
+            creation,
+        } => {
             assert_eq!(clan_name, "EpicClan");
             assert_eq!(inviter, "ChiefBob");
             assert!(creation);

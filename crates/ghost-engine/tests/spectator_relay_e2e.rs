@@ -88,7 +88,6 @@ fn test_game_cfg(relay_handle: RelayHandle) -> GameConfig {
     }
 }
 
-
 fn make_reqjoin(name: &str) -> Bytes {
     let mut b = BytesMut::new();
     b.put_u32_le(1);

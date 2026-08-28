@@ -71,9 +71,21 @@ fn test_s2_w3mmd_binary_packet_parsing_and_operations() {
     assert_eq!(mmd.pid_to_name.get(&1), Some(&"Bob".to_string()));
 
     // 2. DefVarP definitions: int, real, string
-    mmd.process_action(&make_w3mmd_action("val:3", "DefVarP kills int none none", 0));
-    mmd.process_action(&make_w3mmd_action("val:4", "DefVarP ratio real none none", 0));
-    mmd.process_action(&make_w3mmd_action("val:5", "DefVarP hero string none none", 0));
+    mmd.process_action(&make_w3mmd_action(
+        "val:3",
+        "DefVarP kills int none none",
+        0,
+    ));
+    mmd.process_action(&make_w3mmd_action(
+        "val:4",
+        "DefVarP ratio real none none",
+        0,
+    ));
+    mmd.process_action(&make_w3mmd_action(
+        "val:5",
+        "DefVarP hero string none none",
+        0,
+    ));
 
     // 3. VarP operations (=, +=, -=)
     // Assignment =
@@ -95,7 +107,10 @@ fn test_s2_w3mmd_binary_packet_parsing_and_operations() {
 
     // String operations
     mmd.process_action(&make_w3mmd_action("val:11", "VarP 0 hero = Paladin", 0));
-    assert_eq!(mmd.var_strings.get(&(0, "hero".into())), Some(&"Paladin".to_string()));
+    assert_eq!(
+        mmd.var_strings.get(&(0, "hero".into())),
+        Some(&"Paladin".to_string())
+    );
 
     // 4. Flags
     mmd.process_action(&make_w3mmd_action("val:12", "FlagP 0 winner", 0));
@@ -104,7 +119,11 @@ fn test_s2_w3mmd_binary_packet_parsing_and_operations() {
     assert_eq!(mmd.flags_leaver.get(&1), Some(&true));
 
     // 5. Escaping in keys: "Token\ with\ space"
-    mmd.process_action(&make_w3mmd_action("val:14", "DefVarP special\\ var int none none", 0));
+    mmd.process_action(&make_w3mmd_action(
+        "val:14",
+        "DefVarP special\\ var int none none",
+        0,
+    ));
     mmd.process_action(&make_w3mmd_action("val:15", "VarP 0 special\\ var = 42", 0));
     assert_eq!(mmd.var_ints.get(&(0, "special var".into())), Some(&42));
 

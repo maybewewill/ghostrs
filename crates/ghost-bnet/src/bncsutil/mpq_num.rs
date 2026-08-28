@@ -8,14 +8,10 @@ pub fn extract_mpq_number(mpq_name: &str) -> i32 {
         name
     };
 
-    let digits: String = stem
-        .chars()
-        .rev()
-        .take_while(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
+    let num_start = stem
+        .rfind(|c: char| !c.is_ascii_digit())
+        .map_or(0, |i| i + 1);
+    let digits = &stem[num_start..];
 
     if digits.is_empty() {
         1

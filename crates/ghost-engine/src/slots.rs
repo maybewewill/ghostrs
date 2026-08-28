@@ -237,7 +237,7 @@ impl SlotTable {
     pub fn is_open(&self, sid: u8) -> bool {
         self.slots
             .get(sid as usize)
-            .map_or(false, |s| s.slot_status == SlotStatus::Open as u8)
+            .is_some_and(|s| s.slot_status == SlotStatus::Open as u8)
     }
 
     pub fn open_slots(&self) -> usize {
@@ -252,9 +252,6 @@ impl SlotTable {
             false
         }
     }
-
-
-
 
     pub fn open_all(&mut self) {
         for s in &mut self.slots {

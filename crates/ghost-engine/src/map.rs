@@ -267,7 +267,6 @@ impl ParsedMap {
         let map_data = fs::read(path)?;
         let map_size = map_data.len() as u32;
 
-
         let mut map_archive = Archive::open(path).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -558,9 +557,7 @@ impl ParsedMap {
             editor_version,
             ovr.and_then(|o| o.max_slots),
         );
-        let num_players = ovr
-            .and_then(|o| o.num_players)
-            .unwrap_or(slots.len() as u8);
+        let num_players = ovr.and_then(|o| o.num_players).unwrap_or(slots.len() as u8);
 
         let flags = calculate_game_flags(speed, visibility, observers, map_flags);
 
@@ -569,9 +566,15 @@ impl ParsedMap {
         } else {
             MAPFILTER_TYPE_SCENARIO
         };
-        let filter_maker = ovr.and_then(|o| o.filter_maker).unwrap_or(MAPFILTER_MAKER_USER);
-        let filter_type = ovr.and_then(|o| o.filter_type).unwrap_or(default_filter_type);
-        let filter_size = ovr.and_then(|o| o.filter_size).unwrap_or(MAPFILTER_SIZE_LARGE);
+        let filter_maker = ovr
+            .and_then(|o| o.filter_maker)
+            .unwrap_or(MAPFILTER_MAKER_USER);
+        let filter_type = ovr
+            .and_then(|o| o.filter_type)
+            .unwrap_or(default_filter_type);
+        let filter_size = ovr
+            .and_then(|o| o.filter_size)
+            .unwrap_or(MAPFILTER_SIZE_LARGE);
         let filter_obs = ovr.and_then(|o| o.filter_obs).unwrap_or(MAPFILTER_OBS_NONE);
 
         let mut game_type = calculate_game_type(filter_maker, filter_type, filter_size, filter_obs);
@@ -588,21 +591,11 @@ impl ParsedMap {
         let stats_w3mmd_category = ovr
             .and_then(|o| o.stats_w3mmd_category.clone())
             .unwrap_or_else(|| "default".into());
-        let default_hcl = ovr
-            .and_then(|o| o.default_hcl.clone())
-            .unwrap_or_default();
-        let default_player_score = ovr
-            .and_then(|o| o.default_player_score)
-            .unwrap_or(1000);
-        let loading_in_game = ovr
-            .and_then(|o| o.loading_in_game)
-            .unwrap_or(false);
-        let local_path = ovr
-            .and_then(|o| o.local_path.clone())
-            .unwrap_or_default();
-        let max_slots = ovr
-            .and_then(|o| o.max_slots)
-            .unwrap_or(24);
+        let default_hcl = ovr.and_then(|o| o.default_hcl.clone()).unwrap_or_default();
+        let default_player_score = ovr.and_then(|o| o.default_player_score).unwrap_or(1000);
+        let loading_in_game = ovr.and_then(|o| o.loading_in_game).unwrap_or(false);
+        let local_path = ovr.and_then(|o| o.local_path.clone()).unwrap_or_default();
+        let max_slots = ovr.and_then(|o| o.max_slots).unwrap_or(24);
 
         let file_name = path
             .file_name()
@@ -635,7 +628,8 @@ impl ParsedMap {
             max_slots,
         };
 
-        info.check_valid().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        info.check_valid()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         Ok(Self {
             info,
@@ -672,7 +666,10 @@ mod tests {
         println!("Path: {}", parsed.info.path);
         println!("Size: {}", parsed.info.size);
         println!("CRC: 0x{:08X}", parsed.info.crc);
-        println!("Width: {}, Height: {}", parsed.info.width, parsed.info.height);
+        println!(
+            "Width: {}, Height: {}",
+            parsed.info.width, parsed.info.height
+        );
         println!(
             "Players: {}, Teams: {}",
             parsed.info.num_players, parsed.info.num_teams
@@ -761,7 +758,6 @@ mod tests {
             max_score: 0.0,
             matchmaking: false,
         };
-
 
         let mut st = GameState::new(game_cfg);
 
@@ -898,9 +894,13 @@ mod tests {
         let blizzard_j = fs::read(workspace_dir.join("maps").join("blizzard.j")).ok();
 
         // 1. Default load has MAPOBS_NONE (bit 22 set in game_type, no 0x3000 in flags)
-        let default_map = ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
-            .expect("load default map");
-        assert_eq!(default_map.info.game_type & MAPGAMETYPE_OBSNONE, MAPGAMETYPE_OBSNONE);
+        let default_map =
+            ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
+                .expect("load default map");
+        assert_eq!(
+            default_map.info.game_type & MAPGAMETYPE_OBSNONE,
+            MAPGAMETYPE_OBSNONE
+        );
         assert_eq!(default_map.info.game_type & MAPGAMETYPE_OBSFULL, 0);
 
         // 2. Load with override enabling observers (MAPOBS_ALLOWED = 3) and filter_obs = MAPFILTER_OBS_FULL
@@ -912,15 +912,25 @@ mod tests {
             flags: Some(MAPFLAG_TEAMSTOGETHER),
             ..Default::default()
         };
-        let ovr_map = ParsedMap::load_mpq_with_override(&map_path, common_j.as_deref(), blizzard_j.as_deref(), Some(&ovr))
-            .expect("load map with override");
+        let ovr_map = ParsedMap::load_mpq_with_override(
+            &map_path,
+            common_j.as_deref(),
+            blizzard_j.as_deref(),
+            Some(&ovr),
+        )
+        .expect("load map with override");
 
         // Observers bit should be MAPGAMETYPE_OBSFULL (bit 20), not MAPGAMETYPE_OBSNONE
-        assert_eq!(ovr_map.info.game_type & MAPGAMETYPE_OBSFULL, MAPGAMETYPE_OBSFULL);
+        assert_eq!(
+            ovr_map.info.game_type & MAPGAMETYPE_OBSFULL,
+            MAPGAMETYPE_OBSFULL
+        );
         assert_eq!(ovr_map.info.game_type & MAPGAMETYPE_OBSNONE, 0);
 
         // Flags should reflect speed=normal(1), vis=always(0x400), obs=allowed(0x3000), flags=0x4000 -> 0x00007401
-        assert_eq!(ovr_map.info.flags, 0x0000_0001 | 0x0000_0400 | 0x0000_3000 | 0x0000_4000);
+        assert_eq!(
+            ovr_map.info.flags,
+            0x0000_0001 | 0x0000_0400 | 0x0000_3000 | 0x0000_4000
+        );
     }
 }
-

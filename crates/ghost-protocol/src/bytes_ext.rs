@@ -65,30 +65,25 @@ pub fn put_cstring(buf: &mut BytesMut, s: &str) {
     buf.put_u8(0);
 }
 
-/// Battle.net statstring encoding: each group of 7 bytes is prefixed by a mask
-/// byte whose bit (i+1) is set when payload byte i was even; every payload byte
 /// Battle.net statstring encoding matching GHost++ UTIL_EncodeStatString and Warcraft III:
-/// Each group of 7 bytes is prefixed by a mask byte.
-/// When payload byte was even, it is incremented by 1 and the mask bit is 0.
-/// When payload byte was odd, it is kept as-is and the mask bit is set to 1.
+/// Each group of 7 bytes is prefixed by a mask byte (bit 0 is always 1).
+/// When payload byte is even, it is incremented by 1 and the mask bit is 0.
+/// When payload byte is odd, it is kept as-is and the mask bit is set to 1.
 pub fn encode_statstring(raw: &[u8]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(raw.len() + raw.len() / 7 + 1);
-    let mut mask = 1u8;
-
-    for i in 0..raw.len() {
-        let byte = raw[i];
-        if byte % 2 == 0 {
-            result.push(byte.wrapping_add(1));
-        } else {
-            result.push(byte);
-            mask |= 1 << ((i % 7) + 1);
+    let mut result = Vec::with_capacity(raw.len() + raw.len().div_ceil(7));
+    for chunk in raw.chunks(7) {
+        let mut mask = 1u8;
+        let start = result.len();
+        result.push(0); // placeholder for mask
+        for (i, &byte) in chunk.iter().enumerate() {
+            if byte.is_multiple_of(2) {
+                result.push(byte.wrapping_add(1));
+            } else {
+                result.push(byte);
+                mask |= 1 << (i + 1);
+            }
         }
-
-        if i % 7 == 6 || i == raw.len() - 1 {
-            let insert_pos = result.len() - 1 - (i % 7);
-            result.insert(insert_pos, mask);
-            mask = 1;
-        }
+        result[start] = mask;
     }
 
     result
@@ -96,16 +91,14 @@ pub fn encode_statstring(raw: &[u8]) -> Vec<u8> {
 
 pub fn decode_statstring(enc: &[u8]) -> Vec<u8> {
     let mut result = Vec::with_capacity(enc.len());
-    let mut mask = 0u8;
-
-    for i in 0..enc.len() {
-        if i % 8 == 0 {
-            mask = enc[i];
-        } else {
-            if (mask & (1 << (i % 8))) == 0 {
-                result.push(enc[i].wrapping_sub(1));
-            } else {
-                result.push(enc[i]);
+    for chunk in enc.chunks(8) {
+        if let Some((&mask, data)) = chunk.split_first() {
+            for (i, &byte) in data.iter().enumerate() {
+                if (mask & (1 << (i + 1))) == 0 {
+                    result.push(byte.wrapping_sub(1));
+                } else {
+                    result.push(byte);
+                }
             }
         }
     }

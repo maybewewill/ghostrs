@@ -9,17 +9,25 @@ use crate::state::{GamePhase, GameState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatCommand {
-    Start { force: bool },
+    Start {
+        force: bool,
+    },
     Abort,
     Open(u8),
     Close(u8),
     OpenAll,
     CloseAll,
     Swap(u8, u8),
-    Hold { name: String, slot: Option<u8> },
+    Hold {
+        name: String,
+        slot: Option<u8>,
+    },
     ClearHold,
     Kick(String),
-    Ban { name: String, reason: String },
+    Ban {
+        name: String,
+        reason: String,
+    },
     Unban(String),
     CheckBan(String),
     BanLast(String),
@@ -40,7 +48,10 @@ pub enum ChatCommand {
     ShufflePlayers,
     Version,
     Say(String),
-    Whisper { user: String, message: String },
+    Whisper {
+        user: String,
+        message: String,
+    },
     Stats(String),
     StatsDotA(String),
     Drop,
@@ -58,11 +69,30 @@ pub enum ChatCommand {
     AutoStart(Option<usize>),
     Refresh,
     VirtualHost(String),
-    Comp { slot: u8, team: u8, colour: u8, race: u8, computer_type: u8, handicap: u8 },
-    CompColour { slot: u8, colour: u8 },
-    CompRace { slot: u8, race: u8 },
-    CompHandicap { slot: u8, handicap: u8 },
-    CompTeam { slot: u8, team: u8 },
+    Comp {
+        slot: u8,
+        team: u8,
+        colour: u8,
+        race: u8,
+        computer_type: u8,
+        handicap: u8,
+    },
+    CompColour {
+        slot: u8,
+        colour: u8,
+    },
+    CompRace {
+        slot: u8,
+        race: u8,
+    },
+    CompHandicap {
+        slot: u8,
+        handicap: u8,
+    },
+    CompTeam {
+        slot: u8,
+        team: u8,
+    },
     Download(String),
     AutoSave(Option<bool>),
     DbStatus,
@@ -71,7 +101,10 @@ pub enum ChatCommand {
     FpResume,
     From,
     Messages(Option<bool>),
-    SendLan { ip: String, port: Option<u16> },
+    SendLan {
+        ip: String,
+        port: Option<u16>,
+    },
     Pub(String),
     Priv(String),
     MuteLobby(Option<bool>),
@@ -164,7 +197,9 @@ pub fn parse_command(trigger: char, msg: &str) -> Option<ChatCommand> {
         }
         "refresh" => ChatCommand::Refresh,
         "virtualhost" => ChatCommand::VirtualHost(args.first()?.to_string()),
-        "dl" | "download" => ChatCommand::Download(args.first().map(|s| s.to_string()).unwrap_or_default()),
+        "dl" | "download" => {
+            ChatCommand::Download(args.first().map(|s| s.to_string()).unwrap_or_default())
+        }
         "comp" => {
             let slot = slot_arg(args.first()?)?;
             let team = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
@@ -268,7 +303,11 @@ impl GameState {
             .by_conn(conn_id)
             .map(|p| (p.pid, p.name.clone(), p.muted))
         else {
-            tracing::warn!(conn_id, len = payload.len(), "chat received from unknown conn_id");
+            tracing::warn!(
+                conn_id,
+                len = payload.len(),
+                "chat received from unknown conn_id"
+            );
             return;
         };
         let chat = match ChatToHost::decode(payload) {
@@ -284,7 +323,11 @@ impl GameState {
         // GHost++ game_base.cpp:2900: only honour chat claiming to come from
         // this player; a mismatched from-PID is ignored.
         if chat.from_pid != pid {
-            tracing::debug!(conn_id, from = chat.from_pid, "chat from_pid mismatch, ignoring");
+            tracing::debug!(
+                conn_id,
+                from = chat.from_pid,
+                "chat from_pid mismatch, ignoring"
+            );
             return;
         }
 
@@ -342,10 +385,15 @@ impl GameState {
                     return;
                 }
 
-                if matches!(self.phase, GamePhase::Loading | GamePhase::Playing { .. }) {
+                if matches!(self.phase, GamePhase::Loading | GamePhase::Playing) {
                     if let Some(rep) = self.replay.as_mut() {
                         let extra_u32 = if chat.extra.len() >= 4 {
-                            u32::from_le_bytes([chat.extra[0], chat.extra[1], chat.extra[2], chat.extra[3]])
+                            u32::from_le_bytes([
+                                chat.extra[0],
+                                chat.extra[1],
+                                chat.extra[2],
+                                chat.extra[3],
+                            ])
                         } else {
                             0
                         };
@@ -403,7 +451,6 @@ impl GameState {
         }
     }
 
-
     pub fn run_command(&mut self, pid: u8, caller_name: &str, cmd: ChatCommand) {
         match cmd {
             ChatCommand::Start { force } => {
@@ -413,14 +460,14 @@ impl GameState {
                         self.send_chat_to(pid, &msg);
                         return;
                     }
-                    if let Some(hcl) = &self.hcl {
-                        if hcl.len() > self.slots.len() {
-                            self.send_chat_to(
-                                pid,
-                                "Unable to start: HCL string is too long for map slots. Use !start force to bypass.",
-                            );
-                            return;
-                        }
+                    if let Some(hcl) = &self.hcl
+                        && hcl.len() > self.slots.len()
+                    {
+                        self.send_chat_to(
+                            pid,
+                            "Unable to start: HCL string is too long for map slots. Use !start force to bypass.",
+                        );
+                        return;
                     }
                     let downloading_names: Vec<String> = self
                         .downloads
@@ -477,14 +524,14 @@ impl GameState {
                         );
                         return;
                     }
-                    if let Some(left_time) = self.last_player_left_time {
-                        if left_time.elapsed() < std::time::Duration::from_secs(2) {
-                            self.send_chat_to(
-                                pid,
-                                "Unable to start: a player left within the last 2 seconds. Use !start force to bypass.",
-                            );
-                            return;
-                        }
+                    if let Some(left_time) = self.last_player_left_time
+                        && left_time.elapsed() < std::time::Duration::from_secs(2)
+                    {
+                        self.send_chat_to(
+                            pid,
+                            "Unable to start: a player left within the last 2 seconds. Use !start force to bypass.",
+                        );
+                        return;
                     }
                 }
                 let by = caller_name.to_string();
@@ -536,11 +583,12 @@ impl GameState {
             ChatCommand::Kick(name) => match self.players.by_name_partial(&name) {
                 Ok(target) => {
                     let target_pid = target.pid;
-                    let left_code = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
-                        ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
-                    } else {
-                        ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST
-                    };
+                    let left_code =
+                        if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
+                            ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
+                        } else {
+                            ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST
+                        };
                     self.kick_player(target_pid, "was kicked", left_code);
                 }
                 Err(NameMatch::None) => self.send_chat_to(pid, &lang::no_such_player(&name)),
@@ -555,11 +603,12 @@ impl GameState {
                 self.send_chat_all(&format!("Banned [{name}]: {reason}."));
                 if let Ok(target) = self.players.by_name_partial(&name) {
                     let tpid = target.pid;
-                    let left_code = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
-                        ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
-                    } else {
-                        ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST
-                    };
+                    let left_code =
+                        if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
+                            ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
+                        } else {
+                            ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST
+                        };
                     self.kick_player(tpid, &format!("banned: {reason}"), left_code);
                 }
             }
@@ -652,41 +701,40 @@ impl GameState {
                 self.votekick_votes.clear();
                 self.send_chat_all("Active votes cancelled.");
             }
-            ChatCommand::VoteKick(name) => {
-                match self.players.by_name_partial(&name) {
-                    Ok(target) => {
-                        let tpid = target.pid;
-                        let tname = target.name.clone();
-                        self.votekick_target = Some(tpid);
-                        self.votekick_votes = vec![pid];
-                        let total = self.players.human_count();
-                        let needed = (total / 2) + 1;
-                        self.send_chat_all(&format!(
-                            "Votekick started against [{tname}] (1/{needed} votes). Type !yes to vote."
-                        ));
-                    }
-                    Err(_) => self.send_chat_to(pid, &lang::no_such_player(&name)),
+            ChatCommand::VoteKick(name) => match self.players.by_name_partial(&name) {
+                Ok(target) => {
+                    let tpid = target.pid;
+                    let tname = target.name.clone();
+                    self.votekick_target = Some(tpid);
+                    self.votekick_votes = vec![pid];
+                    let total = self.players.human_count();
+                    let needed = (total / 2) + 1;
+                    self.send_chat_all(&format!(
+                        "Votekick started against [{tname}] (1/{needed} votes). Type !yes to vote."
+                    ));
                 }
-            }
+                Err(_) => self.send_chat_to(pid, &lang::no_such_player(&name)),
+            },
             ChatCommand::Yes => {
-                if let Some(target_pid) = self.votekick_target {
-                    if !self.votekick_votes.contains(&pid) {
-                        self.votekick_votes.push(pid);
-                        let votes = self.votekick_votes.len();
-                        let total = self.players.human_count();
-                        let needed = (total / 2) + 1;
-                        self.send_chat_all(&format!("Votekick: {votes}/{needed} votes."));
-                        if votes >= needed {
-                            let left_code = if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
+                if let Some(target_pid) = self.votekick_target
+                    && !self.votekick_votes.contains(&pid)
+                {
+                    self.votekick_votes.push(pid);
+                    let votes = self.votekick_votes.len();
+                    let total = self.players.human_count();
+                    let needed = (total / 2) + 1;
+                    self.send_chat_all(&format!("Votekick: {votes}/{needed} votes."));
+                    if votes >= needed {
+                        let left_code =
+                            if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. })
+                            {
                                 ghost_protocol::w3gs::ids::PLAYERLEAVE_LOBBY
                             } else {
                                 ghost_protocol::w3gs::ids::PLAYERLEAVE_LOST
                             };
-                            self.kick_player(target_pid, "voted out", left_code);
-                            self.votekick_target = None;
-                            self.votekick_votes.clear();
-                        }
-
+                        self.kick_player(target_pid, "voted out", left_code);
+                        self.votekick_target = None;
+                        self.votekick_votes.clear();
                     }
                 }
             }
@@ -775,7 +823,9 @@ impl GameState {
                         self.announce_interval = std::time::Duration::from_secs(interval_sec);
                         self.announce_message = Some(text.clone());
                         self.last_announce_time = Some(std::time::Instant::now());
-                        self.send_chat_all(&format!("Announcement (every {interval_sec}s): {text}"));
+                        self.send_chat_all(&format!(
+                            "Announcement (every {interval_sec}s): {text}"
+                        ));
                     } else {
                         let full_text = msg.clone();
                         self.announce_message = Some(full_text.clone());
@@ -811,40 +861,43 @@ impl GameState {
                 computer_type,
                 handicap,
             } => {
-                if self.slots.add_computer(slot, team, colour, race, computer_type, handicap) {
+                if self
+                    .slots
+                    .add_computer(slot, team, colour, race, computer_type, handicap)
+                {
                     self.send_all_slot_info();
                 }
             }
             ChatCommand::CompColour { slot, colour } => {
-                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize) {
-                    if s.computer == 1 {
-                        s.colour = colour;
-                        self.send_all_slot_info();
-                    }
+                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize)
+                    && s.computer == 1
+                {
+                    s.colour = colour;
+                    self.send_all_slot_info();
                 }
             }
             ChatCommand::CompRace { slot, race } => {
-                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize) {
-                    if s.computer == 1 {
-                        s.race = race;
-                        self.send_all_slot_info();
-                    }
+                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize)
+                    && s.computer == 1
+                {
+                    s.race = race;
+                    self.send_all_slot_info();
                 }
             }
             ChatCommand::CompHandicap { slot, handicap } => {
-                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize) {
-                    if s.computer == 1 {
-                        s.handicap = handicap;
-                        self.send_all_slot_info();
-                    }
+                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize)
+                    && s.computer == 1
+                {
+                    s.handicap = handicap;
+                    self.send_all_slot_info();
                 }
             }
             ChatCommand::CompTeam { slot, team } => {
-                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize) {
-                    if s.computer == 1 {
-                        s.team = team;
-                        self.send_all_slot_info();
-                    }
+                if let Some(s) = self.slots.as_wire_mut().get_mut(slot as usize)
+                    && s.computer == 1
+                {
+                    s.team = team;
+                    self.send_all_slot_info();
                 }
             }
             ChatCommand::Download(name) => {
@@ -857,19 +910,25 @@ impl GameState {
                     if let Some(p) = self.players.by_pid_mut(tpid) {
                         p.download_allowed = true;
                         let p_name = p.name.clone();
-                        self.send_chat_to(pid, &format!("Map download allowed for player [{p_name}]."));
+                        self.send_chat_to(
+                            pid,
+                            &format!("Map download allowed for player [{p_name}]."),
+                        );
                     }
-                    self.send_to(tpid, ghost_protocol::w3gs::outgoing::start_download(self.host_pid()));
+                    self.send_to(
+                        tpid,
+                        ghost_protocol::w3gs::outgoing::start_download(self.host_pid()),
+                    );
                 } else {
                     self.send_chat_to(pid, &lang::no_such_player(&name));
                 }
             }
             ChatCommand::Stats(name) => {
                 if let Some(caller_player) = self.players.by_pid_mut(pid) {
-                    if let Some(last_sent) = caller_player.stats_sent_time {
-                        if last_sent.elapsed() < std::time::Duration::from_secs(5) {
-                            return;
-                        }
+                    if let Some(last_sent) = caller_player.stats_sent_time
+                        && last_sent.elapsed() < std::time::Duration::from_secs(5)
+                    {
+                        return;
                     }
                     caller_player.stats_sent_time = Some(std::time::Instant::now());
                 }
@@ -878,10 +937,10 @@ impl GameState {
             }
             ChatCommand::StatsDotA(name) => {
                 if let Some(caller_player) = self.players.by_pid_mut(pid) {
-                    if let Some(last_sent) = caller_player.stats_dota_sent_time {
-                        if last_sent.elapsed() < std::time::Duration::from_secs(5) {
-                            return;
-                        }
+                    if let Some(last_sent) = caller_player.stats_dota_sent_time
+                        && last_sent.elapsed() < std::time::Duration::from_secs(5)
+                    {
+                        return;
                     }
                     caller_player.stats_dota_sent_time = Some(std::time::Instant::now());
                 }
@@ -948,27 +1007,29 @@ impl GameState {
                     self.finished = true;
                 }
             }
-            ChatCommand::AutoSave(opt) => {
-                match opt {
-                    Some(true) => {
-                        self.auto_save = true;
-                        self.send_chat_to(pid, "Auto save enabled.");
-                    }
-                    Some(false) => {
-                        self.auto_save = false;
-                        self.send_chat_to(pid, "Auto save disabled.");
-                    }
-                    None => {
-                        self.send_chat_to(
-                            pid,
-                            &format!(
-                                "Auto save is {}.",
-                                if self.auto_save { "enabled" } else { "disabled" }
-                            ),
-                        );
-                    }
+            ChatCommand::AutoSave(opt) => match opt {
+                Some(true) => {
+                    self.auto_save = true;
+                    self.send_chat_to(pid, "Auto save enabled.");
                 }
-            }
+                Some(false) => {
+                    self.auto_save = false;
+                    self.send_chat_to(pid, "Auto save disabled.");
+                }
+                None => {
+                    self.send_chat_to(
+                        pid,
+                        &format!(
+                            "Auto save is {}.",
+                            if self.auto_save {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        ),
+                    );
+                }
+            },
             ChatCommand::DbStatus => {
                 self.send_chat_to(pid, "DB STATUS --- OK");
             }
@@ -978,9 +1039,9 @@ impl GameState {
                 }
             }
             ChatCommand::FpPause => {
-                if self.fake_player_pid.is_some() && matches!(self.phase, GamePhase::Playing) {
+                if let (Some(fake_pid), GamePhase::Playing) = (self.fake_player_pid, self.phase) {
                     let act = ghost_protocol::w3gs::ActionBlock {
-                        pid: self.fake_player_pid.unwrap(),
+                        pid: fake_pid,
                         data: bytes::Bytes::from_static(&[0x01]),
                     };
                     self.actions.push(act);
@@ -988,9 +1049,9 @@ impl GameState {
                 }
             }
             ChatCommand::FpResume => {
-                if self.fake_player_pid.is_some() && matches!(self.phase, GamePhase::Playing) {
+                if let (Some(fake_pid), GamePhase::Playing) = (self.fake_player_pid, self.phase) {
                     let act = ghost_protocol::w3gs::ActionBlock {
-                        pid: self.fake_player_pid.unwrap(),
+                        pid: fake_pid,
                         data: bytes::Bytes::from_static(&[0x02]),
                     };
                     self.actions.push(act);
@@ -1008,7 +1069,10 @@ impl GameState {
                         } else {
                             format!(
                                 "{}.{}.{}.{}",
-                                p.external_ip[0], p.external_ip[1], p.external_ip[2], p.external_ip[3]
+                                p.external_ip[0],
+                                p.external_ip[1],
+                                p.external_ip[2],
+                                p.external_ip[3]
                             )
                         };
                         format!("Player [{}] is from [{}]", p.name, loc)
@@ -1018,27 +1082,29 @@ impl GameState {
                     self.send_chat_to(pid, &msg);
                 }
             }
-            ChatCommand::Messages(opt) => {
-                match opt {
-                    Some(true) => {
-                        self.local_admin_messages = true;
-                        self.send_chat_to(pid, "Local admin messages enabled.");
-                    }
-                    Some(false) => {
-                        self.local_admin_messages = false;
-                        self.send_chat_to(pid, "Local admin messages disabled.");
-                    }
-                    None => {
-                        self.send_chat_to(
-                            pid,
-                            &format!(
-                                "Local admin messages are {}.",
-                                if self.local_admin_messages { "enabled" } else { "disabled" }
-                            ),
-                        );
-                    }
+            ChatCommand::Messages(opt) => match opt {
+                Some(true) => {
+                    self.local_admin_messages = true;
+                    self.send_chat_to(pid, "Local admin messages enabled.");
                 }
-            }
+                Some(false) => {
+                    self.local_admin_messages = false;
+                    self.send_chat_to(pid, "Local admin messages disabled.");
+                }
+                None => {
+                    self.send_chat_to(
+                        pid,
+                        &format!(
+                            "Local admin messages are {}.",
+                            if self.local_admin_messages {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        ),
+                    );
+                }
+            },
             ChatCommand::SendLan { ip, port } => {
                 let p = port.unwrap_or(6112);
                 self.send_chat_to(pid, &format!("Sending LAN broadcast to [{ip}:{p}]."));
@@ -1098,10 +1164,7 @@ impl GameState {
                         target_pid,
                         &format!("[Whisper from {caller_name}]: {message}"),
                     );
-                    self.send_chat_to(
-                        pid,
-                        &format!("[Whisper to {target_name}]: {message}"),
-                    );
+                    self.send_chat_to(pid, &format!("[Whisper to {target_name}]: {message}"));
                 } else {
                     self.send_chat_to(pid, &lang::no_such_player(&user));
                 }
@@ -1131,7 +1194,8 @@ impl GameState {
                     // game_base.cpp:3028: on custom-forces maps a team change is
                     // a move to another slot, GetEmptySlot(team, PID) + SwapSlots.
                     if let Some(target_sid) = self.slots.first_open_in_team_from(sid, target_team) {
-                        self.slots.swap_slots(sid, target_sid, fixed_settings, custom_forces);
+                        self.slots
+                            .swap_slots(sid, target_sid, fixed_settings, custom_forces);
                         return true;
                     }
                     return false;
@@ -1272,14 +1336,22 @@ impl GameState {
             return;
         }
         if matches!(self.phase, GamePhase::Lobby | GamePhase::Countdown { .. }) {
-            let msg = if message.len() > 254 { &message[..254] } else { message };
+            let msg = if message.len() > 254 {
+                &message[..254]
+            } else {
+                message
+            };
             if let Ok(b) =
                 ghost_protocol::w3gs::outgoing::chat_from_host(from, &[pid], 0x10, &[], msg)
             {
                 self.send_to(pid, b);
             }
         } else {
-            let msg = if message.len() > 127 { &message[..127] } else { message };
+            let msg = if message.len() > 127 {
+                &message[..127]
+            } else {
+                message
+            };
             let sid = self.slots.sid_of_pid(pid);
             let colour = sid
                 .and_then(|s| self.slots.as_wire().get(s as usize))
@@ -1360,11 +1432,7 @@ mod tests {
     async fn the_virtual_host_does_not_count_toward_the_minimum_to_start() {
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
         st.create_virtual_host();
-        assert_eq!(
-            st.players.len(),
-            1,
-            "only virtual host present"
-        );
+        assert_eq!(st.players.len(), 1, "only virtual host present");
 
         st.run_command(1, "VirtualHost", ChatCommand::Start { force: false });
 
@@ -1430,7 +1498,10 @@ mod tests {
         assert!(st.apply_slot_request(1, 0x11, 1));
         assert_eq!(st.slots.sid_of_pid(1), Some(6));
         assert_eq!(st.slots.as_wire()[6].team, 1);
-        assert!(st.slots.as_wire()[0].slot_status == 0, "old slot must be open again");
+        assert!(
+            st.slots.as_wire()[0].slot_status == 0,
+            "old slot must be open again"
+        );
     }
 
     #[test]

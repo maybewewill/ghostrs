@@ -1,11 +1,11 @@
 use ghost_bnet::bncsutil::{
-    BNCSUTIL_PLATFORM_MAC, BNCSUTIL_PLATFORM_OSX, BNCSUTIL_PLATFORM_WIN,
-    BNCSUTIL_PLATFORM_WINDOWS, BNCSUTIL_PLATFORM_X86, BNCSUTIL_VERSION, BNCSUTIL_VERSION_STRING,
-    CdKeyDecoder, CdKeyError, DEFAULT_MPQ_SEEDS, KeyType, NLS_G, NLS_I, NLS_PRIME_BYTES,
-    NLS_SIGNATURE_KEY, NLS_SIG_N, NlsSession, calc_hash_buf, check_revision, check_revision_flat,
-    check_signature, create_key_info, decode_cd_key, double_hash_password, extract_mpq_number,
-    extract_pe_version, get_exe_info, get_mpq_seed, get_version, get_version_string,
-    hash_password, kd_quick, set_mpq_seed, xsha1,
+    BNCSUTIL_PLATFORM_MAC, BNCSUTIL_PLATFORM_OSX, BNCSUTIL_PLATFORM_WIN, BNCSUTIL_PLATFORM_WINDOWS,
+    BNCSUTIL_PLATFORM_X86, BNCSUTIL_VERSION, BNCSUTIL_VERSION_STRING, CdKeyDecoder, CdKeyError,
+    DEFAULT_MPQ_SEEDS, KeyType, NLS_G, NLS_I, NLS_PRIME_BYTES, NLS_SIG_N, NLS_SIGNATURE_KEY,
+    NlsSession, calc_hash_buf, check_revision, check_revision_flat, check_signature,
+    create_key_info, decode_cd_key, double_hash_password, extract_mpq_number, extract_pe_version,
+    get_exe_info, get_mpq_seed, get_version, get_version_string, hash_password, kd_quick,
+    set_mpq_seed, xsha1,
 };
 use std::io::Write;
 
@@ -106,8 +106,8 @@ fn test_cdkey_warcraft3_26_char() {
     assert_eq!(
         hash,
         [
-            103, 3, 212, 224, 183, 184, 231, 85, 250, 186, 189, 108, 208, 7, 183, 173, 244, 20,
-            63, 249,
+            103, 3, 212, 224, 183, 184, 231, 85, 250, 186, 189, 108, 208, 7, 183, 173, 244, 20, 63,
+            249,
         ]
     );
 
@@ -160,8 +160,8 @@ fn test_cdkey_starcraft_13_char() {
     let hash = dec.calculate_hash(0x12345678, 0x87654321);
     assert_eq!(hash.len(), 20);
 
-    let wire = create_key_info(&valid_sc_key, 0x12345678, 0x87654321, false)
-        .expect("wire SC keyinfo");
+    let wire =
+        create_key_info(&valid_sc_key, 0x12345678, 0x87654321, false).expect("wire SC keyinfo");
     assert_eq!(wire.len(), 36);
     assert_eq!(u32::from_le_bytes([wire[0], wire[1], wire[2], wire[3]]), 13);
 }
@@ -265,7 +265,11 @@ fn test_exe_info_platforms() {
     }
 
     let info_win = get_exe_info(&test_file, BNCSUTIL_PLATFORM_WINDOWS).expect("exeinfo");
-    assert!(info_win.exe_info_string.starts_with("test_parity_war3.exe "));
+    assert!(
+        info_win
+            .exe_info_string
+            .starts_with("test_parity_war3.exe ")
+    );
     assert!(info_win.exe_info_string.ends_with(" 1000"));
 
     let _ = std::fs::remove_file(&test_file);
@@ -313,7 +317,9 @@ fn test_nls_full_exchange() {
     assert_ne!(v, [0u8; 32]);
 
     let server_pub = [0x77u8; 32];
-    let s = session.compute_s(&server_pub, &salt).expect("shared secret S");
+    let s = session
+        .compute_s(&server_pub, &salt)
+        .expect("shared secret S");
     assert_ne!(s, [0u8; 32]);
 
     let k = session.compute_k(&s);
@@ -322,7 +328,9 @@ fn test_nls_full_exchange() {
     let m1 = session.compute_m1(&server_pub, &salt).expect("m1 proof");
     assert_eq!(m1.len(), 20);
 
-    let m2 = session.compute_m2(&server_pub, &salt, &m1).expect("m2 proof");
+    let m2 = session
+        .compute_m2(&server_pub, &salt, &m1)
+        .expect("m2 proof");
     assert_eq!(m2.len(), 20);
 
     assert!(session.check_m2(&m2, &server_pub, &salt));

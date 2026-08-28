@@ -59,7 +59,11 @@ impl GameState {
             }
         }
 
-        self.lagging = self.players.iter().filter(|p| !p.virtual_host).any(|p| p.lagging);
+        self.lagging = self
+            .players
+            .iter()
+            .filter(|p| !p.virtual_host)
+            .any(|p| p.lagging);
 
         // GHost++ game_base.cpp:923 - Reset lag screen every 60 seconds (or 30s if load_in_game)
         let reset_interval = if self.load_in_game {
@@ -104,12 +108,26 @@ impl GameState {
         let to_drop: Vec<(u8, String)> = self
             .players
             .iter()
-            .filter(|p| !p.virtual_host && p.lagging && p.left.is_none() && p.started_lagging.is_some_and(|t| t.elapsed() >= max_lag))
-            .map(|p| (p.pid, format!("was dropped after lagging for {}s", max_lag.as_secs())))
+            .filter(|p| {
+                !p.virtual_host
+                    && p.lagging
+                    && p.left.is_none()
+                    && p.started_lagging.is_some_and(|t| t.elapsed() >= max_lag)
+            })
+            .map(|p| {
+                (
+                    p.pid,
+                    format!("was dropped after lagging for {}s", max_lag.as_secs()),
+                )
+            })
             .collect();
 
         for (pid, reason) in to_drop {
-            self.kick_player(pid, &reason, ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT);
+            self.kick_player(
+                pid,
+                &reason,
+                ghost_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT,
+            );
         }
     }
 }
@@ -213,8 +231,14 @@ mod tests {
         }
 
         let ids: Vec<u8> = packets.iter().map(|p| p[1]).collect();
-        assert!(ids.contains(&ids::STOP_LAG), "must send STOP_LAG on reset, got {ids:?}");
-        assert!(ids.contains(&ids::START_LAG), "must send START_LAG on reset, got {ids:?}");
+        assert!(
+            ids.contains(&ids::STOP_LAG),
+            "must send STOP_LAG on reset, got {ids:?}"
+        );
+        assert!(
+            ids.contains(&ids::START_LAG),
+            "must send START_LAG on reset, got {ids:?}"
+        );
 
         // Check that START_LAG packet contains non-zero lag time (>= 60,000 ms)
         let start_lag_pkt = packets.iter().find(|p| p[1] == ids::START_LAG).unwrap();
@@ -226,7 +250,9 @@ mod tests {
             start_lag_pkt[8],
             start_lag_pkt[9],
         ]);
-        assert!(lag_time >= 60_000, "lag_time must be >= 60000 ms, got {lag_time}");
+        assert!(
+            lag_time >= 60_000,
+            "lag_time must be >= 60000 ms, got {lag_time}"
+        );
     }
 }
-
