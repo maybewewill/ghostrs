@@ -202,7 +202,7 @@ impl Supervisor {
 
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down gracefully");
-                    self.shutdown().await;
+                    self.shutdown();
                     break;
                 }
 
@@ -344,7 +344,7 @@ impl Supervisor {
         }
     }
 
-    fn handle_reconnect_connection(&mut self, conn_id: u64, stream: TcpStream, peer: SocketAddr) {
+    fn handle_reconnect_connection(&self, conn_id: u64, stream: TcpStream, peer: SocketAddr) {
         let mut candidate_games: Vec<GameHandle> =
             self.games.iter().map(|g| g.handle.clone()).collect();
         if candidate_games.is_empty()
@@ -426,7 +426,7 @@ impl Supervisor {
         });
     }
 
-    fn handle_conn_event(&mut self, ev: ConnEvent) {
+    fn handle_conn_event(&self, ev: ConnEvent) {
         let conn_id = ev.conn_id;
         if let Some(game) = self.conn_to_game.get(&conn_id) {
             game.send(GameCmd::Conn(ev));
@@ -1275,7 +1275,7 @@ impl Supervisor {
         self.create_game(&name, &bot_name, ghost_protocol::GameVisibility::Public);
     }
 
-    async fn shutdown(&mut self) {
+    fn shutdown(&self) {
         self.bnet.send(BnetCmd::Shutdown);
         for g in &self.games {
             g.handle.send(GameCmd::Shutdown);
@@ -1283,6 +1283,7 @@ impl Supervisor {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub fn new_for_test(
         cfg: Config,
         store: Store,

@@ -16,10 +16,12 @@ impl TickScheduler {
         }
     }
 
+    #[must_use]
     pub fn deadline(&self) -> Instant {
         self.next
     }
 
+    #[must_use]
     pub fn period(&self) -> Duration {
         self.period
     }

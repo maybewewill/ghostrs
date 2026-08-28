@@ -22,6 +22,7 @@ pub struct BotConfig {
 }
 
 impl BotConfig {
+    #[must_use]
     pub fn resolved_udp_broadcast_target(&self) -> std::net::Ipv4Addr {
         let trimmed = self.udp_broadcast_target.trim();
         if trimmed.is_empty() {
@@ -31,10 +32,12 @@ impl BotConfig {
         }
     }
 
+    #[must_use]
     pub fn is_port_pool_enabled(&self) -> bool {
         self.port_pool_start.is_some() && self.port_pool_end.is_some()
     }
 
+    #[must_use]
     pub fn port_pool_range(&self) -> (u16, u16) {
         let start = self.port_pool_start.unwrap_or(self.host_port);
         let end = self.port_pool_end.unwrap_or(start);

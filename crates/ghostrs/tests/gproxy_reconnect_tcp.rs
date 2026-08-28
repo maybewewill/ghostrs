@@ -41,7 +41,7 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     cfg.bot.gproxy_reconnect_port = reconnect_port;
     cfg.spectator.port = spectator_port;
     cfg.bnet.server = "127.0.0.1".into();
-    cfg.db_path = format!("reconnect_test_{}.db", host_port).into();
+    cfg.db_path = format!("reconnect_test_{host_port}.db").into();
 
     let sup_handle = tokio::spawn(async move {
         let _ = Supervisor::run(cfg, vec!["ReconnectMatch".into()], None, false).await;
@@ -157,7 +157,7 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     bad_pkt.put_u8(gps::ids::RECONNECT);
     bad_pkt.put_u16_le(13);
     bad_pkt.put_u8(pid);
-    bad_pkt.put_u32_le(0xDEADBEEF); // wrong key
+    bad_pkt.put_u32_le(0xDEAD_BEEF); // wrong key
     bad_pkt.put_u32_le(0);
     bad_sock.write_all(&bad_pkt).await.unwrap();
     bad_sock.flush().await.unwrap();
@@ -176,5 +176,5 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     assert!(got_reject, "bad reconnect must be rejected or closed");
 
     sup_handle.abort();
-    let _ = std::fs::remove_file(format!("reconnect_test_{}.db", host_port));
+    let _ = std::fs::remove_file(format!("reconnect_test_{host_port}.db"));
 }
