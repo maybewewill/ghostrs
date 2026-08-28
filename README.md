@@ -106,8 +106,8 @@ flowchart TD
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/maybewewill/ghostrs.git
-cd ghostrs
+git clone https://github.com/maybewewill/spectre.git
+cd spectre
 
 # 2. Build and launch with default spectre.toml
 cargo run --release -p spectre
@@ -322,8 +322,8 @@ at your option.
 Crafted with [Readme Craft](https://github.com/motiful/readme-craft)
 
 <!-- Reference-style link definitions -->
-[ci-shield]: https://github.com/maybewewill/ghostrs/actions/workflows/ci.yml/badge.svg
-[ci-url]: https://github.com/maybewewill/ghostrs/actions
+[ci-shield]: https://github.com/maybewewill/spectre/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/maybewewill/spectre/actions
 [rust-shield]: https://img.shields.io/badge/rust-1.96.1+-blue.svg?logo=rust
 [rust-url]: https://www.rust-lang.org
 [edition-shield]: https://img.shields.io/badge/edition-2024-green.svg
