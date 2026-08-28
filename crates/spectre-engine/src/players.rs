@@ -13,6 +13,15 @@ pub enum NameMatch {
     Ambiguous(usize),
 }
 
+/// Стадия «join-in-progress» переджойнящегося игрока. Управляет реактивным
+/// handshake поверх обычных обработчиков REQJOIN → MAPSIZE → GAMELOADED_SELF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejoinStage {
+    None,
+    AwaitingMapSize,
+    AwaitingLoaded,
+}
+
 #[derive(Debug)]
 pub struct Player {
     pub pid: u8,
@@ -50,6 +59,9 @@ pub struct Player {
     pub stats_dota_sent_time: Option<Instant>,
     pub last_gproxy_wait_notice: Option<Instant>,
     pub gproxy_disconnect_notice_sent: bool,
+    pub rejoin: RejoinStage,
+    pub catchup_cursor: Option<u32>,
+    pub catching_up: bool,
 }
 
 impl Player {
@@ -90,6 +102,9 @@ impl Player {
             stats_dota_sent_time: None,
             last_gproxy_wait_notice: None,
             gproxy_disconnect_notice_sent: false,
+            rejoin: RejoinStage::None,
+            catchup_cursor: None,
+            catching_up: false,
         }
     }
     pub fn record_ping(&mut self, ping_ms: u32) {
@@ -263,5 +278,13 @@ mod tests {
         let _ = slots.set_colour(0, 5);
 
         assert_eq!(t.next_free_colour(&slots), 0);
+    }
+
+    #[test]
+    fn new_player_has_no_rejoin_state() {
+        let p = test_player(1, "a");
+        assert_eq!(p.rejoin, RejoinStage::None);
+        assert_eq!(p.catchup_cursor, None);
+        assert!(!p.catching_up);
     }
 }
