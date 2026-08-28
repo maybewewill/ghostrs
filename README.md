@@ -265,16 +265,7 @@ Contributions, bug reports, and suggestions are welcome. Please open an issue or
 
 ## License
 
-Dual-licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
-
----
-
-Crafted with [Readme Craft](https://github.com/motiful/readme-craft)
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
 
 <!-- Reference-style link definitions -->
 [ci-shield]: https://github.com/maybewewill/spectre/actions/workflows/ci.yml/badge.svg
@@ -283,6 +274,6 @@ Crafted with [Readme Craft](https://github.com/motiful/readme-craft)
 [rust-url]: https://www.rust-lang.org
 [edition-shield]: https://img.shields.io/badge/edition-2024-green.svg
 [edition-url]: https://doc.rust-lang.org/edition-guide/rust-2024/
-[license-shield]: https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg
+[license-shield]: https://img.shields.io/badge/license-MIT-blue.svg
 [license-url]: LICENSE
 
