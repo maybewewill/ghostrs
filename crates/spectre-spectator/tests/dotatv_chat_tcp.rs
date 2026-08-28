@@ -18,7 +18,6 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
         history_max_mb: 16,
     });
 
-    // Allow the relay server time to bind
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let mut viewer1 = TcpStream::connect(format!("127.0.0.1:{port}"))
@@ -28,7 +27,6 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
         .await
         .expect("viewer2 must connect");
 
-    // Viewer 1 sends a DotaTV client chat frame (0xFD, 0x81)
     let chat_frame = encode_client_chat("Hello from viewer 1!").expect("must encode client chat");
     viewer1
         .write_all(&chat_frame)
@@ -36,7 +34,6 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
         .expect("must write chat");
     viewer1.flush().await.expect("must flush");
 
-    // Viewer 2 should receive the broadcasted chat message (0xFD, 0x80)
     let mut buf = vec![0u8; 1024];
     let mut received_chat = false;
 
@@ -47,7 +44,7 @@ async fn test_dotatv_viewer_chat_tcp_e2e() {
         {
             let n = n.unwrap_or(0);
             if n >= 4 {
-                // Find any 0xFD 0x80 packet in received stream
+
                 let mut offset = 0;
                 while offset + 4 <= n {
                     if buf[offset] == 0xFD && buf[offset + 1] == dotatv_ids::CHAT {

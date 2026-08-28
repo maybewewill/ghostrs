@@ -5,7 +5,7 @@ use spectre_protocol::w3gs::outgoing;
 use crate::state::GameState;
 
 impl GameState {
-    /// Returns true while the lag screen is up, meaning no actions go out.
+
     pub fn check_lag(&mut self) -> bool {
         let limit = self.cfg.sync_limit;
         let game_sync = self.sync_counter;
@@ -22,7 +22,7 @@ impl GameState {
         {
             let behind = game_sync.saturating_sub(p.sync_counter);
             if p.lagging {
-                // Recover only once comfortably caught up (src/game_base.rs:667).
+
                 if behind < limit / 2 {
                     p.lagging = false;
                     let lag_ms = p
@@ -65,7 +65,6 @@ impl GameState {
             .filter(|p| !p.virtual_host)
             .any(|p| p.lagging);
 
-        // GHost++ game_base.cpp:923 - Reset lag screen every 60 seconds
         let reset_interval = Duration::from_secs(60);
         if self.lagging && self.last_lag_screen_reset.elapsed() >= reset_interval {
             let laggers: Vec<(u8, u32)> = self
@@ -99,7 +98,6 @@ impl GameState {
         self.lagging
     }
 
-    /// Drops anyone stuck on the lag screen longer than `max_lag`.
     pub fn drop_lagging_players(&mut self, max_lag: Duration) {
         let to_drop: Vec<(u8, String)> = self
             .players
@@ -140,7 +138,7 @@ mod tests {
         st.begin_playing();
         st.sync_counter = 60;
         st.players.by_pid_mut(1).unwrap().sync_counter = 60;
-        st.players.by_pid_mut(2).unwrap().sync_counter = 5; // 55 ticks behind
+        st.players.by_pid_mut(2).unwrap().sync_counter = 5;
         for rx in rxs.iter_mut() {
             let _ = drain_ids(rx);
         }
@@ -157,7 +155,7 @@ mod tests {
         st.begin_playing();
         st.sync_counter = 60;
         st.players.by_pid_mut(1).unwrap().sync_counter = 60;
-        st.players.by_pid_mut(2).unwrap().sync_counter = 30; // 30 < 50
+        st.players.by_pid_mut(2).unwrap().sync_counter = 30;
         assert!(!st.check_lag());
         assert!(!st.lagging);
     }
@@ -174,9 +172,7 @@ mod tests {
             let _ = drain_ids(rx);
         }
 
-        // Legacy rule (src/game_base.rs:667): a lagger recovers once it is
-        // within half the sync limit, not merely one tick better.
-        st.players.by_pid_mut(2).unwrap().sync_counter = 40; // 20 < 50/2
+        st.players.by_pid_mut(2).unwrap().sync_counter = 40;
         assert!(!st.check_lag());
         assert!(!st.lagging);
         assert!(drain_ids(&mut rxs[0]).contains(&ids::STOP_LAG));
@@ -206,21 +202,18 @@ mod tests {
         st.sync_counter = 60;
         st.players.by_pid_mut(1).unwrap().sync_counter = 60;
         st.players.by_pid_mut(2).unwrap().sync_counter = 5;
-        assert!(st.check_lag()); // Initial raise
+        assert!(st.check_lag());
 
         for rx in rxs.iter_mut() {
             let _ = drain_ids(rx);
         }
 
-        // Simulate 61 seconds passing
         let past = Instant::now() - Duration::from_secs(61);
         st.last_lag_screen_reset = past;
         st.players.by_pid_mut(2).unwrap().started_lagging = Some(past);
 
-        // Run check_lag again
         assert!(st.check_lag());
 
-        // We expect: STOP_LAG, INCOMING_ACTION, START_LAG in the output
         let mut packets = Vec::new();
         while let Ok(pkt) = rxs[0].try_recv() {
             packets.push(pkt);
@@ -236,7 +229,6 @@ mod tests {
             "must send START_LAG on reset, got {ids:?}"
         );
 
-        // Check that START_LAG packet contains non-zero lag time (>= 60,000 ms)
         let start_lag_pkt = packets.iter().find(|p| p[1] == ids::START_LAG).unwrap();
         let num_laggers = start_lag_pkt[4];
         assert_eq!(num_laggers, 1);

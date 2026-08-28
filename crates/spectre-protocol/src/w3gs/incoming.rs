@@ -38,8 +38,6 @@ impl ReqJoin {
     }
 }
 
-/// A player action. `data` aliases the read buffer: relaying it costs a
-/// refcount bump, and the engine never parses the body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutgoingAction {
     pub crc: u32,
@@ -67,10 +65,10 @@ pub struct ChatToHost {
     pub to_pids: Vec<u8>,
     pub from_pid: u8,
     pub flag: u8,
-    /// Extra flags for flag 0x20 (chat scope: all/allies/observers/private).
+
     pub extra: Bytes,
     pub message: String,
-    /// Set for flags 0x11..=0x14 (team/colour/race/handicap change requests).
+
     pub byte: u8,
 }
 
@@ -168,14 +166,14 @@ mod tests {
 
     fn reqjoin_payload(name: &str) -> Bytes {
         let mut b = BytesMut::new();
-        b.put_u32_le(7); // host counter
-        b.put_u32_le(0xDEAD_BEEF); // entry key
-        b.put_u8(0); // unknown
-        b.put_u16_le(6112); // listen port
-        b.put_u32_le(0x1234_5678); // peer key
+        b.put_u32_le(7);
+        b.put_u32_le(0xDEAD_BEEF);
+        b.put_u8(0);
+        b.put_u16_le(6112);
+        b.put_u32_le(0x1234_5678);
         b.put_slice(name.as_bytes());
         b.put_u8(0);
-        b.put_slice(&[0, 0, 0, 0, 0, 0]); // 6 bytes unknown/sockaddr prefix (matching legacy offset name.len() + 26)
+        b.put_slice(&[0, 0, 0, 0, 0, 0]);
         b.put_slice(&[192, 168, 1, 50]);
         b.freeze()
     }
@@ -210,7 +208,7 @@ mod tests {
         let a = OutgoingAction::decode(&payload).unwrap();
         assert_eq!(a.crc, 0xAABB_CCDD);
         assert_eq!(&a.data[..], &[0x10, 0x20, 0x30]);
-        // The action body must be a slice of the original buffer, not a copy.
+
         assert_eq!(a.data.as_ptr(), payload[4..].as_ptr());
     }
 
@@ -218,9 +216,9 @@ mod tests {
     fn decodes_chat_message_flag_0x10() {
         let mut b = BytesMut::new();
         b.put_u8(2);
-        b.put_slice(&[3, 4]); // to pids
-        b.put_u8(1); // from pid
-        b.put_u8(0x10); // flag: plain message
+        b.put_slice(&[3, 4]);
+        b.put_u8(1);
+        b.put_u8(0x10);
         b.put_slice(b"gl hf");
         b.put_u8(0);
         let c = ChatToHost::decode(&b.freeze()).unwrap();
@@ -236,7 +234,7 @@ mod tests {
         b.put_slice(&[2]);
         b.put_u8(1);
         b.put_u8(0x20);
-        b.put_u32_le(0); // extra flags (chat scope)
+        b.put_u32_le(0);
         b.put_slice(b"ally");
         b.put_u8(0);
         let c = ChatToHost::decode(&b.freeze()).unwrap();
@@ -265,16 +263,14 @@ mod tests {
 
     #[test]
     fn test_decode_map_part_not_ok() {
-        // GHost++ golden fixture from gameprotocol.h:99 (f7 45 0a 00 01 02 01 00 00 00)
+
         let payload_6b = Bytes::from_static(&[0x01, 0x02, 0x01, 0x00, 0x00, 0x00]);
         assert_eq!(decode_map_part_not_ok(&payload_6b).unwrap(), 1);
 
-        // 10-byte payload variant (with 4-byte unknown field before offset)
         let payload_10b =
             Bytes::from_static(&[0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00]);
         assert_eq!(decode_map_part_not_ok(&payload_10b).unwrap(), 0x1234);
 
-        // Short payload
         let short = Bytes::from_static(&[0x01, 0x02]);
         assert!(decode_map_part_not_ok(&short).is_err());
     }

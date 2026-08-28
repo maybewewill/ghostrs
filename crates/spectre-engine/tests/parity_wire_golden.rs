@@ -13,7 +13,6 @@ fn parity_wire_b1_map_transfer_packets_use_host_pid() {
     st.cfg.map.data = Some(std::sync::Arc::new(vec![0x77; 10_000]));
     let _ = drain_ids(&mut rxs[0]);
 
-    // 1. Client reports 0 bytes -> START_DOWNLOAD
     let mut p = BytesMut::new();
     p.put_slice(&[0, 0, 0, 0]);
     p.put_u8(1);
@@ -29,7 +28,6 @@ fn parity_wire_b1_map_transfer_packets_use_host_pid() {
     );
     assert_ne!(start_pkt[4], 255, "START_DOWNLOAD must not use 255");
 
-    // 2. Map part packet
     let _ = drain_ids(&mut rxs[0]);
     st.pump_downloads();
     let part_pkt = rxs[0].try_recv().expect("MAP_PART packet");
@@ -65,12 +63,10 @@ fn parity_wire_b3_countdown_10_steps_5_seconds() {
     }
     st.start_countdown("host");
 
-    // Initial announcement at t=0
     st.on_tick(0);
     let sent = drain_ids(&mut rxs[0]);
     assert!(sent.contains(&ids::CHAT_FROM_HOST));
 
-    // Announce steps down to 1
     if let GamePhase::Countdown {
         ref mut started_at, ..
     } = st.phase
@@ -87,16 +83,13 @@ fn parity_wire_b4_hcl_is_encoded_at_begin_loading_not_start_countdown() {
     let (mut st, _rxs) = seated_game(2);
     st.hcl = Some("ab".into());
 
-    // Before countdown: handicaps are 100
     assert_eq!(st.slots.as_wire()[0].handicap, 100);
     assert_eq!(st.slots.as_wire()[1].handicap, 100);
 
-    // Start countdown: handicaps must still be untouched
     st.start_countdown("slash");
     assert_eq!(st.slots.as_wire()[0].handicap, 100);
     assert_eq!(st.slots.as_wire()[1].handicap, 100);
 
-    // Countdown ends and begin_loading is called: HCL is now encoded into slot handicaps!
     st.begin_loading();
     assert_ne!(
         st.slots.as_wire()[0].handicap,
@@ -119,22 +112,19 @@ fn parity_wire_b5_b6_replay_timeslots_use_0x1f_and_0x1e_without_crc() {
     };
     let raw1 = ActionBlock::encode_actions_raw(&[action1]);
 
-    // Add overflow timeslot2 (0x1E)
     replay.add_timeslot2(&raw1);
-    // Add standard timeslot (0x1F)
+
     replay.add_timeslot(100, &raw1);
 
     let (body, duration) = replay.finish().expect("finish replay");
     assert_eq!(duration, 100);
 
-    // Verify 0x1E record: [0x1E, len_le, 0_le, raw_actions...]
     let mut expected_ts2 = Vec::new();
     expected_ts2.push(0x1E);
     expected_ts2.extend_from_slice(&((2 + raw1.len()) as u16).to_le_bytes());
     expected_ts2.extend_from_slice(&0u16.to_le_bytes());
     expected_ts2.extend_from_slice(&raw1);
 
-    // Verify 0x1F record: [0x1F, len_le, 100_le, raw_actions...]
     let mut expected_ts1 = Vec::new();
     expected_ts1.push(0x1F);
     expected_ts1.extend_from_slice(&((2 + raw1.len()) as u16).to_le_bytes());
@@ -164,7 +154,6 @@ fn parity_wire_b7_replay_host_pid_matches_virtual_host_pid() {
     let rep = st.replay.take().expect("replay exists");
     let (body, _) = rep.finish().expect("replay body built");
 
-    // The host record at start of body is [16, 1, 0, 0, 0x00, host_pid, ...]
     assert_eq!(&body[0..4], &[16, 1, 0, 0], "Unknown 4.0 prefix");
     assert_eq!(body[4], 0x00, "Host record RecordID must be 0x00");
     assert_eq!(
@@ -182,12 +171,10 @@ fn parity_wire_b8_loading_leavers_placed_between_0x1b_and_0x1c() {
     replay.add_player(2, "Player2");
     let _ = replay.set_start(slots_wire, 12345, 0, 2);
 
-    // Player 2 leaves during loading
     replay.add_leaver_loading(2, 0x01, 0x01);
 
     let (body, _) = replay.finish().expect("replay finish");
 
-    // Marker sequence: 0x1B (second start block), followed by loading leaver (0x17), followed by 0x1C (third start block)
     let b1_pos = body
         .windows(5)
         .position(|w| w == [0x1B, 1, 0, 0, 0])
@@ -215,12 +202,10 @@ fn parity_wire_b13_pings_broadcast_only_in_lobby_countdown_loading() {
         let _ = drain_ids(rx);
     }
 
-    // 1. In Lobby: ping is sent
     st.on_tick(0);
     let sent = drain_ids(&mut rxs[0]);
     assert!(sent.contains(&ids::PING_FROM_HOST));
 
-    // 2. In Playing: ping is NOT sent
     st.begin_playing();
     st.last_ping_at = std::time::Instant::now() - Duration::from_secs(10);
     for rx in &mut rxs {
@@ -243,7 +228,6 @@ fn parity_wire_p1_2_replay_contains_real_statstring() {
     let rep = st.replay.take().expect("replay exists");
     let (body, _) = rep.finish().expect("finish replay");
 
-    // Game name is "test" followed by NUL, then the stat string followed by NUL
     let game_name_bytes = b"test\0";
     let name_pos = body
         .windows(game_name_bytes.len())
@@ -251,7 +235,6 @@ fn parity_wire_p1_2_replay_contains_real_statstring() {
         .expect("game name in replay");
     let after_name = &body[name_pos + game_name_bytes.len()..];
 
-    // First byte of stat string should be the null (4.0) byte in ReplayBody, followed by encoded stat string
     assert_eq!(after_name[0], 0, "null byte (4.0) preceding stat string");
     let stat_slice = &after_name[1..];
     let stat_len = stat_slice
@@ -277,7 +260,7 @@ fn parity_wire_p1_2_replay_contains_real_statstring() {
 
 #[test]
 fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
-    // 1. Lobby voluntary leave -> PLAYERLEAVE_LOBBY (13)
+
     let (mut st, mut rxs) = seated_game(2);
     for rx in &mut rxs {
         let _ = drain_ids(rx);
@@ -294,7 +277,6 @@ fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
         "Lobby leave must send PLAYERLEAVE_LOBBY (13)"
     );
 
-    // 2. Loading leaver -> reason=1, result=PLAYERLEAVE_DISCONNECT (1) in replay loading block & wire
     let (mut st, mut rxs) = seated_game(2);
     st.begin_loading();
     for rx in &mut rxs {
@@ -313,13 +295,12 @@ fn parity_wire_p1_3_and_p1_4_leave_codes_and_replay_leave_blocks() {
         "Loading disconnect must send PLAYERLEAVE_DISCONNECT (1)"
     );
 
-    // 3. Desync drop -> PLAYERLEAVE_LOST (7) in wire and replay
     let (mut st, mut rxs) = seated_game(3);
     st.begin_playing();
     for rx in &mut rxs {
         let _ = drain_ids(rx);
     }
-    // Player 1 & 2 send checksum 0xAAAA, Player 3 sends 0xBBBB
+
     let mut p1 = BytesMut::new();
     p1.put_u8(0);
     p1.put_u32_le(0xAAAA);
@@ -364,7 +345,6 @@ fn parity_wire_p1_7_replay_host_pid_and_name() {
     let rep = st.replay.take().expect("replay exists");
     let (body, _) = rep.finish().expect("finish");
 
-    // Header structure: 4 bytes unknown + 1 byte RecordID (0) + 1 byte hostPID + hostName\0
     assert_eq!(body[4], 0, "Host record ID is 0");
     assert_eq!(
         body[5], vhost_pid,
@@ -392,20 +372,18 @@ fn parity_wire_p1_8_relay_receives_in_game_chat_and_game_over() {
     st.relay = Some(relay_handle);
     st.begin_playing();
 
-    // Drain initial GameStart / PlayerInfo commands
     while let Ok(cmd) = relay_rx.try_recv() {
         if matches!(cmd, spectre_spectator::RelayCmd::ViewerChat { .. }) {
             break;
         }
     }
 
-    // 1. In-game player chat forwarded to relay
     let mut chat_bytes = BytesMut::new();
-    chat_bytes.put_u8(1); // 1 recipient
-    chat_bytes.put_u8(2); // to PID 2
-    chat_bytes.put_u8(1); // from PID 1
-    chat_bytes.put_u8(0x20); // flag 0x20
-    chat_bytes.put_slice(&[0, 0, 0, 0]); // extra flags
+    chat_bytes.put_u8(1);
+    chat_bytes.put_u8(2);
+    chat_bytes.put_u8(1);
+    chat_bytes.put_u8(0x20);
+    chat_bytes.put_slice(&[0, 0, 0, 0]);
     chat_bytes.put_slice(b"hello spectator\0");
     st.handle_chat_to_host(1, &chat_bytes.freeze());
 
@@ -418,7 +396,6 @@ fn parity_wire_p1_8_relay_receives_in_game_chat_and_game_over() {
         other => panic!("expected ViewerChat, got {:?}", other),
     }
 
-    // 2. Host chat (send_chat_all) forwarded to relay
     st.send_chat_all("host message");
     let cmd = relay_rx.try_recv().expect("relay received host chat");
     match cmd {
@@ -428,13 +405,11 @@ fn parity_wire_p1_8_relay_receives_in_game_chat_and_game_over() {
         other => panic!("expected ViewerChat, got {:?}", other),
     }
 
-    // 3. Game over forwards GameOver to relay
     st.handle_conn_closed(1, "left".into());
     st.handle_conn_closed(2, "left".into());
     st.reap_left_players();
     st.on_tick(0);
 
-    // Drain any remaining game blocks
     let mut got_game_over = false;
     while let Ok(cmd) = relay_rx.try_recv() {
         if matches!(cmd, spectre_spectator::RelayCmd::GameOver) {
@@ -453,21 +428,18 @@ fn parity_wire_p1_9_replay_chat_preserves_flag_and_extra() {
     let (mut st, _rxs) = seated_game(2);
     st.begin_playing();
 
-    // Player 1 sends allied chat with flag 0x20 and extra flags = [2, 0, 0, 0]
     let mut chat_bytes = BytesMut::new();
-    chat_bytes.put_u8(1); // 1 recipient
-    chat_bytes.put_u8(2); // to PID 2
-    chat_bytes.put_u8(1); // from PID 1
-    chat_bytes.put_u8(0x20); // flag 0x20
-    chat_bytes.put_slice(&[2, 0, 0, 0]); // extra flags = 2 (allied chat scope)
+    chat_bytes.put_u8(1);
+    chat_bytes.put_u8(2);
+    chat_bytes.put_u8(1);
+    chat_bytes.put_u8(0x20);
+    chat_bytes.put_slice(&[2, 0, 0, 0]);
     chat_bytes.put_slice(b"allied chat message\0");
     st.handle_chat_to_host(1, &chat_bytes.freeze());
 
     let rep = st.replay.take().expect("replay exists");
     let (body, _) = rep.finish().expect("finish replay");
 
-    // REPLAY_CHATMESSAGE = 0x20 in blocks
-    // Format: 0x20 (RecordID), PID(1), length(2 LE), flag(1), extra(4 LE), message\0
     let msg_bytes = b"allied chat message\0";
     let pos = body
         .windows(msg_bytes.len())

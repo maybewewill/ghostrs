@@ -7,12 +7,10 @@ use spectre_protocol::gps::{ReconnectReq, reconnect_ok, reject, reject_reason};
 
 use crate::state::GameState;
 
-/// Ring buffer of packets sent to one GProxy client, so a reconnecting client
-/// can be replayed exactly what it missed.
 #[derive(Debug, Clone)]
 pub struct GProxyBuffer {
     capacity: usize,
-    /// Sequence number of the oldest packet still held.
+
     first_packet_id: u32,
     packets: VecDeque<Bytes>,
 }
@@ -34,13 +32,10 @@ impl GProxyBuffer {
         self.packets.push_back(packet);
     }
 
-    /// Total packets ever pushed, i.e. the sequence number of the newest one.
     pub fn total_sent(&self) -> u32 {
         self.first_packet_id + self.packets.len() as u32
     }
 
-    /// Packets the client has not confirmed, or None when they were evicted or
-    /// the client claims to have more than we ever sent.
     pub fn replay_from(&self, last_received: u32) -> Option<Vec<Bytes>> {
         if last_received > self.total_sent() || last_received < self.first_packet_id {
             return None;
@@ -103,8 +98,6 @@ impl GameState {
         true
     }
 
-    /// Removes GProxy players who never came back within the grace period,
-    /// and periodically broadcasts wait notices every 20 seconds.
     pub fn reap_gproxy_timeouts(&mut self, grace: Duration) {
         let mut notices: Vec<String> = Vec::new();
         for p in self.players.iter_mut() {
@@ -170,7 +163,7 @@ mod tests {
         for i in 0..10u8 {
             b.push(Bytes::from(vec![i]));
         }
-        // Packet 2 is long gone: the client cannot be resynchronised.
+
         assert!(b.replay_from(2).is_none());
         assert!(b.replay_from(7).is_some());
     }
@@ -189,7 +182,7 @@ mod tests {
         st.players.by_pid_mut(1).unwrap().gproxy = true;
         st.players.by_pid_mut(1).unwrap().gproxy_buffer = Some(GProxyBuffer::new(100));
         let key = st.players.by_pid(1).unwrap().reconnect_key;
-        st.on_tick(0); // one action packet is buffered
+        st.on_tick(0);
         st.players.by_pid_mut(1).unwrap().disconnected_since = Some(Instant::now());
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(64);
@@ -217,7 +210,7 @@ mod tests {
         p.gproxy = true;
         p.gproxy_buffer = Some(GProxyBuffer::new(10));
         let (tx, rx) = tokio::sync::mpsc::channel(64);
-        drop(rx); // dead link
+        drop(rx);
         p.link = PlayerLink::for_test(tx);
 
         st.broadcast(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]));
@@ -261,16 +254,16 @@ mod tests {
     #[test]
     fn gproxy_empty_actions_formula_matches_ghostpp() {
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
-        st.cfg.reconnect_wait = Duration::from_secs(180); // 3 minutes
+        st.cfg.reconnect_wait = Duration::from_secs(180);
         assert_eq!(st.gproxy_empty_actions(), 2);
 
-        st.cfg.reconnect_wait = Duration::from_secs(600); // 10 minutes (clamped to 9)
+        st.cfg.reconnect_wait = Duration::from_secs(600);
         assert_eq!(st.gproxy_empty_actions(), 9);
 
-        st.cfg.reconnect_wait = Duration::from_secs(3); // 3 raw minutes / units
+        st.cfg.reconnect_wait = Duration::from_secs(3);
         assert_eq!(st.gproxy_empty_actions(), 2);
 
-        st.cfg.reconnect_wait = Duration::from_secs(60); // 1 minute -> 0 empty actions
+        st.cfg.reconnect_wait = Duration::from_secs(60);
         assert_eq!(st.gproxy_empty_actions(), 0);
 
         st.cfg.reconnect_wait = Duration::ZERO;
@@ -300,14 +293,11 @@ mod tests {
         assert_eq!(sent[0], spectre_protocol::gps::GPS_HEADER);
         assert_eq!(sent[1], spectre_protocol::gps::ids::INIT);
 
-        // Bytes 4..8: port (u32_le)
         let port = u32::from_le_bytes([sent[4], sent[5], sent[6], sent[7]]);
         assert_eq!(port, 6114);
 
-        // Byte 8: PID
         assert_eq!(sent[8], 1);
 
-        // Byte 13: num_empty_actions
         assert_eq!(sent[13], 2);
     }
 }

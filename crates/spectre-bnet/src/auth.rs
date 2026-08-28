@@ -2,13 +2,10 @@
 
 pub use crate::bncsutil::cdkey::CdKeyError;
 
-/// Hashes a password using Battle.net XSHA-1.
-/// Authoritative implementation from `crates/ghost-bnet/src/bncsutil/xsha1.rs`.
 pub fn hash_password_pvpgn(password: &str) -> [u8; 20] {
     crate::bncsutil::xsha1::hash_password(password)
 }
 
-/// Standard SHA-1 hash over lowercased ASCII password.
 pub fn hash_password_standard_sha1(password: &str) -> [u8; 20] {
     let lower = password.to_ascii_lowercase();
     let mut hasher = Sha1::new();
@@ -19,8 +16,6 @@ pub fn hash_password_standard_sha1(password: &str) -> [u8; 20] {
     out
 }
 
-/// Computes double-hashed password for BNCS SID_LOGONRESPONSE:
-/// SHA1(client_token + server_token + hash_password_pvpgn(password))
 pub fn hash_password_double(password: &str, client_token: u32, server_token: u32) -> [u8; 20] {
     let h1 = hash_password_pvpgn(password);
     let mut hasher = Sha1::new();
@@ -33,8 +28,6 @@ pub fn hash_password_double(password: &str, client_token: u32, server_token: u32
     out
 }
 
-/// Builds 36-byte CD-Key info for PvPGN SID_AUTH_CHECK using the pure-Rust CD-key decoder:
-/// 4 bytes len (26), 4 bytes product (ROC=4, TFT=7), 4 bytes public_val, 4 bytes val2, 20 bytes hash.
 pub fn create_key_info(
     cdkey: &str,
     client_token: u32,
@@ -44,7 +37,6 @@ pub fn create_key_info(
     crate::bncsutil::cdkey::create_key_info(cdkey, client_token, server_token, is_tft)
 }
 
-/// Generates a random 32-byte client public key for NLS login.
 pub fn generate_client_key() -> [u8; 32] {
     let mut k = [0u8; 32];
     for b in &mut k {

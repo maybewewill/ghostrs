@@ -3,8 +3,6 @@ use spectre_protocol::w3gs::{ActionBlock, incoming::OutgoingAction, outgoing};
 
 use crate::state::{GamePhase, GameState};
 
-/// Actions beyond this many wire bytes spill into an INCOMING_ACTION2 packet.
-/// Matches GHost++ game_base.cpp:1373 (1452 bytes).
 pub const MAX_ACTION_PAYLOAD: usize = 1452;
 
 impl GameState {
@@ -12,9 +10,7 @@ impl GameState {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
             return;
         };
-        // GHost++ EventPlayerAction (game_base.cpp:2724): actions are only valid
-        // once the game is loading or loaded; anything else gets the sender
-        // kicked with PLAYERLEAVE_LOST.
+
         if !matches!(self.phase, GamePhase::Loading | GamePhase::Playing) {
             tracing::warn!(conn_id, "blocked invalid action packet (game not loaded)");
             self.kick_player(
@@ -25,11 +21,9 @@ impl GameState {
             return;
         }
         match OutgoingAction::decode(payload) {
-            // The body is a slice of the read buffer: queuing it costs a
-            // refcount bump, and it is relayed without ever being parsed.
+
             Ok(a) => {
-                // GHost++ caps GetLength() (action bytes + 3) at 1027, i.e. 1024
-                // action bytes (game_base.cpp:2725), and kicks the offender.
+
                 if a.data.len() + 3 > 1027 {
                     tracing::warn!(
                         conn_id,
@@ -50,8 +44,7 @@ impl GameState {
     }
 
     pub fn handle_keepalive(&mut self, conn_id: u64, payload: &Bytes) {
-        // GHost++ EventPlayerKeepAlive (game_base.cpp:2751): keepalives only
-        // count once the game is loaded.
+
         if !matches!(self.phase, GamePhase::Playing) {
             return;
         }
@@ -336,12 +329,6 @@ impl GameState {
         }
     }
 
-    /// One scheduled tick. `skipped` counts periods lost to a stall.
-    /// Adds a fake player, or removes the existing one. Lobby only.
-    ///
-    /// Extracted from the `!fakeplayer` chat handler so the same path can be
-    /// driven without an admin on Battle.net - see spectre' `--fake-player`.
-    /// Returns the message to report, or `None` if the call was a no-op.
     pub fn toggle_fake_player(&mut self) -> Option<&'static str> {
         if !matches!(self.phase, GamePhase::Lobby) {
             return None;
@@ -361,9 +348,6 @@ impl GameState {
         let fpid = self.players.next_free_pid()?;
         let slot_idx = self.slots.first_open()?;
 
-        // The fake player has no socket, so nothing ever drains its queue. Keeping the
-        // receiver alive is enough for sends to succeed; spawning a drain task would
-        // panic here because this is reachable from sync callers with no tokio runtime.
         let (tx, rx) = tokio::sync::mpsc::channel(128);
         std::mem::forget(rx);
         let mut p = crate::players::Player::new(
@@ -385,10 +369,6 @@ impl GameState {
         Some("Fake player added.")
     }
 
-    /// Hands everything produced this tick to the DotaTV stream.
-    ///
-    /// Separate from `on_tick` because publishing is async: it takes the stream
-    /// lock shared with connected viewers. No-op unless spectating is enabled.
     pub async fn publish_dotatv(&mut self) {
         let Some(shared) = self.dotatv.clone() else {
             return;
@@ -400,19 +380,12 @@ impl GameState {
         if let Err(err) =
             spectre_spectator::publish_pending(&shared, replay, &mut self.dotatv_prologue_sent).await
         {
-            // A rejected chunk means viewers can no longer be kept in sync, but
-            // the game itself is unaffected, so drop the stream rather than the
-            // match.
+
             tracing::warn!(error = %err, "dotatv: publish failed, disabling live stream");
             self.dotatv = None;
         }
     }
 
-    /// Publishes the final tail of the body once the match is over.
-    ///
-    /// There is no next tick after the game loop breaks, so without this the last
-    /// records — leaver records and final timeslots — never reach viewers and their
-    /// playback stalls just short of the end.
     pub async fn finish_dotatv(&mut self) {
         let Some(shared) = self.dotatv.clone() else {
             return;
@@ -517,11 +490,10 @@ impl GameState {
                 self.check_desync();
                 if self.check_lag() {
                     self.drop_lagging_players(std::time::Duration::from_secs(60));
-                    return; // lag screen is up; no actions go out this tick
+                    return;
                 }
                 self.send_all_actions(skipped);
 
-                // GHost++ game_base.cpp:1059: start gameover timer if only 1 real player remains in game
                 let real_players_count = self
                     .players
                     .iter()
@@ -535,7 +507,6 @@ impl GameState {
                     self.game_over_time = Some(tokio::time::Instant::now());
                 }
 
-                // GHost++ game_base.cpp:1067: finish gameover timer after 60 seconds
                 if let Some(over_at) = self.game_over_time
                     && over_at.elapsed() >= std::time::Duration::from_secs(60)
                 {
@@ -550,7 +521,6 @@ impl GameState {
             GamePhase::Over => self.finished = true,
         }
 
-        // GHost++ game_base.cpp:1089: end game when no players left
         let real_players_count = self
             .players
             .iter()
@@ -624,11 +594,9 @@ impl GameState {
         }
     }
 
-    /// Encodes the tick's action packets once and shares them with every player.
     pub fn send_all_actions(&mut self, skipped: u32) {
         let latency_ms = self.tick.period().as_millis() as u32;
-        // A skipped period still advanced game time; report the real interval so
-        // clients keep their simulation aligned with ours.
+
         let elapsed = latency_ms.saturating_mul(skipped + 1);
         let send_interval = elapsed.min(u16::MAX as u32) as u16;
 
@@ -682,7 +650,6 @@ impl GameState {
             self.game_over_time = Some(tokio::time::Instant::now());
         }
 
-        // The main packet always goes out, even empty: it is the clock tick.
         match outgoing::incoming_action(&batch, send_interval) {
             Ok(b) => {
                 if let Some(r) = &self.relay {
@@ -751,7 +718,6 @@ mod tests {
         st.begin_playing();
         let _ = drain_ids(&mut rxs[0]);
 
-        // 20 x 100-byte actions = 2060 wire bytes, past the 1452-byte limit.
         for _ in 0..20 {
             st.actions.push(ActionBlock {
                 pid: 1,
@@ -800,14 +766,12 @@ mod tests {
 
         st.on_tick(0);
 
-        // 1. Verify player received overflow then main packet
         let client_ids = drain_ids(&mut rxs[0]);
         assert_eq!(
             client_ids,
             vec![ids::INCOMING_ACTION2, ids::INCOMING_ACTION]
         );
 
-        // 2. Verify relay received overflow (0x48) before main (0x0C) with exact packet payloads
         let mut relay_packets = Vec::new();
         let mut saw_game_start = false;
         let mut saw_player_info = false;
@@ -832,7 +796,6 @@ mod tests {
             vec![expected_overflow.clone(), expected_main.clone()]
         );
 
-        // 3. Verify replay body recorded timeslots in order with exact bytes and time increments without CRC
         let rep = st.replay.take().expect("replay must exist");
         let (body, duration_ms) = rep.finish().expect("replay finish must succeed");
         assert_eq!(duration_ms, 100);
@@ -841,13 +804,12 @@ mod tests {
         let raw_actions2 = ActionBlock::encode_actions_raw(&[action2]);
 
         let mut expected_timeslot_bytes = Vec::new();
-        // Overflow timeslot: record id 0x1E, length, time increment 0, raw actions without CRC
+
         expected_timeslot_bytes.push(0x1E);
         expected_timeslot_bytes.extend_from_slice(&((2 + raw_actions1.len()) as u16).to_le_bytes());
         expected_timeslot_bytes.extend_from_slice(&0u16.to_le_bytes());
         expected_timeslot_bytes.extend_from_slice(&raw_actions1);
 
-        // Main timeslot: record id 0x1F, length, time increment 100, raw actions without CRC
         expected_timeslot_bytes.push(0x1F);
         expected_timeslot_bytes.extend_from_slice(&((2 + raw_actions2.len()) as u16).to_le_bytes());
         expected_timeslot_bytes.extend_from_slice(&100u16.to_le_bytes());
@@ -901,14 +863,12 @@ mod tests {
             last_announced_step: 5,
         };
 
-        // Mark player 1 as left
         st.players.by_pid_mut(1).unwrap().left = Some("left voluntarily".into());
         st.reap_left_players();
 
-        // Must revert back to Lobby phase (game_base.cpp:1616-1620)
         assert_eq!(st.phase, GamePhase::Lobby);
-        // Lobby must be notified via chat, player leave, and updated slot info
-        let sent = drain_ids(&mut rxs[1]); // player 2 (pid 2) is still in the lobby
+
+        let sent = drain_ids(&mut rxs[1]);
         assert!(sent.contains(&ids::CHAT_FROM_HOST));
         assert!(sent.contains(&ids::PLAYER_LEAVE_OTHERS));
         assert!(sent.contains(&ids::SLOT_INFO));
@@ -939,12 +899,10 @@ mod tests {
         st.start_countdown("host");
         assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
-        // Initial tick at t=0 announces "5. . ."
         st.on_tick(0);
         let sent = drain_ids(&mut rxs[0]);
         assert!(sent.contains(&ids::CHAT_FROM_HOST));
 
-        // Advance time by 500ms -> step 4
         if let GamePhase::Countdown {
             ref mut started_at, ..
         } = st.phase
@@ -987,15 +945,13 @@ mod tests {
     fn player_disconnect_during_loading_starts_game_for_remaining_loaded_players() {
         let (mut st, _rxs) = seated_game(2);
         st.begin_loading();
-        // Player 1 sends loaded
+
         st.handle_loaded(1);
         assert_eq!(st.phase, GamePhase::Loading);
 
-        // Player 2 disconnects without loading
         st.players.by_pid_mut(2).unwrap().left = Some("disconnected".into());
         st.reap_left_players();
 
-        // With Player 2 gone, 100% of seated players (Player 1) are loaded
         assert_eq!(st.phase, GamePhase::Playing);
     }
 
@@ -1008,7 +964,7 @@ mod tests {
         st.handle_loaded(1);
 
         st.on_tick(0);
-        // Player 2 should be dropped due to timeout, game starts for Player 1
+
         assert_eq!(st.phase, GamePhase::Playing);
         assert_eq!(st.players.len(), 1);
         assert_eq!(st.players.iter().next().unwrap().pid, 1);
@@ -1022,11 +978,10 @@ mod tests {
             let _ = crate::actor::tests_support::drain_ids(rx);
         }
 
-        // Inject DotA winner action into action queue
         let mut act = Vec::new();
         act.extend_from_slice(&[0x6b, b'd', b'r', b'.', b'x', 0x00]);
         act.extend_from_slice(b"Global\0Winner\0");
-        act.extend_from_slice(&1u32.to_le_bytes()); // Sentinel victory
+        act.extend_from_slice(&1u32.to_le_bytes());
         st.actions.push(spectre_protocol::w3gs::ActionBlock {
             pid: 1,
             data: bytes::Bytes::from(act),
@@ -1038,16 +993,14 @@ mod tests {
             st.game_over_time.is_some(),
             "game_over_time must be set when winner detected"
         );
-        // Verify End Message was broadcast
+
         let chat = rxs[0].try_recv().expect("must receive end chat");
         assert_eq!(chat[1], spectre_protocol::w3gs::ids::CHAT_FROM_HOST);
 
-        // Advance clock by 59 seconds: players must still be connected
         tokio::time::advance(std::time::Duration::from_secs(59)).await;
         st.on_tick(0);
         assert_eq!(st.players.iter().filter(|p| p.left.is_none()).count(), 2);
 
-        // Advance clock past 60 seconds: remaining players must be stopped
         tokio::time::advance(std::time::Duration::from_secs(2)).await;
         st.on_tick(0);
         assert_eq!(st.players.iter().filter(|p| p.left.is_none()).count(), 0);
@@ -1066,11 +1019,9 @@ mod tests {
 
         st.begin_playing();
 
-        // Tick with latency increment 100ms
         st.on_tick(0);
         st.send_chat_all("Good luck have fun!");
 
-        // Mark player 2 as left
         if let Some(p) = st.players.by_pid_mut(2) {
             p.left = Some("disconnected".into());
         }
@@ -1095,13 +1046,11 @@ mod tests {
         let conn2 = st.players.by_pid(2).unwrap().conn_id;
         let conn3 = st.players.by_pid(3).unwrap().conn_id;
 
-        // Players 1 and 2 send checksum 0x11112222
         let mut p1 = bytes::BytesMut::new();
         p1.extend_from_slice(&[0x00]);
         p1.extend_from_slice(&0x11112222u32.to_le_bytes());
         let payload1 = p1.freeze();
 
-        // Player 3 sends checksum 0x99998888 (desync)
         let mut p3 = bytes::BytesMut::new();
         p3.extend_from_slice(&[0x00]);
         p3.extend_from_slice(&0x99998888u32.to_le_bytes());
@@ -1160,8 +1109,7 @@ mod tests {
 
     #[test]
     fn actions_sent_before_the_game_starts_kick_the_sender() {
-        // GHost++ EventPlayerAction (game_base.cpp:2724): an action packet in the
-        // lobby is invalid and gets the sender kicked with PLAYERLEAVE_LOST.
+
         let (mut st, _rxs) = seated_game(1);
         assert!(matches!(st.phase, GamePhase::Lobby));
 
@@ -1178,14 +1126,13 @@ mod tests {
 
     #[test]
     fn oversized_action_packets_kick_the_sender() {
-        // GHost++ caps GetLength() (action bytes + 3) at 1027, i.e. 1024 action
-        // bytes (game_base.cpp:2725).
+
         let (mut st, _rxs) = seated_game(1);
         st.begin_playing();
 
         let mut payload = bytes::BytesMut::new();
-        payload.extend_from_slice(&0u32.to_le_bytes()); // crc
-        payload.extend_from_slice(&vec![7u8; 1025]); // 1025 action bytes
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        payload.extend_from_slice(&vec![7u8; 1025]);
         st.handle_action(1, &payload.freeze());
 
         let p = st.players.by_pid(1).unwrap();
@@ -1195,8 +1142,7 @@ mod tests {
 
     #[test]
     fn keepalives_before_the_game_starts_are_ignored() {
-        // GHost++ EventPlayerKeepAlive (game_base.cpp:2751): `if (!m_GameLoaded)
-        // return;` — keepalives in the lobby must not feed the checksum queue.
+
         let (mut st, _rxs) = seated_game(1);
 
         let mut p = bytes::BytesMut::new();

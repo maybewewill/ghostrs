@@ -1,14 +1,4 @@
-﻿//! End-to-End integration test for the DotaTV live spectator relay.
-//!
-//! # Transport Fidelity & Simulation Determinism Note
-//! This test verifies transport fidelity: that every match initialization parameter,
-//! seated player record, and recorded action packet (including 0x48 `INCOMING_ACTION2`
-//! overflow packets produced under heavy action loads) reaches the spectator client
-//! over the `0xFD` wire protocol in exact, complete, and correct chronological order.
-//!
-//! Note: Comparing action packet streams verifies transport fidelity between the host
-//! and relay; it does not prove determinism inside Warcraft III's internal simulation
-//! engine, which must be verified against real client executions.
+﻿
 
 use std::time::Duration;
 
@@ -99,7 +89,6 @@ fn make_reqjoin(name: &str) -> Bytes {
     b.freeze()
 }
 
-/// Spawns a spectator relay actor loop backed by an in-memory channel.
 fn spawn_relay_actor(
     cfg: RelayConfig,
 ) -> (
@@ -221,7 +210,7 @@ fn spawn_relay_actor(
 
 #[tokio::test]
 async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
-    // 1. Start a spectator relay with zero delay and port 0
+
     let relay_cfg = RelayConfig {
         port: 0,
         delay: Duration::ZERO,
@@ -231,7 +220,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
     };
     let (relay_handle, relay_cmd_tx, relay_join) = spawn_relay_actor(relay_cfg);
 
-    // 2. Initialize GameState and seat 3 players
     let mut st = GameState::new(test_game_cfg(relay_handle));
     let mut player_rxs = Vec::new();
     for i in 1..=3 {
@@ -250,7 +238,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
     assert_eq!(st.players.len(), 3);
     assert_eq!(st.phase, GamePhase::Lobby);
 
-    // Compute expected statstring for comparison
     let mut raw_stat =
         Vec::with_capacity(64 + st.cfg.map.path.len() + st.cfg.virtual_host_name.len());
     raw_stat.extend_from_slice(&st.cfg.map.flags.to_le_bytes());
@@ -284,15 +271,9 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         slots: st.slots.as_wire().to_vec(),
     };
 
-    // Transition game to Playing phase. This automatically dispatches
-    // GameStartSnapshot and PlayerInfo records to the spectator relay.
     st.begin_playing();
     assert_eq!(st.phase, GamePhase::Playing);
 
-    // 3. Push a sequence of action blocks INCLUDING an INCOMING_ACTION2 (0x48) overflow packet
-    // Tick 1: Two 800-byte action blocks (802 + 802 = 1604 bytes > MAX_ACTION_PAYLOAD = 1400 bytes).
-    // This MUST spill action1 into an INCOMING_ACTION2 (0x48) overflow packet and action2 into
-    // the main INCOMING_ACTION (0x0C) packet.
     let action1 = ActionBlock {
         pid: 1,
         data: Bytes::from(vec![0xAA; 800]),
@@ -316,7 +297,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
 
     st.on_tick(0);
 
-    // Tick 2: Normal action block fitting in a single INCOMING_ACTION packet
     let action3 = ActionBlock {
         pid: 3,
         data: Bytes::from(vec![0xCC; 120]),
@@ -327,13 +307,11 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
 
     st.on_tick(0);
 
-    // Tick 3: Empty clock tick action packet
     let expected_main_pkt3 =
         outgoing::incoming_action(&[], 100).expect("build empty clock tick packet");
 
     st.on_tick(0);
 
-    // Verify expected W3GS packet IDs before checking relay delivery
     assert_eq!(
         expected_overflow_pkt[1],
         w3gs_ids::INCOMING_ACTION2,
@@ -349,10 +327,8 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
     assert_eq!(expected_main_pkt2[1], 0x0C);
     assert_eq!(expected_main_pkt3[1], 0x0C);
 
-    // Allow the relay actor task to process all dispatched commands
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // 4. Connect a spectator viewer and receive the stream over 0xFD framing
     let (viewer_tx, mut viewer_rx) = mpsc::channel(64);
     let viewer_link = PlayerLink::for_test(viewer_tx);
 
@@ -364,8 +340,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         .await
         .expect("send ViewerJoined");
 
-    // Total expected frames:
-    // 1 HELLO + 1 GAME_START_SNAPSHOT + 3 PLAYER + 4 ACTION (1 overflow + 3 main) + 1 HISTORY_END = 10 frames
     let mut raw_frames = Vec::new();
     for _ in 0..10 {
         let frame_bytes = tokio::time::timeout(Duration::from_millis(500), viewer_rx.recv())
@@ -379,20 +353,18 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         "viewer must receive exactly 10 frames"
     );
 
-    // 4a. Assert received 0xFD message IDs arrive as an exact ordered vector:
-    // HELLO (0x01), GAME_START_SNAPSHOT (0x02), PLAYER x 3 (0x03), ACTION x 4 (0x04), HISTORY_END (0x07)
     let received_ids: Vec<u8> = raw_frames.iter().map(|f| f[1]).collect();
     let expected_ordered_ids = vec![
-        dotatv_ids::HELLO,               // 0x01
-        dotatv_ids::GAME_START_SNAPSHOT, // 0x02
-        dotatv_ids::PLAYER,              // 0x03 (Player 1)
-        dotatv_ids::PLAYER,              // 0x03 (Player 2)
-        dotatv_ids::PLAYER,              // 0x03 (Player 3)
-        dotatv_ids::ACTION,              // 0x04 (Overflow action 0x48)
-        dotatv_ids::ACTION,              // 0x04 (Main action 1 0x0C)
-        dotatv_ids::ACTION,              // 0x04 (Main action 2 0x0C)
-        dotatv_ids::ACTION,              // 0x04 (Empty clock tick 0x0C)
-        dotatv_ids::HISTORY_END,         // 0x07
+        dotatv_ids::HELLO,
+        dotatv_ids::GAME_START_SNAPSHOT,
+        dotatv_ids::PLAYER,
+        dotatv_ids::PLAYER,
+        dotatv_ids::PLAYER,
+        dotatv_ids::ACTION,
+        dotatv_ids::ACTION,
+        dotatv_ids::ACTION,
+        dotatv_ids::ACTION,
+        dotatv_ids::HISTORY_END,
     ];
     assert_eq!(received_ids, expected_ordered_ids);
     assert_eq!(
@@ -400,7 +372,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         vec![0x01, 0x02, 0x03, 0x03, 0x03, 0x04, 0x04, 0x04, 0x04, 0x07]
     );
 
-    // Assert every frame starts with 0xFD and has consistent length header
     for (idx, frame) in raw_frames.iter().enumerate() {
         assert_eq!(
             frame[0], DOTATV_HEADER,
@@ -415,13 +386,11 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         );
     }
 
-    // Frame 0: HELLO (0x01)
     let (hello_version, hello_server_name) =
         decode_hello(&raw_frames[0][4..]).expect("decode hello");
     assert_eq!(hello_version, 1);
     assert_eq!(hello_server_name, "spectre");
 
-    // 5. Decode the snapshot frame and assert its fields equal EXACTLY what was sent
     let decoded_snapshot = decode_snapshot(&raw_frames[1][4..]).expect("decode snapshot");
     assert_eq!(decoded_snapshot.game_name, "DotA 5v5 Live Match");
     assert_eq!(decoded_snapshot.map_path, "Maps\\Download\\DotA v6.83d.w3x");
@@ -444,7 +413,6 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
     assert_eq!(decoded_snapshot.slots, expected_snap.slots);
     assert_eq!(decoded_snapshot, expected_snap);
 
-    // Verify Player records (Frames 2, 3, 4)
     let p1 = decode_player(&raw_frames[2][4..]).expect("decode player 1");
     assert_eq!(
         p1,
@@ -453,7 +421,7 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
             name: "Player_1".to_string(),
             colour: 0,
             team: 0,
-            race: 32, // 0x20 (SLOTRACE_RANDOM)
+            race: 32,
         }
     );
 
@@ -465,7 +433,7 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
             name: "Player_2".to_string(),
             colour: 1,
             team: 0,
-            race: 32, // 0x20 (SLOTRACE_RANDOM)
+            race: 32,
         }
     );
 
@@ -477,12 +445,10 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
             name: "Player_3".to_string(),
             colour: 2,
             team: 0,
-            race: 32, // 0x20 (SLOTRACE_RANDOM)
+            race: 32,
         }
     );
 
-    // 6. Assert every ACTION frame's payload is byte-identical to the action packet that was pushed,
-    // in the exact same order - including the 0x48 overflow packet.
     let action_payload_0 = decode_action(&raw_frames[5][4..]).expect("decode action 0 (overflow)");
     assert_eq!(
         action_payload_0, expected_overflow_pkt,
@@ -524,14 +490,12 @@ async fn spectator_relay_e2e_ordered_stream_snapshot_and_action_overflow() {
         "action frame 3 must wrap INCOMING_ACTION (0x0C)"
     );
 
-    // 7. Assert HISTORY_END carries exactly the number of action frames delivered (4)
     let history_count = decode_history_end(&raw_frames[9][4..]).expect("decode history end");
     assert_eq!(
         history_count, 4,
         "HISTORY_END packet count must equal exactly the 4 action frames pushed"
     );
 
-    // Clean shutdown of relay actor
     relay_cmd_tx
         .send(RelayCmd::Shutdown)
         .await

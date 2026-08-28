@@ -22,12 +22,10 @@ pub struct MapInfo {
     pub height: u16,
     pub game_type: u32,
     pub flags: u32,
-    /// Present only when map downloads are enabled.
+
     pub data: Option<Arc<Vec<u8>>>,
     pub layout_style: u8,
-    /// Raw w3i map options masked to the bits the bot cares about
-    /// (MAPOPT_MELEE | MAPOPT_FIXEDPLAYERSETTINGS | MAPOPT_CUSTOMFORCES),
-    /// mirroring GHost++ `CMap::m_MapOptions`.
+
     pub options: u32,
     pub map_type: String,
     pub matchmaking_category: String,
@@ -39,18 +37,15 @@ pub struct MapInfo {
 }
 
 impl MapInfo {
-    /// MAPOPT_FIXEDPLAYERSETTINGS, exactly like GHost++ `GetMapOptions()`.
+
     pub fn has_fixed_player_settings(&self) -> bool {
         self.options & crate::map::MAPOPT_FIXEDPLAYERSETTINGS != 0
     }
 
-    /// MAPOPT_CUSTOMFORCES, exactly like GHost++ `GetMapOptions()`.
     pub fn has_custom_forces(&self) -> bool {
         self.options & crate::map::MAPOPT_CUSTOMFORCES != 0
     }
 
-    /// MAPOBS_* observer setting, decoded from the game flags that
-    /// `calculate_game_flags` baked it into.
     pub fn observers(&self) -> u8 {
         use crate::map::{MAPOBS_ALLOWED, MAPOBS_NONE, MAPOBS_ONDEFEAT, MAPOBS_REFEREES};
         if self.flags & 0x4000_0000 != 0 {
@@ -64,8 +59,6 @@ impl MapInfo {
         }
     }
 
-    /// MAPFLAG_RANDOMRACES, decoded from the game flags that
-    /// `calculate_game_flags` baked it into (0x0400_0000).
     pub fn has_random_races(&self) -> bool {
         self.flags & 0x0400_0000 != 0
     }
@@ -153,7 +146,6 @@ pub struct GameConfig {
     pub matchmaking: bool,
 }
 
-/// GHost++ steps the countdown every 500 ms (`game_base.cpp:707`), starting at 10 down to 1 (5.0s in total).
 pub const COUNTDOWN_STEP: Duration = Duration::from_millis(500);
 pub const COUNTDOWN_STEPS: u8 = 10;
 pub const COUNTDOWN_TOTAL: Duration = Duration::from_millis(500 * COUNTDOWN_STEPS as u64);
@@ -171,14 +163,13 @@ pub enum GamePhase {
     Over,
 }
 
-/// All mutable game state, owned exclusively by one actor task. No locks.
 pub struct GameState {
     pub cfg: GameConfig,
     pub phase: GamePhase,
     pub slots: SlotTable,
     pub players: PlayerTable,
     pub tick: TickScheduler,
-    /// Connections that have not sent REQ_JOIN yet.
+
     pub pending: Vec<(u64, PlayerLink, [u8; 4])>,
     pub actions: Vec<ActionBlock>,
     pub sync_counter: u32,
@@ -194,9 +185,9 @@ pub struct GameState {
     pub last_download_tick: Instant,
     pub relay: Option<spectre_spectator::RelayHandle>,
     pub replay: Option<spectre_spectator::ReplayBody>,
-    /// Live DotaTV stream, when spectating is enabled for this game.
+
     pub dotatv: Option<std::sync::Arc<spectre_spectator::DotaTvShared>>,
-    /// Whether the replay prologue has already been published to `dotatv`.
+
     pub dotatv_prologue_sent: bool,
     pub store: Option<spectre_store::Store>,
     pub jitter_histogram: [u64; 5],
@@ -217,8 +208,7 @@ pub struct GameState {
     pub announce_message: Option<String>,
     pub announce_interval: Duration,
     pub last_announce_time: Option<Instant>,
-    /// PID of the fake "bot" player shown in the lobby, or 255 when absent.
-    /// Mirrors GHost++ `m_VirtualHostPID` (game_base.cpp:4702).
+
     pub virtual_host_pid: u8,
     pub started_loading_at: Option<Instant>,
     pub last_ping_at: Instant,
@@ -233,8 +223,7 @@ pub struct GameState {
 }
 
 impl GameState {
-    /// Encoded stat string as a replay carries it: map settings, map path and
-    /// host name, with a single terminator after the host name.
+
     fn build_replay_stat_string(cfg: &GameConfig) -> Vec<u8> {
         let mut raw = Vec::with_capacity(44 + cfg.map.path.len() + cfg.virtual_host_name.len());
         raw.extend_from_slice(&cfg.map.flags.to_le_bytes());
@@ -257,7 +246,7 @@ impl GameState {
         };
         let tick = TickScheduler::new(cfg.latency);
         let relay = cfg.relay.clone();
-        // Replay statstrings omit the trailing SHA1 delimiter present in network adverts.
+
         let replay_stat_string = Self::build_replay_stat_string(&cfg);
         let mut replay = spectre_spectator::ReplayBody::new(255, &cfg.virtual_host_name);
         replay.set_game(&cfg.name, &replay_stat_string, cfg.map.game_type);
@@ -347,11 +336,6 @@ impl GameState {
 
     pub const MAX_CONSECUTIVE_DROPS: u32 = 100;
 
-    /// Queues `bytes` for every seated player. Never awaits: a peer that cannot
-    /// keep up is marked for removal rather than allowed to stall the tick.
-    /// GProxy++ clients get every packet mirrored into their reconnect buffer
-    /// first, and a dropped gproxy link enters the reconnect grace period
-    /// (`disconnected_since`) instead of being removed immediately.
     pub fn broadcast(&mut self, bytes: Bytes) {
         for p in self.players.iter_mut() {
             if p.left.is_some() || p.virtual_host {
@@ -423,14 +407,6 @@ impl GameState {
         }
     }
 
-    /// Marks a player as kicked. Mirrors GHost++ `OpenSlot(sid, kick=true)`
-    /// (`game_base.cpp`): `SetDeleteMe` + `SetLeftReason` + `SetLeftCode`, and
-    /// nothing on the wire beyond the usual PLAYERLEAVE_OTHERS that
-    /// `reap_left_players` broadcasts afterwards.
-    ///
-    /// Deliberately does NOT send W3GS_HOST_KICK_PLAYER (0x1C): GHost++ only
-    /// declares that id (`gameprotocol.h:78`) and has no `SEND_` function for
-    /// it, so emitting it would be a divergence from the reference, not parity.
     pub fn kick_player(&mut self, pid: u8, reason: &str, left_code: u32) {
         if let Some(p) = self.players.by_pid_mut(pid) {
             p.left = Some(reason.to_string());
@@ -480,8 +456,6 @@ impl GameState {
         }
     }
 
-    /// Removes everyone marked as left and tells the rest. Called once per tick
-    /// and after every batch of inbound frames, never mid-iteration.
     pub fn reap_left_players(&mut self) {
         let gone: Vec<(u8, String, u32)> = self
             .players
@@ -578,8 +552,6 @@ impl GameState {
         }
     }
 
-    /// Seats a socket-less player so clients have a sender to attribute bot chat
-    /// to, and so the lobby count matches GHost++. No-op when one already exists.
     pub fn create_virtual_host(&mut self) {
         if self.virtual_host_pid != 255 {
             return;
@@ -587,10 +559,7 @@ impl GameState {
         let Some(pid) = self.players.next_free_pid() else {
             return;
         };
-        // The virtual host has no socket. `broadcast` and `reap_left_players`
-        // both skip it, so nothing ever sends through this link; it exists only
-        // to satisfy the Player type. Dropping the receiver is fine and must not
-        // be worked around with a leak.
+
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
         let mut p = crate::players::Player::new(
             pid,
@@ -609,7 +578,6 @@ impl GameState {
         self.players.insert(p);
     }
 
-    /// Removes the virtual host, freeing its PID for a real player.
     pub fn delete_virtual_host(&mut self) {
         if self.virtual_host_pid == 255 {
             return;
@@ -617,7 +585,7 @@ impl GameState {
         let pid = self.virtual_host_pid;
         self.virtual_host_pid = 255;
         self.players.remove_pid(pid);
-        // PLAYERLEAVE_LOBBY == 13, matching game_base.cpp:4721.
+
         self.broadcast(outgoing::player_leave_others(
             pid,
             spectre_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,

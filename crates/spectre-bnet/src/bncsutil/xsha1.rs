@@ -1,6 +1,5 @@
-﻿/// Computes the Battle.net "Broken SHA-1" (XSHA-1) digest over an arbitrary byte buffer.
-/// Chunks are padded with zeros to a multiple of 64 bytes (empty input still processes
-/// one 64-byte block of zeroes) and parsed as little-endian 32-bit words.
+﻿
+
 pub fn xsha1(data: &[u8]) -> [u8; 20] {
     let mut hash = [
         0x6745_2301u32,
@@ -75,14 +74,10 @@ pub fn xsha1(data: &[u8]) -> [u8; 20] {
     out
 }
 
-/// Hashes a Battle.net password using XSHA-1.
-///
-/// Note: XSHA-1 is case-sensitive; this does not lowercase the password.
 pub fn hash_password(password: &str) -> [u8; 20] {
     xsha1(password.as_bytes())
 }
 
-/// Canonical alias for `xsha1` matching BNCSutil C `calcHashBuf`.
 #[inline]
 pub fn calc_hash_buf(data: &[u8]) -> [u8; 20] {
     xsha1(data)
@@ -92,7 +87,6 @@ pub fn calc_hash_buf(data: &[u8]) -> [u8; 20] {
 mod tests {
     use super::*;
 
-    // Ground truth: bncsutil.dll `hashPassword`, captured 2026-08-15.
     const V_PASSWORD: [u8; 20] = [
         0xec, 0xc8, 0x0d, 0x1d, 0x76, 0xe7, 0x58, 0xc0, 0xb9, 0xda, 0x8c, 0x25, 0xff, 0x10, 0x6a,
         0xff, 0x8e, 0x24, 0x29, 0x16,

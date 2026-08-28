@@ -15,13 +15,12 @@ pub mod ids {
 }
 
 pub mod reject_reason {
-    /// The game the client tried to rejoin is gone.
+
     pub const NOT_FOUND: u32 = 0x01;
-    /// The reconnect key did not match.
+
     pub const INVALID_KEY: u32 = 0x02;
 }
 
-/// Sent by the bot to advertise GProxy support and the reconnect parameters.
 pub fn init(version: u32, pid: u8, reconnect_key: u32, num_empty_actions: u8) -> Bytes {
     let mut p = BytesMut::with_capacity(10);
     p.put_u32_le(version);
@@ -33,7 +32,6 @@ pub fn init(version: u32, pid: u8, reconnect_key: u32, num_empty_actions: u8) ->
         .expect("10-byte gps init always fits")
 }
 
-/// Acknowledges how many packets the bot has received from this client.
 pub fn ack(last_packet: u32) -> Bytes {
     let mut p = BytesMut::with_capacity(4);
     p.put_u32_le(last_packet);
@@ -42,7 +40,6 @@ pub fn ack(last_packet: u32) -> Bytes {
         .expect("4-byte gps ack always fits")
 }
 
-/// Acknowledges a reconnect request and indicates the bot's total packets received.
 pub fn reconnect_ok(last_packet: u32) -> Bytes {
     let mut p = BytesMut::with_capacity(4);
     p.put_u32_le(last_packet);
@@ -59,12 +56,11 @@ pub fn reject(reason: u32) -> Bytes {
         .expect("4-byte gps reject always fits")
 }
 
-/// A client asking to resume a dropped session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReconnectReq {
     pub pid: u8,
     pub reconnect_key: u32,
-    /// How many packets the client has already received from the bot.
+
     pub last_packet: u32,
 }
 

@@ -4,7 +4,6 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use bytes::Bytes;
 use tokio::net::UdpSocket;
 
-/// Broadcasts W3GS_GAMEINFO to the LAN so the game appears in Local Area Games.
 pub struct UdpBroadcaster {
     socket: UdpSocket,
     target: SocketAddrV4,

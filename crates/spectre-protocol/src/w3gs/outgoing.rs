@@ -6,8 +6,6 @@ use super::slot::SlotInfo;
 use crate::bytes_ext::put_cstring;
 use crate::error::ProtoError;
 
-/// One player action as it appears inside INCOMING_ACTION:
-/// pid (1) + length (2, LE) + body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionBlock {
     pub pid: u8,
@@ -51,7 +49,7 @@ fn action_payload(actions: &[ActionBlock], send_interval: u16) -> Result<Bytes, 
     let mut payload = BytesMut::with_capacity(4 + body_len);
     payload.put_u16_le(send_interval);
     if actions.is_empty() {
-        // An empty tick carries no CRC field, matching src/gameprotocol.rs:358.
+
         return Ok(payload.freeze());
     }
     let crc = crc32fast::hash(&sub);
@@ -61,7 +59,6 @@ fn action_payload(actions: &[ActionBlock], send_interval: u16) -> Result<Bytes, 
     Ok(payload.freeze())
 }
 
-/// W3GS_INCOMING_ACTION (0x0C): the per-tick action broadcast.
 pub fn incoming_action(actions: &[ActionBlock], send_interval: u16) -> Result<Bytes, ProtoError> {
     Frame::new(
         ids::INCOMING_ACTION,
@@ -70,7 +67,6 @@ pub fn incoming_action(actions: &[ActionBlock], send_interval: u16) -> Result<By
     .encode()
 }
 
-/// W3GS_INCOMING_ACTION2 (0x48): overflow packet, always send_interval 0.
 pub fn incoming_action2(actions: &[ActionBlock]) -> Result<Bytes, ProtoError> {
     Frame::new(ids::INCOMING_ACTION2, action_payload(actions, 0)?).encode()
 }
@@ -102,7 +98,6 @@ fn slot_block(
     p
 }
 
-/// W3GS_SLOTINFO (0x09).
 pub fn slot_info(
     slots: &[SlotInfo],
     random_seed: u32,
@@ -113,7 +108,6 @@ pub fn slot_info(
     Frame::new(ids::SLOT_INFO, p.freeze()).encode()
 }
 
-/// W3GS_SLOTINFOJOIN (0x04): slot table plus the joiner's own identity.
 pub fn slot_info_join(
     pid: u8,
     port: u16,
@@ -125,10 +119,10 @@ pub fn slot_info_join(
 ) -> Result<Bytes, ProtoError> {
     let mut p = slot_block(slots, random_seed, layout_style, player_slots);
     p.put_u8(pid);
-    p.put_u16_le(2); // AF_INET
+    p.put_u16_le(2);
     p.put_u16_le(port);
     p.put_slice(&external_ip);
-    p.put_slice(&[0; 8]); // sockaddr padding
+    p.put_slice(&[0; 8]);
     Frame::new(ids::SLOT_INFO_JOIN, p.freeze()).encode()
 }
 
@@ -140,7 +134,6 @@ pub fn reject_join(reason: u32) -> Bytes {
         .expect("4-byte reject always fits")
 }
 
-/// W3GS_PLAYERINFO (0x06).
 pub fn player_info(
     pid: u8,
     name: &str,
@@ -148,17 +141,17 @@ pub fn player_info(
     internal_ip: [u8; 4],
 ) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(32 + name.len());
-    p.put_u32_le(2); // player join counter
+    p.put_u32_le(2);
     p.put_u8(pid);
     put_cstring(&mut p, name);
-    p.put_u8(1); // size of following unknown block
+    p.put_u8(1);
     p.put_u8(0);
-    // external sockaddr
+
     p.put_u16_le(2);
     p.put_u16_le(0);
     p.put_slice(&external_ip);
     p.put_slice(&[0; 8]);
-    // internal sockaddr
+
     p.put_u16_le(2);
     p.put_u16_le(0);
     p.put_slice(&internal_ip);
@@ -195,7 +188,6 @@ pub fn countdown_end() -> Bytes {
         .expect("empty frame always fits")
 }
 
-/// W3GS_CHAT_FROM_HOST (0x0F).
 pub fn chat_from_host(
     from_pid: u8,
     to_pids: &[u8],
@@ -218,7 +210,6 @@ pub fn chat_from_host(
     Frame::new(ids::CHAT_FROM_HOST, p.freeze()).encode()
 }
 
-/// W3GS_START_LAG (0x10): pid plus how long that player has been lagging.
 pub fn start_lag(laggers: &[(u8, u32)]) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(1 + laggers.len() * 5);
     p.put_u8(laggers.len() as u8);
@@ -238,7 +229,6 @@ pub fn stop_lag(pid: u8, lag_ms: u32) -> Bytes {
         .expect("5-byte stoplag always fits")
 }
 
-/// W3GS_MAPCHECK (0x3D).
 pub fn map_check(
     map_path: &str,
     map_size: u32,
@@ -265,7 +255,6 @@ pub fn start_download(from_pid: u8) -> Bytes {
         .expect("5-byte startdownload always fits")
 }
 
-/// W3GS_MAPPART (0x43). `chunk` must be at most 1442 bytes; the CRC covers it.
 pub fn map_part(from_pid: u8, to_pid: u8, start: u32, chunk: &[u8]) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(14 + chunk.len());
     p.put_u8(to_pid);
@@ -277,7 +266,6 @@ pub fn map_part(from_pid: u8, to_pid: u8, start: u32, chunk: &[u8]) -> Result<By
     Frame::new(ids::MAP_PART, p.freeze()).encode()
 }
 
-/// W3GS_GAMEINFO (0x30): LAN game announcement broadcast.
 #[allow(clippy::too_many_arguments)]
 pub fn game_info(
     tft: bool,
@@ -294,9 +282,9 @@ pub fn game_info(
 ) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(64 + game_name.len() + stat_string.len());
     if tft {
-        p.put_slice(&[80, 88, 51, 87]); // "PX3W"
+        p.put_slice(&[80, 88, 51, 87]);
     } else {
-        p.put_slice(&[51, 82, 65, 87]); // "3RAW"
+        p.put_slice(&[51, 82, 65, 87]);
     }
     p.put_slice(&[war3_version, 0, 0, 0]);
     p.put_u32_le(host_counter);
@@ -307,7 +295,7 @@ pub fn game_info(
     p.put_u8(0);
     p.put_u32_le(slots_total);
     p.put_slice(&map_game_type);
-    p.put_slice(&[1, 0, 0, 0]); // unknown2
+    p.put_slice(&[1, 0, 0, 0]);
     p.put_u32_le(slots_open);
     p.put_u32_le(up_time);
     p.put_u16_le(port);
@@ -332,7 +320,6 @@ mod tests {
         ];
         let framed = incoming_action(&actions, 100).unwrap();
 
-        // Frame header
         assert_eq!(framed[0], 0xF7);
         assert_eq!(framed[1], ids::INCOMING_ACTION);
         assert_eq!(
@@ -340,7 +327,6 @@ mod tests {
             framed.len()
         );
 
-        // send interval, then 2-byte CRC, then the action blocks
         assert_eq!(u16::from_le_bytes([framed[4], framed[5]]), 100);
 
         let mut subpacket = BytesMut::new();
@@ -390,7 +376,7 @@ mod tests {
     fn slot_info_encodes_nine_bytes_per_slot() {
         let slots = vec![SlotInfo::default(); 12];
         let framed = slot_info(&slots, 42, 0, 12).unwrap();
-        // header 4 + u16 blocklen + u8 numslots + 12*9 + u32 seed + u8 layout + u8 playerslots
+
         assert_eq!(framed.len(), 4 + 2 + 1 + 12 * 9 + 4 + 1 + 1);
         assert_eq!(framed[1], ids::SLOT_INFO);
     }

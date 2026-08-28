@@ -9,7 +9,6 @@ use tokio::task::JoinHandle;
 use crate::handle::{GameCmd, GameHandle};
 use crate::state::{GameConfig, GamePhase, GameState};
 
-/// Bounds how far the command queue may back up before the sender complains.
 const CMD_CAPACITY: usize = 4096;
 
 pub fn spawn_game(cfg: GameConfig) -> (GameHandle, JoinHandle<()>) {
@@ -30,8 +29,7 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
 
     loop {
         tokio::select! {
-            // Commands first: actions that arrive just before a deadline should
-            // make it into that tick rather than the next one.
+
             biased;
 
             cmd = rx.recv() => {
@@ -80,8 +78,6 @@ async fn run(mut state: GameState, mut rx: mpsc::Receiver<GameCmd>) {
         }
     }
 
-    // The replay body is saved to disk from `state.replay` below; flush its
-    // unpublished tail to viewers first, while it is still intact.
     state.finish_dotatv().await;
 
     if let Some(rep) = state.replay.take() {
@@ -300,12 +296,11 @@ pub mod tests_support {
         b.put_u32_le(0);
         b.put_slice(name.as_bytes());
         b.put_u8(0);
-        b.put_slice(&[0, 0, 0, 0, 0, 0]); // 6 bytes unknown/sockaddr prefix
+        b.put_slice(&[0, 0, 0, 0, 0, 0]);
         b.put_slice(&[127, 0, 0, 1]);
         b.freeze()
     }
 
-    /// Drains one player's outbound queue into a list of (id, payload) pairs.
     pub fn drain_ids(rx: &mut mpsc::Receiver<Bytes>) -> Vec<u8> {
         let mut ids = Vec::new();
         while let Ok(b) = rx.try_recv() {
@@ -442,7 +437,7 @@ mod tests {
             1,
             AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("A"))),
         );
-        drop(rx); // the writer task is gone
+        drop(rx);
 
         st.broadcast(Bytes::from_static(&[0xF7, 0x0B, 0x04, 0x00]));
         st.reap_left_players();

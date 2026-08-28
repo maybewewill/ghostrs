@@ -66,19 +66,19 @@ pub fn calculate_game_flags(speed: u8, visibility: u8, observers: u8, map_flags:
     let mut flags: u32 = match speed {
         MAPSPEED_SLOW => 0x0000_0000,
         MAPSPEED_NORMAL => 0x0000_0001,
-        _ => 0x0000_0002, // MAPSPEED_FAST
+        _ => 0x0000_0002,
     };
     flags |= match visibility {
         MAPVIS_HIDETERRAIN => 0x0000_0100,
         MAPVIS_EXPLORED => 0x0000_0200,
         MAPVIS_ALWAYSVISIBLE => 0x0000_0400,
-        _ => 0x0000_0800, // MAPVIS_DEFAULT
+        _ => 0x0000_0800,
     };
     flags |= match observers {
         MAPOBS_ONDEFEAT => 0x0000_2000,
         MAPOBS_ALLOWED => 0x0000_3000,
         MAPOBS_REFEREES => 0x4000_0000,
-        _ => 0x0000_0000, // MAPOBS_NONE
+        _ => 0x0000_0000,
     };
     if map_flags & MAPFLAG_TEAMSTOGETHER != 0 {
         flags |= 0x0000_4000;
@@ -144,7 +144,7 @@ pub fn calculate_game_type(
 pub fn apply_melee_slot_init(slots: &mut [SlotInfo]) {
     for (i, slot) in slots.iter_mut().enumerate() {
         slot.team = i as u8;
-        slot.race = 0x20; // SLOTRACE_RANDOM
+        slot.race = 0x20;
     }
 }
 
@@ -181,7 +181,6 @@ pub fn add_observer_slots(
     }
 }
 
-/// Standard Warcraft III polynomial checksum calculation.
 pub fn xor_rotate_left(data: &[u8]) -> u32 {
     let mut i = 0;
     let mut val: u32 = 0;
@@ -276,7 +275,6 @@ impl ParsedMap {
         let mut val: u32 = 0;
         let mut hasher = Sha1::new();
 
-        // 1. Process common.j
         let mut overrode_common_j = false;
         if let Ok(file) = map_archive.open_file("Scripts\\common.j") {
             let mut buf = vec![0u8; file.size() as usize];
@@ -293,7 +291,6 @@ impl ParsedMap {
             hasher.update(cj);
         }
 
-        // 2. Process blizzard.j
         let mut overrode_blizzard_j = false;
         if let Ok(file) = map_archive.open_file("Scripts\\blizzard.j") {
             let mut buf = vec![0u8; file.size() as usize];
@@ -310,12 +307,10 @@ impl ParsedMap {
             hasher.update(bj);
         }
 
-        // 3. Transform with magic constants
         val = val.rotate_left(3);
         val = (val ^ 0x03F1379E).rotate_left(3);
         hasher.update([0x9E, 0x37, 0xF1, 0x03]);
 
-        // 4. Process internal map files
         let file_list = [
             "war3map.j",
             "scripts\\war3map.j",
@@ -356,7 +351,6 @@ impl ParsedMap {
         let mut map_sha1 = [0u8; 20];
         map_sha1.copy_from_slice(&hasher.finalize());
 
-        // 5. Parse war3map.w3i
         let mut width = 128u16;
         let mut height = 128u16;
         let mut num_teams = 2u8;
@@ -376,7 +370,7 @@ impl ParsedMap {
                     if cursor.read_exact(&mut u32_buf).is_ok() {
                         let file_format = u32::from_le_bytes(u32_buf);
                         if file_format == 18 || file_format == 25 {
-                            let _ = cursor.seek(SeekFrom::Current(4)); // number of saves
+                            let _ = cursor.seek(SeekFrom::Current(4));
                             if cursor.read_exact(&mut u32_buf).is_ok() {
                                 editor_version = u32::from_le_bytes(u32_buf);
                             }
@@ -428,16 +422,16 @@ impl ParsedMap {
                                         computer: 0,
                                         team: (i / 6) as u8,
                                         colour: i as u8,
-                                        race: 0x20, // random
+                                        race: 0x20,
                                         computer_type: 1,
                                         handicap: 100,
                                     };
 
-                                    let _ = cursor.read_exact(&mut u32_buf); // player type / colour
+                                    let _ = cursor.read_exact(&mut u32_buf);
                                     let colour = u32::from_le_bytes(u32_buf) as u8;
                                     slot.colour = colour;
 
-                                    let _ = cursor.read_exact(&mut u32_buf); // status
+                                    let _ = cursor.read_exact(&mut u32_buf);
                                     let status = u32::from_le_bytes(u32_buf);
                                     if status == 2 {
                                         slot.slot_status = SlotStatus::Occupied as u8;
@@ -446,19 +440,19 @@ impl ParsedMap {
                                         slot.slot_status = SlotStatus::Closed as u8;
                                     }
 
-                                    let _ = cursor.read_exact(&mut u32_buf); // race
+                                    let _ = cursor.read_exact(&mut u32_buf);
                                     let race = u32::from_le_bytes(u32_buf);
                                     slot.race = match race {
-                                        1 => 0x01, // Human (SLOTRACE_HUMAN)
-                                        2 => 0x02, // Orc (SLOTRACE_ORC)
-                                        3 => 0x08, // Undead (SLOTRACE_UNDEAD)
-                                        4 => 0x04, // NightElf (SLOTRACE_NIGHTELF)
-                                        _ => 0x20, // Random
+                                        1 => 0x01,
+                                        2 => 0x02,
+                                        3 => 0x08,
+                                        4 => 0x04,
+                                        _ => 0x20,
                                     };
 
                                     let _ = cursor.seek(SeekFrom::Current(4));
-                                    let _ = read_cstring(&mut cursor); // player name
-                                    let _ = cursor.seek(SeekFrom::Current(16)); // start pos
+                                    let _ = read_cstring(&mut cursor);
+                                    let _ = cursor.seek(SeekFrom::Current(16));
 
                                     if slot.slot_status != SlotStatus::Closed as u8 {
                                         slots.push(slot);
@@ -469,7 +463,7 @@ impl ParsedMap {
                                     let raw_teams = u32::from_le_bytes(u32_buf).min(12);
                                     num_teams = raw_teams as u8;
                                     for team in 0..raw_teams {
-                                        let _ = cursor.read_exact(&mut u32_buf); // flags
+                                        let _ = cursor.read_exact(&mut u32_buf);
                                         let _ = cursor.read_exact(&mut u32_buf);
                                         let player_mask = u32::from_le_bytes(u32_buf);
                                         for j in 0..24 {
@@ -481,7 +475,7 @@ impl ParsedMap {
                                                 }
                                             }
                                         }
-                                        let _ = read_cstring(&mut cursor); // team name
+                                        let _ = read_cstring(&mut cursor);
                                     }
                                 }
                             }
@@ -514,7 +508,7 @@ impl ParsedMap {
 
         if map_options & MAPOPT_FIXEDPLAYERSETTINGS == 0 {
             for slot in &mut slots {
-                slot.race |= 0x40; // SLOTRACE_SELECTABLE
+                slot.race |= 0x40;
             }
         }
 
@@ -681,15 +675,14 @@ mod tests {
         assert_eq!(parsed.layout_style, 3);
         assert_eq!(parsed.slots.len(), 10);
 
-        // Sentinel team 0 (slots 0..5), colours 1..5
         for s in &parsed.slots[0..5] {
             assert_eq!(s.team, 0);
-            assert_eq!(s.race, 0x04); // NightElf (SLOTRACE_NIGHTELF)
+            assert_eq!(s.race, 0x04);
         }
-        // Scourge team 1 (slots 5..10), colours 7..11
+
         for s in &parsed.slots[5..10] {
             assert_eq!(s.team, 1);
-            assert_eq!(s.race, 0x08); // Undead (SLOTRACE_UNDEAD)
+            assert_eq!(s.race, 0x08);
         }
     }
 
@@ -754,12 +747,10 @@ mod tests {
 
         let mut st = GameState::new(game_cfg);
 
-        // Verify DotA stats tracker and HCL initialized
         assert!(st.dota.is_some());
         assert_eq!(st.phase, GamePhase::Lobby);
         assert_eq!(st.slots.len(), 10);
 
-        // 1. Connect Player 1 (Alice)
         let (tx1, mut rx1) = mpsc::channel(128);
         st.add_conn(1, PlayerLink::for_test(tx1), [192, 168, 1, 10]);
         st.on_frame(
@@ -767,24 +758,21 @@ mod tests {
             AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Alice"))),
         );
 
-        // Verify Alice seated in Sentinel Slot 0
         let p1 = st.players.by_name_partial("Alice").unwrap();
         assert_eq!(p1.pid, 1);
         let wire_slots = st.slots.as_wire();
-        assert_eq!(wire_slots[0].slot_status, 2); // Occupied
+        assert_eq!(wire_slots[0].slot_status, 2);
         assert_eq!(wire_slots[0].pid, 1);
-        assert_eq!(wire_slots[0].team, 0); // Sentinel
-        assert_eq!(wire_slots[0].colour, 1); // Blue
+        assert_eq!(wire_slots[0].team, 0);
+        assert_eq!(wire_slots[0].colour, 1);
 
-        // Drain Alice's packets: should contain SLOT_INFO_JOIN, MAP_CHECK, GPS_INIT, SLOT_INFO
         let mut alice_packets = Vec::new();
         while let Ok(b) = rx1.try_recv() {
-            alice_packets.push(b[1]); // Packet ID byte
+            alice_packets.push(b[1]);
         }
         assert!(alice_packets.contains(&ids::SLOT_INFO_JOIN));
         assert!(alice_packets.contains(&ids::MAP_CHECK));
 
-        // 2. Connect Player 2 (Bob)
         let (tx2, mut rx2) = mpsc::channel(128);
         st.add_conn(2, PlayerLink::for_test(tx2), [192, 168, 1, 11]);
         st.on_frame(
@@ -795,16 +783,14 @@ mod tests {
         let p2 = st.players.by_name_partial("Bob").unwrap();
         assert_eq!(p2.pid, 2);
         let wire_slots = st.slots.as_wire();
-        assert_eq!(wire_slots[1].slot_status, 2); // Occupied
+        assert_eq!(wire_slots[1].slot_status, 2);
         assert_eq!(wire_slots[1].pid, 2);
-        assert_eq!(wire_slots[1].team, 0); // Sentinel
-        assert_eq!(wire_slots[1].colour, 2); // Teal
+        assert_eq!(wire_slots[1].team, 0);
+        assert_eq!(wire_slots[1].colour, 2);
 
-        // 3. Start game with !start command
         st.handle_cmd(GameCmd::Start { by: "slash".into() });
         assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
-        // Fast-forward countdown duration
         if let GamePhase::Countdown {
             ref mut started_at, ..
         } = st.phase
@@ -814,7 +800,6 @@ mod tests {
         st.on_tick(0);
         assert_eq!(st.phase, GamePhase::Loading);
 
-        // 4. Both players report GAME_LOADED_SELF
         st.on_frame(
             1,
             AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())),
@@ -824,14 +809,11 @@ mod tests {
             AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, bytes::Bytes::new())),
         );
 
-        // All players loaded -> Game is live Playing!
         assert_eq!(st.phase, GamePhase::Playing);
 
-        // Drain pending packets from rx1 and rx2
         while rx1.try_recv().is_ok() {}
         while rx2.try_recv().is_ok() {}
 
-        // 5. Game tick in Playing state: Action packet W3GS_INCOMING_ACTION is broadcast
         st.on_tick(0);
 
         let p1_pkt = rx1
@@ -843,16 +825,14 @@ mod tests {
         assert_eq!(p1_pkt[1], ids::INCOMING_ACTION);
         assert_eq!(p2_pkt[1], ids::INCOMING_ACTION);
 
-        // 6. Alice sends an action (e.g. hero order)
         let mut action_body = BytesMut::new();
-        action_body.put_u32_le(0); // crc
-        action_body.put_slice(&[0x10, 0x01, 0x02, 0x03]); // arbitrary action payload
+        action_body.put_u32_le(0);
+        action_body.put_slice(&[0x10, 0x01, 0x02, 0x03]);
         st.on_frame(
             1,
             AnyFrame::W3gs(Frame::new(ids::OUTGOING_ACTION, action_body.freeze())),
         );
 
-        // Alice sends keepalive
         let mut keepalive = BytesMut::new();
         keepalive.put_u32_le(0);
         st.on_frame(
@@ -860,7 +840,6 @@ mod tests {
             AnyFrame::W3gs(Frame::new(ids::OUTGOING_KEEPALIVE, keepalive.freeze())),
         );
 
-        // Next tick: the action is bundled into INCOMING_ACTION and sent to all players
         st.on_tick(0);
 
         let p1_action_tick = rx1.try_recv().expect("Alice must receive action tick");
@@ -886,7 +865,6 @@ mod tests {
         let common_j = fs::read(workspace_dir.join("maps").join("common.j")).ok();
         let blizzard_j = fs::read(workspace_dir.join("maps").join("blizzard.j")).ok();
 
-        // 1. Default load has MAPOBS_NONE (bit 22 set in game_type, no 0x3000 in flags)
         let default_map =
             ParsedMap::load_mpq(&map_path, common_j.as_deref(), blizzard_j.as_deref())
                 .expect("load default map");
@@ -896,7 +874,6 @@ mod tests {
         );
         assert_eq!(default_map.info.game_type & MAPGAMETYPE_OBSFULL, 0);
 
-        // 2. Load with override enabling observers (MAPOBS_ALLOWED = 3) and filter_obs = MAPFILTER_OBS_FULL
         let ovr = MapOverride {
             observers: Some(MAPOBS_ALLOWED),
             filter_obs: Some(MAPFILTER_OBS_FULL),
@@ -913,14 +890,12 @@ mod tests {
         )
         .expect("load map with override");
 
-        // Observers bit should be MAPGAMETYPE_OBSFULL (bit 20), not MAPGAMETYPE_OBSNONE
         assert_eq!(
             ovr_map.info.game_type & MAPGAMETYPE_OBSFULL,
             MAPGAMETYPE_OBSFULL
         );
         assert_eq!(ovr_map.info.game_type & MAPGAMETYPE_OBSNONE, 0);
 
-        // Flags should reflect speed=normal(1), vis=always(0x400), obs=allowed(0x3000), flags=0x4000 -> 0x00007401
         assert_eq!(
             ovr_map.info.flags,
             0x0000_0001 | 0x0000_0400 | 0x0000_3000 | 0x0000_4000

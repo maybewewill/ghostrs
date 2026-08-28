@@ -9,10 +9,6 @@
 };
 use std::io::Write;
 
-// =========================================================================
-// 1. LibInfo Tests
-// =========================================================================
-
 #[test]
 fn test_libinfo_version_constants_and_getters() {
     assert_eq!(BNCSUTIL_VERSION, 10405);
@@ -22,10 +18,6 @@ fn test_libinfo_version_constants_and_getters() {
     assert_eq!(spectre_bnet::bncsutil::bncsutil_get_version(), 10405);
     assert_eq!(spectre_bnet::bncsutil::bncsutil_get_version_string(), "1.4.5");
 }
-
-// =========================================================================
-// 2. Broken SHA-1 (XSHA-1) Tests
-// =========================================================================
 
 #[test]
 fn test_xsha1_reference_vectors() {
@@ -63,10 +55,6 @@ fn test_xsha1_multi_block_padding() {
     assert_eq!(h1.len(), 20);
 }
 
-// =========================================================================
-// 3. OldAuth Tests
-// =========================================================================
-
 #[test]
 fn test_oldauth_single_and_double_hash() {
     let single = hash_password("secret");
@@ -83,10 +71,6 @@ fn test_oldauth_single_and_double_hash() {
     let expected = xsha1(&buf);
     assert_eq!(double, expected);
 }
-
-// =========================================================================
-// 4. CD-Key Decoder Tests
-// =========================================================================
 
 #[test]
 fn test_cdkey_warcraft3_26_char() {
@@ -124,12 +108,12 @@ fn test_cdkey_warcraft3_26_char() {
     let wire = create_key_info(tft_key, client_token, server_token, true).expect("wire info");
     assert_eq!(wire.len(), 36);
     assert_eq!(u32::from_le_bytes([wire[0], wire[1], wire[2], wire[3]]), 26);
-    assert_eq!(u32::from_le_bytes([wire[4], wire[5], wire[6], wire[7]]), 7); // TFT override
+    assert_eq!(u32::from_le_bytes([wire[4], wire[5], wire[6], wire[7]]), 7);
 }
 
 #[test]
 fn test_cdkey_warcraft2_16_char() {
-    let key = "47D2C4CD-N628-CGB4"; // 16 alphanumeric characters
+    let key = "47D2C4CD-N628-CGB4";
     let sanitized: String = key.chars().filter(|c| c.is_alphanumeric()).collect();
     assert_eq!(sanitized.len(), 16);
 
@@ -142,7 +126,7 @@ fn test_cdkey_warcraft2_16_char() {
 
 #[test]
 fn test_cdkey_starcraft_13_char() {
-    // Generate valid 13-digit StarCraft key
+
     let prefix = "123456789012";
     let mut accum: i32 = 3;
     for c in prefix.chars() {
@@ -178,10 +162,6 @@ fn test_cdkey_error_handling() {
     );
 }
 
-// =========================================================================
-// 5. MPQ Number Extraction Tests
-// =========================================================================
-
 #[test]
 fn test_extract_mpq_number_comprehensive() {
     assert_eq!(extract_mpq_number("IX86ver1.mpq"), 1);
@@ -192,10 +172,6 @@ fn test_extract_mpq_number_comprehensive() {
     assert_eq!(extract_mpq_number("custom_file.mpq"), 1);
     assert_eq!(extract_mpq_number(""), 1);
 }
-
-// =========================================================================
-// 6. CheckRevision Tests
-// =========================================================================
 
 #[test]
 fn test_check_revision_multi_file_and_flat() {
@@ -223,7 +199,6 @@ fn test_check_revision_multi_file_and_flat() {
     let c_slice = check_revision(formula, &[&f1, &f2, &f3], 1).expect("checksum slice");
     assert_eq!(c_flat, c_slice);
 
-    // 1-file evaluation
     let c_single = check_revision(formula, &[&f1], 1).expect("checksum 1 file");
     assert_ne!(c_single, 0);
 
@@ -244,10 +219,6 @@ fn test_check_revision_seed_management() {
     set_mpq_seed(1, 0xF6A1_4FFC);
     assert_eq!(get_mpq_seed(1), 0xF6A1_4FFC);
 }
-
-// =========================================================================
-// 7. ExeInfo & PE Parser Tests
-// =========================================================================
 
 #[test]
 fn test_exe_info_platforms() {
@@ -277,25 +248,20 @@ fn test_exe_info_platforms() {
 
 #[test]
 fn test_pe_fixed_file_info_extraction() {
-    // VS_FIXEDFILEINFO signature test
+
     let mut fake_pe = vec![0u8; 256];
     fake_pe[0..2].copy_from_slice(b"MZ");
     fake_pe[0x3C..0x40].copy_from_slice(&0x40u32.to_le_bytes());
     fake_pe[0x40..0x44].copy_from_slice(b"PE\0\0");
 
-    // Embed VS_FIXEDFILEINFO structure somewhere in buffer
     let ffi_offset = 100;
-    fake_pe[ffi_offset..ffi_offset + 4].copy_from_slice(&[0xBD, 0x04, 0xEF, 0xFE]); // 0xFEEF04BD
-    fake_pe[ffi_offset + 16..ffi_offset + 20].copy_from_slice(&0x0001001Au32.to_le_bytes()); // 1.26
-    fake_pe[ffi_offset + 20..ffi_offset + 24].copy_from_slice(&0x00000001u32.to_le_bytes()); // 0.1
+    fake_pe[ffi_offset..ffi_offset + 4].copy_from_slice(&[0xBD, 0x04, 0xEF, 0xFE]);
+    fake_pe[ffi_offset + 16..ffi_offset + 20].copy_from_slice(&0x0001001Au32.to_le_bytes());
+    fake_pe[ffi_offset + 20..ffi_offset + 24].copy_from_slice(&0x00000001u32.to_le_bytes());
 
     let ver = extract_pe_version(&fake_pe).expect("extracted version");
-    assert_eq!(ver, 0x011A0001); // 18481153
+    assert_eq!(ver, 0x011A0001);
 }
-
-// =========================================================================
-// 8. New Logon System (NLS / SRP-6a) Tests
-// =========================================================================
 
 #[test]
 fn test_nls_constants() {

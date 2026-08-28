@@ -65,8 +65,7 @@ pub struct GameDefaults {
 pub struct SpectatorConfig {
     pub enabled: bool,
     pub port: u16,
-    /// Live replay-stream spectating (`-loadfile` bootstrap + chunk feed).
-    /// Independent of the W3GS relay above and needs its own port.
+
     pub dotatv_enabled: bool,
     pub dotatv_port: u16,
     pub delay: Duration,

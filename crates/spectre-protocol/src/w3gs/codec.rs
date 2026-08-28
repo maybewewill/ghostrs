@@ -7,7 +7,6 @@ use crate::frame::{Frame as RawFrame, HeaderCodec};
 pub const W3GS_HEADER: u8 = 0xF7;
 pub type W3gsCodec = HeaderCodec<W3GS_HEADER>;
 
-/// W3GS-flavoured frame: same shape as the shared one, header fixed to 0xF7.
 pub type Frame = RawFrame;
 
 pub trait W3gsFrameExt {
@@ -20,8 +19,6 @@ impl W3gsFrameExt for RawFrame {
     }
 }
 
-/// True for ids the engine acts on. Unknown ids are still framed and forwarded
-/// so the stream never desyncs; the engine decides whether to ignore them.
 pub fn is_known_id(id: u8) -> bool {
     matches!(
         id,
@@ -69,8 +66,7 @@ mod tests {
 
     #[test]
     fn unknown_packet_id_is_consumed_not_desynced() {
-        // Regression: legacy src/protocol/w3gs.rs:160 errored before advancing,
-        // leaving the byte stream permanently misaligned.
+
         let mut buf = BytesMut::new();
         buf.extend_from_slice(&[0xF7, 0xEE, 0x05, 0x00, 0x99]);
         buf.extend_from_slice(&[0xF7, 0x27, 0x04, 0x00]);
@@ -101,7 +97,7 @@ mod tests {
 
     #[test]
     fn oversized_payload_errors_instead_of_truncating() {
-        // Regression: legacy encode cast total_len to u16 unchecked.
+
         let payload = Bytes::from(vec![0u8; 70_000]);
         let frame = Frame::new(ids::MAP_PART, payload);
         assert!(matches!(frame.encode(), Err(ProtoError::TooLarge(70_004))));

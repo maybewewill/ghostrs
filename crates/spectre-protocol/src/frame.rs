@@ -5,8 +5,6 @@ use crate::error::ProtoError;
 
 pub const HEADER_LEN: usize = 4;
 
-/// A framed packet. `payload` excludes the 4-byte header and shares memory with
-/// the read buffer, so cloning it is a refcount bump, not a copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub id: u8,
@@ -32,7 +30,6 @@ impl Frame {
     }
 }
 
-/// Length-prefixed framing shared by W3GS (0xF7), GPS (0xF8) and BNCS (0xFF).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HeaderCodec<const H: u8>;
 
@@ -75,8 +72,6 @@ impl<const H: u8> Decoder for HeaderCodec<H> {
 impl<const H: u8> Encoder<Bytes> for HeaderCodec<H> {
     type Error = ProtoError;
 
-    /// Packets are pre-encoded once and broadcast as shared `Bytes`, so the
-    /// encoder only appends already-framed data.
     fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), ProtoError> {
         dst.reserve(item.len());
         dst.put_slice(&item);
@@ -107,8 +102,7 @@ mod tests {
 
     #[test]
     fn a_bncs_frame_is_not_mistaken_for_a_gps_frame() {
-        // 0xFF is not the GPS header, so the GPS codec must resync past it and
-        // then find nothing rather than decoding a bogus frame.
+
         let mut buf = BytesMut::from(&[0xFF, 0x50, 0x04, 0x00][..]);
         assert!(Gps::default().decode(&mut buf).unwrap().is_none());
         assert!(buf.is_empty(), "unusable bytes must be discarded");

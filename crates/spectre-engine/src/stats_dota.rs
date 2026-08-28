@@ -32,7 +32,7 @@ impl DotAPlayerStats {
 #[derive(Debug, Clone, Default)]
 pub struct StatsDotA {
     pub players: HashMap<u32, DotAPlayerStats>,
-    /// 0 = unknown/unfinished, 1 = Sentinel, 2 = Scourge
+
     pub winner: u32,
     pub duration_min: u32,
     pub duration_sec: u32,
@@ -57,8 +57,6 @@ impl StatsDotA {
         self.players.insert(colour, p);
     }
 
-    /// Parses DotA real-time replay data actions.
-    /// Equivalent to GHost++ `CStatsDOTA::ProcessAction` (statsdota.cpp:51-371).
     pub fn process_action(&mut self, action_data: &[u8]) -> bool {
         let mut i = 0;
         let dota_sig = [0x6b, b'd', b'r', b'.', b'x', 0x00];
@@ -66,7 +64,7 @@ impl StatsDotA {
         while i + 6 <= action_data.len() {
             if action_data[i..i + 6] == dota_sig {
                 let start = i + 6;
-                // Extract null-terminated Data string
+
                 let Some(data_null) = action_data[start..].iter().position(|&b| b == 0) else {
                     i += 1;
                     continue;
@@ -74,7 +72,6 @@ impl StatsDotA {
                 let data_bytes = &action_data[start..start + data_null];
                 let key_start = start + data_null + 1;
 
-                // Extract null-terminated Key string
                 let Some(key_null) = action_data[key_start..].iter().position(|&b| b == 0) else {
                     i += 1;
                     continue;
@@ -127,7 +124,7 @@ impl StatsDotA {
                     }
                 } else if data_str == "Global" {
                     if key_str == "Winner" {
-                        self.winner = value_int; // 1 = Sentinel, 2 = Scourge (statsdota.cpp:271)
+                        self.winner = value_int;
                     } else if key_str == "m" {
                         self.duration_min = value_int;
                     } else if key_str == "s" {
@@ -266,7 +263,7 @@ mod tests {
 
     fn make_dr_x_action(data: &str, key: &str, value: u32) -> Vec<u8> {
         let mut pkt = Vec::new();
-        // DotA custom action marker: 0x6b "dr.x\0" (statsdota.cpp:67)
+
         pkt.extend_from_slice(&[0x6b, b'd', b'r', b'.', b'x', 0x00]);
         pkt.extend_from_slice(data.as_bytes());
         pkt.push(0x00);
@@ -282,7 +279,6 @@ mod tests {
         dota.add_player(1, "PlayerOne".into());
         dota.add_player(7, "PlayerTwo".into());
 
-        // Winner event: Data="Global", Key="Winner", Value=1 (Sentinel)
         let winner_act = make_dr_x_action("Global", "Winner", 1);
         let finished = dota.process_action(&winner_act);
         assert!(
@@ -292,7 +288,6 @@ mod tests {
         assert_eq!(dota.winner, 1);
         assert_eq!(dota.format_winner(), "Sentinel");
 
-        // Duration: Data="Global", Key="m", Value=42; Key="s", Value=15
         dota.process_action(&make_dr_x_action("Global", "m", 42));
         dota.process_action(&make_dr_x_action("Global", "s", 15));
         assert_eq!(dota.duration_min, 42);
@@ -304,14 +299,13 @@ mod tests {
         let mut dota = StatsDotA::new("DotA v6.83d".into());
         dota.add_player(1, "Alice".into());
 
-        // Player "1" stats: Kills=12, Deaths=3, Creeps=145, Denies=18, Assists=7, Gold=2400
         dota.process_action(&make_dr_x_action("1", "1", 12));
         dota.process_action(&make_dr_x_action("1", "2", 3));
         dota.process_action(&make_dr_x_action("1", "3", 145));
         dota.process_action(&make_dr_x_action("1", "4", 18));
         dota.process_action(&make_dr_x_action("1", "5", 7));
         dota.process_action(&make_dr_x_action("1", "6", 2400));
-        // Item 0: "I001" (stored reversed on wire)
+
         let item_val = u32::from_le_bytes([b'1', b'0', b'0', b'I']);
         dota.process_action(&make_dr_x_action("1", "8_0", item_val));
 
@@ -330,7 +324,6 @@ mod tests {
         let mut dota = StatsDotA::new("DotA v6.83d".into());
         dota.add_player(1, "Alice".into());
 
-        // In-game Data="Data", Key="Tower010" (Alliance 0=Sentinel, Level 1, Side 0=top), Value=1 (Player 1 destroyed it)
         dota.process_action(&make_dr_x_action("Data", "Tower010", 1));
         let p = dota.players.get(&1).unwrap();
         assert_eq!(p.tower_kills, 1);

@@ -1,16 +1,11 @@
-﻿//! Portable Executable (PE) File and Resource Parser
-//!
-//! Provides routines to parse PE headers, resource directories, and extract `VS_FIXEDFILEINFO`
-//! product version numbers matching BNCSutil's `pe.c` (`cm_pe_load`, `cm_pe_load_resources`, `cm_pe_fixed_version`).
+﻿
 
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-/// Standard VS_FIXEDFILEINFO signature (`0xFEEF04BD` in little endian).
 pub const VS_FFI_SIGNATURE: u32 = 0xFEEF_04BD;
 
-/// Fixed file information extracted from PE `.rsrc` section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PeFixedFileInfo {
     pub signature: u32,
@@ -29,8 +24,7 @@ pub struct PeFixedFileInfo {
 }
 
 impl PeFixedFileInfo {
-    /// Combines `product_version_ms` and `product_version_ls` into the packed 32-bit version
-    /// formatted as `(major << 24) | (minor << 16) | (rev << 8) | build` matching BNCSutil.
+
     pub fn packed_product_version(&self) -> u32 {
         let hi_ms = (self.product_version_ms >> 16) & 0xFF;
         let lo_ms = self.product_version_ms & 0xFF;
@@ -40,13 +34,11 @@ impl PeFixedFileInfo {
     }
 }
 
-/// Parses fixed file version information from an in-memory PE image buffer.
 pub fn extract_pe_version(data: &[u8]) -> Option<u32> {
     if let Some(ffi) = extract_pe_fixed_file_info(data) {
         return Some(ffi.packed_product_version());
     }
 
-    // Direct byte scan fallback for VS_FIXEDFILEINFO signature: 0xBD, 0x04, 0xEF, 0xFE
     for w in data.windows(52) {
         if w[0..4] == [0xBD, 0x04, 0xEF, 0xFE] {
             let ms = u32::from_le_bytes(w[16..20].try_into().unwrap_or_default());
@@ -62,7 +54,6 @@ pub fn extract_pe_version(data: &[u8]) -> Option<u32> {
     None
 }
 
-/// Parses complete `PeFixedFileInfo` from PE image buffer by traversing `.rsrc` directory tree.
 pub fn extract_pe_fixed_file_info(data: &[u8]) -> Option<PeFixedFileInfo> {
     if data.len() < 64 || &data[0..2] != b"MZ" {
         return None;
@@ -138,7 +129,6 @@ pub fn extract_pe_fixed_file_info(data: &[u8]) -> Option<PeFixedFileInfo> {
                         let data_or_dir =
                             u32::from_le_bytes(data_slice.try_into().unwrap_or_default());
 
-                        // RT_VERSION = 16
                         if id_or_name == 16 && (data_or_dir & 0x8000_0000) != 0 {
                             let l2_off = (data_or_dir & 0x7FFF_FFFF) as usize;
                             if l2_off + 16 <= rsrc.len() {
@@ -233,7 +223,6 @@ fn parse_fixed_file_info_struct(buf: &[u8]) -> Option<PeFixedFileInfo> {
     })
 }
 
-/// Reads executable from disk and extracts packed version.
 pub fn extract_pe_version_from_file(path: &Path) -> Option<u32> {
     let mut f = File::open(path).ok()?;
     let mut buffer = Vec::new();
@@ -266,6 +255,6 @@ mod tests {
             file_date_ls: 0,
         };
 
-        assert_eq!(ffi.packed_product_version(), 0x011A0001); // 18481153 (1.26.0.1)
+        assert_eq!(ffi.packed_product_version(), 0x011A0001);
     }
 }

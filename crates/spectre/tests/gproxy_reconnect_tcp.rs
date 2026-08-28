@@ -49,12 +49,10 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // 1. Connect player to game host_port
     let mut player_sock = TcpStream::connect(format!("127.0.0.1:{host_port}"))
         .await
         .expect("must connect to host_port");
 
-    // 2. Send REQ_JOIN
     let reqjoin = make_reqjoin("ReconnectTester");
     let mut frame = BytesMut::new();
     frame.put_u8(0xF7);
@@ -66,7 +64,6 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // 3. Send GPS_INIT to register as GProxy player
     let mut init_frame = BytesMut::new();
     init_frame.put_u8(0xF8);
     init_frame.put_u8(gps::ids::INIT);
@@ -75,7 +72,6 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     player_sock.write_all(&init_frame).await.unwrap();
     player_sock.flush().await.unwrap();
 
-    // 4. Read GPS_INIT response from bot
     let mut init_buf = vec![0u8; 1024];
     let mut pid = 0;
     let mut reconnect_key = 0;
@@ -109,11 +105,9 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     assert!(pid > 0);
     assert!(reconnect_key != 0);
 
-    // 5. Drop the player socket (simulate network drop)
     drop(player_sock);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // 6. Connect to reconnect_port with valid key
     let mut reconn_sock = TcpStream::connect(format!("127.0.0.1:{reconnect_port}"))
         .await
         .expect("must connect to reconnect_port");
@@ -124,11 +118,10 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     reconn_pkt.put_u16_le(13);
     reconn_pkt.put_u8(pid);
     reconn_pkt.put_u32_le(reconnect_key);
-    reconn_pkt.put_u32_le(0); // last_packet: 0
+    reconn_pkt.put_u32_le(0);
     reconn_sock.write_all(&reconn_pkt).await.unwrap();
     reconn_sock.flush().await.unwrap();
 
-    // 7. Verify we get GPS_RECONNECT / GPS_ACK response on the new socket
     let mut reply_buf = vec![0u8; 1024];
     let mut reconnected = false;
     for _ in 0..10 {
@@ -147,7 +140,6 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
         "must receive GPS_RECONNECT/ACK on reconnect socket"
     );
 
-    // 8. Test invalid key on a separate connection -> rejected
     let mut bad_sock = TcpStream::connect(format!("127.0.0.1:{reconnect_port}"))
         .await
         .expect("must connect to reconnect_port for bad test");
@@ -157,7 +149,7 @@ async fn gproxy_reconnect_listener_tcp_e2e() {
     bad_pkt.put_u8(gps::ids::RECONNECT);
     bad_pkt.put_u16_le(13);
     bad_pkt.put_u8(pid);
-    bad_pkt.put_u32_le(0xDEAD_BEEF); // wrong key
+    bad_pkt.put_u32_le(0xDEAD_BEEF);
     bad_pkt.put_u32_le(0);
     bad_sock.write_all(&bad_pkt).await.unwrap();
     bad_sock.flush().await.unwrap();

@@ -5,7 +5,6 @@ use spectre_net::PlayerLink;
 
 use crate::slots::SlotTable;
 
-/// How many recent ping samples feed the average shown by `!ping`.
 const PING_HISTORY: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,12 +24,12 @@ pub struct Player {
     pub joined_realm: String,
     pub spoofed: bool,
     pub whois_sent: bool,
-    /// How many action ticks this player has confirmed via keepalive.
+
     pub sync_counter: u32,
     pub lagging: bool,
     pub started_lagging: Option<Instant>,
     pub loaded: bool,
-    /// 0..100 while downloading the map, 255 when not downloading.
+
     pub download_status: u8,
     pub ping_history: VecDeque<u32>,
     pub reconnect_key: u32,
@@ -43,11 +42,11 @@ pub struct Player {
     pub total_packets_received: u32,
     pub checksums: VecDeque<u32>,
     pub consecutive_send_failures: u32,
-    /// Code indicating why player left (matches GHost++ gameprotocol.h:38-45).
+
     pub left_code: u32,
-    /// Set once the player is scheduled for removal; carries the reason.
+
     pub left: Option<String>,
-    /// True for the socket-less bot player seated to fill the lobby headcount.
+
     pub virtual_host: bool,
     pub finished_loading_at: Option<Instant>,
     pub download_allowed: bool,
@@ -149,7 +148,6 @@ impl PlayerTable {
         self.players.iter_mut().find(|p| p.conn_id == conn_id)
     }
 
-    /// Exact match wins; otherwise a unique case-insensitive prefix match.
     pub fn by_name_partial(&self, needle: &str) -> Result<&Player, NameMatch> {
         if let Some(p) = self.players.iter().find(|p| p.name == needle) {
             return Ok(p);
@@ -175,15 +173,10 @@ impl PlayerTable {
         self.players.iter_mut()
     }
 
-    /// Every seated player except the virtual host: the set that can actually
-    /// vote, chat, or be counted toward "enough players to start".
     pub fn iter_humans(&self) -> impl Iterator<Item = &Player> {
         self.players.iter().filter(|p| !p.virtual_host)
     }
 
-    /// Count of real (non-virtual-host) players. Use this anywhere GHost++
-    /// counts `GetNumPlayers()`/human headcount, since the virtual host is
-    /// seated in this table but must never be counted as a human.
     pub fn human_count(&self) -> usize {
         self.iter_humans().count()
     }
@@ -196,7 +189,6 @@ impl PlayerTable {
         self.players.is_empty()
     }
 
-    /// PIDs run 1..=254; 255 is reserved for the virtual host player.
     pub fn next_free_pid(&self) -> Option<u8> {
         (1u8..=254).find(|c| !self.players.iter().any(|p| p.pid == *c))
     }
@@ -244,7 +236,7 @@ mod tests {
             Err(NameMatch::Ambiguous(2))
         ));
         assert!(matches!(t.by_name_partial("zzz"), Err(NameMatch::None)));
-        // An exact match wins even when it is a prefix of another name.
+
         assert_eq!(t.by_name_partial("Slash").unwrap().pid, 1);
     }
 
@@ -271,11 +263,11 @@ mod tests {
     fn next_free_colour_finds_first_unused_colour() {
         let t = PlayerTable::new();
         let mut slots = SlotTable::new(12);
-        // Default slots allocate colours 0..11
+
         assert_eq!(t.next_free_colour(&slots), 0);
-        // If slot 0 is changed to colour 5
+
         let _ = slots.set_colour(0, 5);
-        // Colour 0 is now free if no other slot has colour 0
+
         assert_eq!(t.next_free_colour(&slots), 0);
     }
 }

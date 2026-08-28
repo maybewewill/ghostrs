@@ -139,8 +139,6 @@ struct ActiveAdvert {
     port: Option<u16>,
 }
 
-/// `bnet.cpp:2284` ORs MAPGAMETYPE_PRIVATEGAME into the game type for a private
-/// game, so it stays out of the public game list.
 const MAPGAMETYPE_PRIVATEGAME: u32 = 0x0000_0800;
 
 fn advert_game_type(map: &MapAdvert, visibility: spectre_protocol::GameVisibility) -> [u8; 4] {
@@ -205,7 +203,7 @@ async fn run(cfg: BnetConfig, events: mpsc::Sender<BnetEvent>, mut rx: mpsc::Rec
         let mut stage = Stage::AwaitAuthInfo;
         let mut active_adverts: Vec<ActiveAdvert> = Vec::new();
         let mut cur_nls: Option<NlsSession> = None;
-        // The advert is re-sent every 3 s, so only log the transition, not every ack.
+
         let mut advert_listed = false;
 
         let mut _friends: Vec<incoming::FriendListEntry> = Vec::new();

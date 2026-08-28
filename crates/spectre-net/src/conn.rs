@@ -52,7 +52,7 @@ impl Decoder for DualCodec {
     type Error = ProtoError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
-        // Resync past any byte that is neither W3GS (0xF7) nor GPS (0xF8).
+
         while !src.is_empty() && src[0] != W3GS_HEADER && src[0] != GPS_HEADER {
             match src
                 .iter()
@@ -127,8 +127,6 @@ pub struct ConnEvent {
     pub kind: ConnEventKind,
 }
 
-/// The engine's handle on one player's socket. Sending never blocks and never
-/// awaits: the game tick hands off bytes and moves on.
 #[derive(Debug, Clone)]
 pub struct PlayerLink {
     tx: mpsc::Sender<Bytes>,
@@ -147,8 +145,6 @@ impl PlayerLink {
         self.tx.is_closed()
     }
 
-    /// Builds a link over a caller-supplied channel. For tests and for the
-    /// virtual host player, which has no socket behind it.
     pub fn for_test(tx: mpsc::Sender<Bytes>) -> Self {
         Self { tx }
     }
@@ -177,7 +173,6 @@ where
     let cancel = CancellationToken::new();
     let cancel_writer = cancel.clone();
 
-    // Reader: socket -> channel
     let reader_events = events.clone();
     tokio::spawn(async move {
         let mut framed = FramedRead::new(read_half, C::default());
@@ -213,7 +208,6 @@ where
             .await;
     });
 
-    // Writer: channel -> socket
     tokio::spawn(async move {
         let mut framed = FramedWrite::new(write_half, C::default());
         loop {
@@ -238,7 +232,6 @@ where
     PlayerLink { tx: out_tx }
 }
 
-/// Spawns the reader and writer tasks for one connection.
 pub fn spawn_conn(
     conn_id: u64,
     stream: TcpStream,
@@ -248,7 +241,6 @@ pub fn spawn_conn(
     spawn_conn_with_codec::<DualCodec>(conn_id, stream, events, write_capacity)
 }
 
-/// Spawns the reader and writer tasks for a DotaTV spectator connection.
 pub fn spawn_dtv_conn(
     conn_id: u64,
     stream: TcpStream,

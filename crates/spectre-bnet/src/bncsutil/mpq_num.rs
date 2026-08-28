@@ -1,5 +1,5 @@
-﻿/// Extracts the integer version number from an MPQ filename (e.g. "IX86ver1.mpq" -> 1).
-/// If no digit sequence is found, defaults to 1.
+﻿
+
 pub fn extract_mpq_number(mpq_name: &str) -> i32 {
     let name = mpq_name.strip_suffix(".mpq").unwrap_or(mpq_name);
     let stem = if let Some(dot_idx) = name.rfind('.') {

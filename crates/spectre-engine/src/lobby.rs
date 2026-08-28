@@ -4,14 +4,10 @@ use spectre_protocol::w3gs::{incoming::ReqJoin, outgoing};
 use crate::players::Player;
 use crate::state::{GamePhase, GameState};
 
-/// REJECTJOIN reason codes, from src/gameprotocol.rs:249.
 pub const REJECT_FULL: u32 = 0x09;
 pub const REJECT_STARTED: u32 = 0x0A;
 pub const REJECT_WRONG_PASSWORD: u32 = 0x1B;
 
-/// GHost++'s global slot ceiling, not this game's configured `num_slots`.
-/// `gameslot.h:39`: `const int MAX_SLOTS = 24;`. `game_base.cpp:2052` gates
-/// virtual-host eviction on this constant, not on the current map's slot count.
 pub const MAX_SLOTS: usize = 24;
 
 impl GameState {
@@ -33,7 +29,6 @@ impl GameState {
             }
         };
 
-        // Reject before allocating anything.
         if !matches!(self.phase, GamePhase::Lobby) {
             let _ = link.try_send(outgoing::reject_join(REJECT_STARTED));
             return;
@@ -97,7 +92,6 @@ impl GameState {
             player.spoofed = true;
         }
 
-        // 1. Tell the joiner who they are and what the lobby looks like.
         match outgoing::slot_info_join(
             pid,
             req.listen_port,
@@ -120,7 +114,6 @@ impl GameState {
             }
         }
 
-        // 2. Tell the joiner about everyone already here.
         let existing: Vec<(u8, String, [u8; 4], [u8; 4])> = self
             .players
             .iter()
@@ -132,7 +125,6 @@ impl GameState {
             }
         }
 
-        // 3. Map check, so the client can start downloading or confirm it has the map.
         if let Ok(b) = outgoing::map_check(
             &self.cfg.map.path,
             self.cfg.map.size,
@@ -145,7 +137,6 @@ impl GameState {
 
         self.players.insert(player);
 
-        // 4. Tell everyone else about the joiner.
         if let Ok(b) = outgoing::player_info(pid, &req.name, external_ip, req.internal_ip) {
             for p in self.players.iter_mut() {
                 if p.pid != pid {
@@ -155,21 +146,6 @@ impl GameState {
         }
         self.send_all_slot_info();
 
-        // game_base.cpp:2052: `if (GetNumPlayers() >= MAX_SLOTS-1 || EnforcePID ==
-        // m_VirtualHostPID) DeleteVirtualHost();`. MAX_SLOTS is the engine-wide
-        // constant (24), not this game's `num_slots` — for a normal, say,
-        // 12-slot DotA lobby this branch never fires at join time; GHost++
-        // removes the virtual host unconditionally when loading starts instead
-        // (game_base.cpp:3389, mirrored in `begin_loading`). The virtual host
-        // never occupies a slot (`create_virtual_host` does not call
-        // `occupy_slot`), so it was never competing with real players for a
-        // seat, only for a PID.
-        //
-        // The C++'s second condition, `EnforcePID == m_VirtualHostPID`, only
-        // ever fires when replaying a saved game (`EnforcePID` defaults to 255
-        // and is set only inside `if (m_SaveGame)`, game_base.cpp:1908-1922);
-        // spectre has no save-game/replay-enforced-layout feature, so there is
-        // no `EnforcePID` to compare here. It is intentionally not ported.
         if self.players.human_count() >= MAX_SLOTS - 1 {
             self.delete_virtual_host();
         }
@@ -243,14 +219,11 @@ mod tests {
     async fn bot_chat_is_sent_from_the_virtual_host_pid() {
         let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
         st.create_virtual_host();
-        // Drain P1's own join packets and the virtual host's PLAYER_INFO
-        // announcement so only the chat packet is left to inspect.
+
         crate::actor::tests_support::drain_ids(&mut rxs[0]);
         st.send_chat_all("hello");
         let pkt = rxs[0].try_recv().expect("chat packet");
-        // [0xF7, 0x0F, len_lo, len_hi, recipient_count, to_pids..., from_pid, ...]
-        // (gameprotocol.cpp:526-542): a count byte and the recipient list
-        // precede from_pid, so with one recipient it lands at offset 6.
+
         assert_eq!(pkt[1], spectre_protocol::w3gs::ids::CHAT_FROM_HOST);
         assert_eq!(
             pkt[6], st.virtual_host_pid,
@@ -260,15 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_normal_lobby_filling_up_keeps_the_virtual_host_until_loading_starts() {
-        // game_base.cpp:2052 gates eviction on the engine-wide MAX_SLOTS (24),
-        // not on this game's `num_slots`. A 12-slot lobby filling every seat
-        // but one (11 real players) never reaches MAX_SLOTS-1 = 23, so the
-        // virtual host must still be present — only `begin_loading` removes
-        // it (game_base.cpp:3389, already covered by a separate test).
-        //
-        // The superseded `num_slots - 1` expression would have deleted the
-        // virtual host as soon as `real_players >= 11`, which this exact
-        // scenario reaches: this test fails against that old expression.
+
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(0);
         st.create_virtual_host();
         let vh = st.virtual_host_pid;

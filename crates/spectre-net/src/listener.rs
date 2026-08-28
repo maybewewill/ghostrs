@@ -11,7 +11,6 @@ pub fn next_conn_id() -> u64 {
     NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Accepts connections and forwards them, tagged with a fresh id, to `out`.
 pub fn spawn_listener(
     addr: SocketAddr,
     out: mpsc::Sender<(u64, TcpStream, SocketAddr)>,
@@ -28,13 +27,12 @@ pub fn spawn_listener(
                 }
             };
             if out.send((next_conn_id(), stream, peer)).await.is_err() {
-                return Ok(()); // owner shut down
+                return Ok(());
             }
         }
     })
 }
 
-/// Accepts connections and forwards them, tagged with a fresh id and listening port, to `out`.
 pub fn spawn_listener_tagged(
     addr: SocketAddr,
     port: u16,
@@ -56,7 +54,7 @@ pub fn spawn_listener_tagged(
                 .await
                 .is_err()
             {
-                return Ok(()); // owner shut down
+                return Ok(());
             }
         }
     })

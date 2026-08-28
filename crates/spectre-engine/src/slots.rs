@@ -8,8 +8,6 @@ pub enum SlotStatus {
     Occupied = 2,
 }
 
-/// The authoritative slot table. Indices are slot ids (SIDs); the wire format
-/// is produced verbatim from this vector.
 #[derive(Debug, Clone)]
 pub struct SlotTable {
     slots: Vec<SlotInfo>,
@@ -25,7 +23,7 @@ impl SlotTable {
                 computer: 0,
                 team: (i / 6) as u8,
                 colour: i as u8,
-                race: 0x20, // random
+                race: 0x20,
                 computer_type: 1,
                 handicap: 100,
             })
@@ -153,7 +151,6 @@ impl SlotTable {
         }
     }
 
-    /// Frees whichever slot holds `pid`, returning its SID.
     pub fn release(&mut self, pid: u8) -> Option<u8> {
         let sid = self.sid_of_pid(pid)?;
         self.open(sid);
@@ -181,9 +178,6 @@ impl SlotTable {
             .map(|i| i as u8)
     }
 
-    /// GHost++ `GetEmptySlot(team, PID)` (game_base.cpp:3857): the first open
-    /// slot on `team`, scanning from the player's own slot when they already sit
-    /// on that team, otherwise from slot 0, wrapping around.
     pub fn first_open_in_team_from(&self, start_sid: u8, team: u8) -> Option<u8> {
         let n = self.slots.len();
         if n == 0 || start_sid as usize >= n {
@@ -209,8 +203,6 @@ impl SlotTable {
         None
     }
 
-    /// GHost++ `GetNewColour()` (game_base.cpp:3697): the smallest colour not
-    /// used by any slot, falling back to MAX_SLOTS when every colour is taken.
     pub fn unused_colour(&self) -> u8 {
         for c in 0..crate::lobby::MAX_SLOTS as u8 {
             if !self.slots.iter().any(|s| s.colour == c) {

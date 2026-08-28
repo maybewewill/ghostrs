@@ -174,10 +174,7 @@ impl Relay {
                 let Some((_, block)) = self.delayed_blocks.pop_front() else {
                     break;
                 };
-                // Released blocks become history: a viewer joining from here on
-                // must receive this block in its catch-up burst, and a viewer
-                // already connected has just been sent it live. Exactly once
-                // either way.
+
                 self.history_bytes = self.history_bytes.saturating_add(block.len());
                 self.history.push(block.clone());
                 if let Ok(framed) = encode_action(&block) {
@@ -309,13 +306,7 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
                         }
                     }
                     Some(RelayCmd::GameBlock(block)) => {
-                        // The block is NOT added to history here. History holds only
-                        // blocks already released to live viewers; a block still sitting
-                        // in delayed_blocks is in every viewer's future. Recording it now
-                        // would send it twice to anyone joining inside the delay window:
-                        // once in the history burst, then again on release. Warcraft III
-                        // would simulate that timeslot twice and desync. It joins history
-                        // in release_due_blocks instead.
+
                         let release_at = Instant::now() + relay.cfg.delay;
                         relay.delayed_blocks.push_back((release_at, block));
                         relay.release_due_blocks();
@@ -340,7 +331,7 @@ async fn run_relay(cfg: RelayConfig, mut rx: mpsc::Receiver<RelayCmd>) {
                         }
                     }
                     Some(RelayCmd::GameOver) => {
-                        // Flush any remaining blocks
+
                         while let Some((_, block)) = relay.delayed_blocks.pop_front() {
                             if let Ok(framed) = encode_action(&block) {
                                 relay.broadcast(&framed);
@@ -470,45 +461,39 @@ mod tests {
         };
         let mut relay = Relay::new(cfg);
 
-        // Create a link with channel capacity 1
         let (tx, _rx) = mpsc::channel(1);
         let link = PlayerLink::for_test(tx);
         relay.add_viewer(1, link).unwrap();
 
         let pkt = Bytes::from_static(&[1, 2, 3]);
 
-        // 1st broadcast succeeds (fills channel)
         relay.broadcast(&pkt);
         assert_eq!(relay.viewers.len(), 1);
         assert_eq!(relay.drop_counts.get(&1), None);
 
-        // 2nd broadcast experiences backpressure, but does NOT drop viewer
         relay.broadcast(&pkt);
         assert_eq!(relay.viewers.len(), 1);
         assert_eq!(relay.drop_counts.get(&1), Some(&1));
 
-        // Send up to threshold
         for _ in 0..199 {
             relay.broadcast(&pkt);
         }
         assert_eq!(relay.viewers.len(), 1);
         assert_eq!(relay.drop_counts.get(&1), Some(&200));
 
-        // One more exceeds threshold -> drops viewer
         relay.broadcast(&pkt);
         assert_eq!(relay.viewers.len(), 0);
         assert_eq!(relay.drop_counts.get(&1), None);
 
-        // Verify successful send resets drop count
         let (tx2, mut rx2) = mpsc::channel(1);
         let link2 = PlayerLink::for_test(tx2);
         relay.add_viewer(2, link2).unwrap();
-        relay.broadcast(&pkt); // fills channel
-        relay.broadcast(&pkt); // drop 1
+        relay.broadcast(&pkt);
+        relay.broadcast(&pkt);
         assert_eq!(relay.drop_counts.get(&2), Some(&1));
-        // drain channel
+
         let _ = rx2.try_recv();
-        relay.broadcast(&pkt); // succeeds -> resets drop count
+        relay.broadcast(&pkt);
         assert_eq!(relay.drop_counts.get(&2), None);
         assert_eq!(relay.viewers.len(), 1);
     }
@@ -516,10 +501,7 @@ mod tests {
     #[tokio::test]
     async fn joining_viewer_receives_exact_ordered_sequence_of_0xfd_message_ids_and_decoded_payloads()
      {
-        // Zero delay so the pushed blocks are released - and therefore enter
-        // history - before the viewer joins. A block still inside the delay
-        // window is deliberately NOT in the catch-up burst; see
-        // a_viewer_joining_inside_the_delay_window_receives_each_block_exactly_once.
+
         let (handle, _join) = spawn_relay(RelayConfig {
             port: 0,
             delay: Duration::ZERO,
@@ -542,7 +524,6 @@ mod tests {
         handle.push(block2.clone());
         handle.push(block3.clone());
 
-        // Allow actor to process game start, player infos, and game blocks
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let (viewer_tx, mut viewer_rx) = mpsc::channel(64);
@@ -556,7 +537,6 @@ mod tests {
             })
             .await;
 
-        // Drain all messages sent to the viewer
         let mut frames = Vec::new();
         for _ in 0..8 {
             let pkt = tokio::time::timeout(Duration::from_millis(200), viewer_rx.recv())
@@ -566,19 +546,18 @@ mod tests {
             frames.push(pkt);
         }
 
-        // (a) Assert exact ordered sequence of 0xFD message IDs
         let received_ids: Vec<u8> = frames.iter().map(|f| f[1]).collect();
         assert_eq!(
             received_ids,
             vec![
-                dotatv_ids::HELLO,               // 0x01
-                dotatv_ids::GAME_START_SNAPSHOT, // 0x02
-                dotatv_ids::PLAYER,              // 0x03
-                dotatv_ids::PLAYER,              // 0x03
-                dotatv_ids::ACTION,              // 0x04
-                dotatv_ids::ACTION,              // 0x04
-                dotatv_ids::ACTION,              // 0x04
-                dotatv_ids::HISTORY_END,         // 0x07
+                dotatv_ids::HELLO,
+                dotatv_ids::GAME_START_SNAPSHOT,
+                dotatv_ids::PLAYER,
+                dotatv_ids::PLAYER,
+                dotatv_ids::ACTION,
+                dotatv_ids::ACTION,
+                dotatv_ids::ACTION,
+                dotatv_ids::HISTORY_END,
             ]
         );
         assert_eq!(
@@ -586,18 +565,15 @@ mod tests {
             vec![0x01, 0x02, 0x03, 0x03, 0x04, 0x04, 0x04, 0x07]
         );
 
-        // Frame 0: HELLO
         assert_eq!(frames[0][0], 0xFD);
         let (hello_ver, hello_server) = decode_hello(&frames[0][4..]).unwrap();
         assert_eq!(hello_ver, 1);
         assert_eq!(hello_server, "spectre");
 
-        // Frame 1: GAME_START_SNAPSHOT
         assert_eq!(frames[1][0], 0xFD);
         let decoded_snap = decode_snapshot(&frames[1][4..]).unwrap();
         assert_eq!(decoded_snap, expected_snap);
 
-        // Frame 2: PLAYER 1
         assert_eq!(frames[2][0], 0xFD);
         let p1 = decode_player(&frames[2][4..]).unwrap();
         assert_eq!(
@@ -611,7 +587,6 @@ mod tests {
             }
         );
 
-        // Frame 3: PLAYER 2
         assert_eq!(frames[3][0], 0xFD);
         let p2 = decode_player(&frames[3][4..]).unwrap();
         assert_eq!(
@@ -625,7 +600,6 @@ mod tests {
             }
         );
 
-        // (b) Assert history action frames match exact payloads that were pushed in order
         assert_eq!(frames[4][0], 0xFD);
         let act1 = decode_action(&frames[4][4..]).unwrap();
         assert_eq!(act1, block1);
@@ -638,18 +612,11 @@ mod tests {
         let act3 = decode_action(&frames[6][4..]).unwrap();
         assert_eq!(act3, block3);
 
-        // Frame 7: HISTORY_END
         assert_eq!(frames[7][0], 0xFD);
         let history_count = decode_history_end(&frames[7][4..]).unwrap();
         assert_eq!(history_count, 3);
     }
 
-    /// A viewer joining while blocks are still inside the delay window must
-    /// receive each block exactly once. Before this was fixed, a block was
-    /// recorded into history the moment it arrived while a copy stayed queued
-    /// in delayed_blocks, so a joiner got it in the catch-up burst AND again
-    /// when the delay expired. Warcraft III would simulate that timeslot twice
-    /// and desync - with the default 120 s delay that hit every single viewer.
     #[tokio::test(start_paused = true)]
     async fn a_viewer_joining_inside_the_delay_window_receives_each_block_exactly_once() {
         let (handle, _join) = spawn_relay(RelayConfig {
@@ -664,7 +631,6 @@ mod tests {
         handle.push(block.clone());
         tokio::task::yield_now().await;
 
-        // Join while the block is still queued and undelivered.
         let (viewer_tx, mut viewer_rx) = mpsc::channel(64);
         let _ = handle
             .tx
@@ -675,7 +641,6 @@ mod tests {
             .await;
         tokio::task::yield_now().await;
 
-        // Let the 120 s delay elapse so the block is released live.
         tokio::time::advance(Duration::from_secs(121)).await;
         let _ = handle.debug_released_count().await;
         tokio::task::yield_now().await;
@@ -726,14 +691,12 @@ mod tests {
             })
             .await;
 
-        // Message 0: HELLO
         let hello = tokio::time::timeout(Duration::from_millis(200), viewer_rx.recv())
             .await
             .expect("timeout")
             .expect("channel open");
         assert_eq!(hello[1], dotatv_ids::HELLO);
 
-        // Message 1: PLAYER (since snapshot was not set)
         let player_frame = tokio::time::timeout(Duration::from_millis(200), viewer_rx.recv())
             .await
             .expect("timeout")
@@ -752,7 +715,6 @@ mod tests {
             }
         );
 
-        // Message 2: HISTORY_END
         let history_end = tokio::time::timeout(Duration::from_millis(200), viewer_rx.recv())
             .await
             .expect("timeout")
@@ -768,22 +730,19 @@ mod tests {
             delay: Duration::ZERO,
             max_viewers: 10,
             game_name: "Cap Test".into(),
-            history_max_mb: 1, // 1 MB cap = 1,048,576 bytes
+            history_max_mb: 1,
         });
 
-        // 1. First viewer connects successfully under limit
         let (v1_tx, mut v1_rx) = mpsc::channel(16);
         let link1 = PlayerLink::for_test(v1_tx);
         assert_eq!(relay.add_viewer(1, link1), Ok(()));
         assert_eq!(relay.viewers.len(), 1);
 
-        // 2. Push blocks exceeding 1 MB cap
         let big_block = Bytes::from(vec![0xAA; 1_048_580]);
         relay.history_bytes = relay.history_bytes.saturating_add(big_block.len());
         relay.history.push(big_block);
         assert_eq!(relay.history_bytes, 1_048_580);
 
-        // 3. New viewer is refused with HistoryLimitExceeded
         let (v2_tx, _v2_rx) = mpsc::channel(16);
         let link2 = PlayerLink::for_test(v2_tx);
         assert_eq!(
@@ -792,7 +751,6 @@ mod tests {
         );
         assert_eq!(relay.viewers.len(), 1);
 
-        // 4. Existing connected viewer still receives live frames
         let live_block = Bytes::from_static(&[0xF7, 0x0C, 0x06, 0x00, 0x64, 0x00]);
         let release_at = Instant::now();
         relay
@@ -821,7 +779,6 @@ mod tests {
         let current_ids: Vec<u64> = relay.viewers.iter().map(|(id, _)| *id).collect();
         assert_eq!(current_ids, vec![10, 20]);
 
-        // Dispatch Closed event for conn_id 10
         relay.handle_conn_event(ConnEvent {
             conn_id: 10,
             kind: ConnEventKind::Closed(CloseReason::PeerClosed),
@@ -831,7 +788,6 @@ mod tests {
         assert_eq!(remaining_ids, vec![20]);
         assert_eq!(relay.drop_counts.get(&10), None);
 
-        // Dispatch Closed event for conn_id 20
         relay.handle_conn_event(ConnEvent {
             conn_id: 20,
             kind: ConnEventKind::Closed(CloseReason::Io("reset".into())),
@@ -858,7 +814,6 @@ mod tests {
         relay.add_viewer(100, PlayerLink::for_test(v1_tx)).unwrap();
         relay.add_viewer(200, PlayerLink::for_test(v2_tx)).unwrap();
 
-        // Inbound 0x81 CLIENT_CHAT from conn_id 100
         let chat_bytes = dotatv::encode_client_chat("Good game everyone").unwrap();
         let frame = Frame::new(dotatv_ids::CLIENT_CHAT, chat_bytes.slice(4..));
 
@@ -900,7 +855,6 @@ mod tests {
         assert_eq!(relay.history_bytes, 6);
         assert_eq!(relay.delayed_blocks.len(), 1);
 
-        // Simulate GameOver command handling
         while let Some((_, b)) = relay.delayed_blocks.pop_front() {
             if let Ok(framed) = encode_action(&b) {
                 relay.broadcast(&framed);

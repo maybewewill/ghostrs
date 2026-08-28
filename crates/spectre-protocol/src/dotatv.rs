@@ -54,7 +54,6 @@ pub struct SpectatorChat {
     pub text: String,
 }
 
-/// 0x01 HELLO (Server -> Client)
 pub fn encode_hello(version: u16, server_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(2 + server_name.len() + 1);
     p.put_u16_le(version);
@@ -69,7 +68,6 @@ pub fn decode_hello(payload: &[u8]) -> Result<(u16, String), ProtoError> {
     Ok((version, server_name))
 }
 
-/// 0x02 GAME_START_SNAPSHOT (Server -> Client)
 pub fn encode_snapshot(snap: &GameStartSnapshot) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(
         snap.game_name.len()
@@ -185,7 +183,6 @@ pub fn decode_snapshot(payload: &[u8]) -> Result<GameStartSnapshot, ProtoError> 
     })
 }
 
-/// 0x03 PLAYER (Server -> Client)
 pub fn encode_player(
     pid: u8,
     name: &str,
@@ -218,7 +215,6 @@ pub fn decode_player(payload: &[u8]) -> Result<PlayerInfo, ProtoError> {
     })
 }
 
-/// 0x04 ACTION (Server -> Client)
 pub fn encode_action(w3gs_raw_frame: &[u8]) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(w3gs_raw_frame.len());
     p.put_slice(w3gs_raw_frame);
@@ -250,7 +246,6 @@ pub fn decode_action(payload: &[u8]) -> Result<Bytes, ProtoError> {
     Ok(Bytes::copy_from_slice(&payload[..len]))
 }
 
-/// 0x05 CHAT (Server -> Client)
 pub fn encode_chat(sender: &str, text: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(sender.len() + 1 + text.len() + 1);
     put_cstring(&mut p, sender);
@@ -265,7 +260,6 @@ pub fn decode_chat(payload: &[u8]) -> Result<SpectatorChat, ProtoError> {
     Ok(SpectatorChat { sender, text })
 }
 
-/// 0x06 GAME_OVER (Server -> Client)
 pub fn encode_game_over(winner: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(winner.len() + 1);
     put_cstring(&mut p, winner);
@@ -277,7 +271,6 @@ pub fn decode_game_over(payload: &[u8]) -> Result<String, ProtoError> {
     b.try_get_cstring()
 }
 
-/// 0x07 HISTORY_END (Server -> Client)
 pub fn encode_history_end(count: u32) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(4);
     p.put_u32_le(count);
@@ -289,7 +282,6 @@ pub fn decode_history_end(payload: &[u8]) -> Result<u32, ProtoError> {
     b.try_get_u32_le()
 }
 
-/// 0x80 SUBSCRIBE (Client -> Server)
 pub fn encode_subscribe(client_version: u16) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(2);
     p.put_u16_le(client_version);
@@ -301,7 +293,6 @@ pub fn decode_subscribe(payload: &[u8]) -> Result<u16, ProtoError> {
     b.try_get_u16_le()
 }
 
-/// 0x81 CHAT (Client -> Server)
 pub fn encode_client_chat(text: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(text.len() + 1);
     put_cstring(&mut p, text);
@@ -358,23 +349,23 @@ mod tests {
         };
         let bytes = encode_snapshot(&snap).unwrap();
         let expected: &[u8] = &[
-            0xFD, 0x02, 82, 0x00, // Header: FD 02, total length 82 (4 header + 78 payload)
-            0x44, 0x6F, 0x74, 0x41, 0x20, 0x4C, 0x69, 0x76, 0x65, 0x00, // "DotA Live\0" (10)
+            0xFD, 0x02, 82, 0x00,
+            0x44, 0x6F, 0x74, 0x41, 0x20, 0x4C, 0x69, 0x76, 0x65, 0x00,
             0x4D, 0x61, 0x70, 0x73, 0x5C, 0x64, 0x6F, 0x74, 0x61, 0x2E, 0x77, 0x33, 0x78,
-            0x00, // "Maps\dota.w3x\0" (14)
-            0x4E, 0x61, 0xBC, 0x00, // size (4)
-            0x44, 0x33, 0x22, 0x11, // info crc (4)
-            0x88, 0x77, 0x66, 0x55, // map crc (4)
+            0x00,
+            0x4E, 0x61, 0xBC, 0x00,
+            0x44, 0x33, 0x22, 0x11,
+            0x88, 0x77, 0x66, 0x55,
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-            20, // sha1 (20)
-            0xAA, 0xBB, 0xCC, 0x00, // stat_string\0 (4)
-            0x2A, 0x00, 0x00, 0x00, // random_seed (4)
-            0x00, // layout_style (1)
-            0x0A, // player_slots (1)
-            0x1A, // war3_version = 26 (1)
-            0x01, // is_tft = 1 (1)
-            0x01, // num_slots = 1 (1)
-            0x00, 0xFF, 0x02, 0x00, 0x00, 0x01, 0x01, 0x00, 0x64, // slot0 (9)
+            20,
+            0xAA, 0xBB, 0xCC, 0x00,
+            0x2A, 0x00, 0x00, 0x00,
+            0x00,
+            0x0A,
+            0x1A,
+            0x01,
+            0x01,
+            0x00, 0xFF, 0x02, 0x00, 0x00, 0x01, 0x01, 0x00, 0x64,
         ];
         assert_eq!(&bytes[..], expected);
     }
@@ -602,21 +593,21 @@ mod tests {
         assert!(decode_snapshot(&[]).is_err());
         assert!(decode_snapshot(b"game\0map\0").is_err());
         let mut truncated = vec![
-            b'g', b'\0', b'm', b'\0', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // crcs
+            b'g', b'\0', b'm', b'\0', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
         assert!(decode_snapshot(&truncated).is_err());
-        truncated.extend_from_slice(&[0u8; 20]); // sha1
+        truncated.extend_from_slice(&[0u8; 20]);
         assert!(decode_snapshot(&truncated).is_err());
-        truncated.push(b'\0'); // empty stat string
-        truncated.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 5]); // num_slots = 5, but 0 slots provided
+        truncated.push(b'\0');
+        truncated.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 5]);
         assert!(decode_snapshot(&truncated).is_err());
     }
 
     #[test]
     fn test_decode_player_truncation() {
         assert!(decode_player(&[]).is_err());
-        assert!(decode_player(&[1, b'P', b'1']).is_err()); // unterminated name
-        assert!(decode_player(&[1, b'P', b'1', 0x00, 1]).is_err()); // missing team, race
+        assert!(decode_player(&[1, b'P', b'1']).is_err());
+        assert!(decode_player(&[1, b'P', b'1', 0x00, 1]).is_err());
     }
 
     #[test]
@@ -648,8 +639,8 @@ mod tests {
     #[test]
     fn test_decode_chat_truncation() {
         assert!(decode_chat(&[]).is_err());
-        assert!(decode_chat(b"Host\0").is_err()); // missing text
-        assert!(decode_chat(b"Host").is_err()); // unterminated sender
+        assert!(decode_chat(b"Host\0").is_err());
+        assert!(decode_chat(b"Host").is_err());
     }
 
     #[test]

@@ -1,7 +1,5 @@
 ﻿use std::time::{Duration, Instant};
 
-/// Schedules game ticks on an absolute grid so per-tick lateness never
-/// accumulates. Replaces the legacy "sleep 15 ms and compare timestamps" loop.
 #[derive(Debug, Clone)]
 pub struct TickScheduler {
     period: Duration,
@@ -26,13 +24,10 @@ impl TickScheduler {
         self.period
     }
 
-    /// Applied from the next tick onwards; the pending deadline is untouched.
     pub fn set_period(&mut self, period: Duration) {
         self.period = period;
     }
 
-    /// Moves to the next deadline strictly after `now`. Returns how many whole
-    /// periods were skipped, which is non-zero only when the process stalled.
     pub fn advance(&mut self, now: Instant) -> u32 {
         self.next += self.period;
         let mut skipped = 0u32;
@@ -53,8 +48,6 @@ mod tests {
         let mut t = TickScheduler::new(Duration::from_millis(100));
         let first = t.deadline();
 
-        // The tick body took 30 ms; the next deadline is still on the 200 ms grid,
-        // not 230 ms. This is the whole point: error must not accumulate.
         let skipped = t.advance(first + Duration::from_millis(30));
         assert_eq!(skipped, 0);
         assert_eq!(t.deadline(), first + Duration::from_millis(100));
@@ -65,10 +58,10 @@ mod tests {
         let mut t = TickScheduler::new(Duration::from_millis(100));
         let first = t.deadline();
         for _ in 0..1000 {
-            let now = t.deadline() + Duration::from_millis(5); // always 5 ms late
+            let now = t.deadline() + Duration::from_millis(5);
             t.advance(now);
         }
-        // 1000 ticks x 100 ms = 100 s after first deadline.
+
         assert_eq!(t.deadline(), first + Duration::from_millis(100 * 1000));
     }
 
@@ -76,7 +69,7 @@ mod tests {
     fn reports_skipped_periods_after_a_long_stall() {
         let mut t = TickScheduler::new(Duration::from_millis(100));
         let first = t.deadline();
-        // The process stalled for 350 ms: three whole periods were missed.
+
         let skipped = t.advance(first + Duration::from_millis(350));
         assert_eq!(skipped, 3);
         assert!(t.deadline() > first + Duration::from_millis(350));

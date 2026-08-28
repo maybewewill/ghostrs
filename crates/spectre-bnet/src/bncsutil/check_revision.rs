@@ -1,6 +1,4 @@
-﻿//! BNCSutil CheckRevision Implementation
-//!
-//! Evaluates Battle.net CheckRevision formulas over game executables and MPQ archive seeds.
+﻿
 
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
@@ -24,7 +22,6 @@ struct Operation {
     right: char,
 }
 
-/// Known Battle.net CheckRevision MPQ seed table from BNCSutil / GHost++.
 pub const DEFAULT_MPQ_SEEDS: [u32; 8] = [
     0xE7F4_CB62,
     0xF6A1_4FFC,
@@ -38,7 +35,6 @@ pub const DEFAULT_MPQ_SEEDS: [u32; 8] = [
 
 static SEED_REGISTRY: RwLock<Option<Vec<u32>>> = RwLock::new(None);
 
-/// Retrieves the seed value registered for the given MPQ number.
 pub fn get_mpq_seed(mpq_number: i32) -> u32 {
     if mpq_number < 0 {
         return 0;
@@ -52,7 +48,6 @@ pub fn get_mpq_seed(mpq_number: i32) -> u32 {
     }
 }
 
-/// Sets or updates the seed value for the given MPQ number. Returns previous seed or 0.
 pub fn set_mpq_seed(mpq_number: i32, new_seed: u32) -> u32 {
     if mpq_number < 0 {
         return 0;
@@ -68,9 +63,6 @@ pub fn set_mpq_seed(mpq_number: i32, new_seed: u32) -> u32 {
     old
 }
 
-/// Evaluates a Battle.net CheckRevision formula string across a slice of game binary paths.
-///
-/// Returns the final checksum (register 'C') as `u32`.
 pub fn check_revision(formula: &str, files: &[&Path], mpq_number: i32) -> Result<u32, Error> {
     if files.is_empty() {
         return Err(Error::new(
@@ -96,8 +88,6 @@ pub fn check_revision(formula: &str, files: &[&Path], mpq_number: i32) -> Result
     Ok(c)
 }
 
-/// Alternate form of CheckRevision function evaluating across exactly three files
-/// (typically warcraft.exe, Storm.dll, and game.dll).
 #[inline]
 pub fn check_revision_flat(
     formula: &str,
@@ -135,7 +125,6 @@ fn parse_formula(formula: &str) -> Result<(u32, u32, u32, Vec<Operation>), Error
             continue;
         }
 
-        // Operation token: 5 chars, e.g. "A=A-S"
         let chars: Vec<char> = token.chars().collect();
         if chars.len() == 5 && chars[1] == '=' {
             let target = chars[0];

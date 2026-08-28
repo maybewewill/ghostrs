@@ -1,4 +1,4 @@
-﻿//! Complete Battle.net (BNCS) packet identifiers catalog.
+﻿
 
 pub const SID_NULL: u8 = 0x00;
 pub const SID_STOPADV: u8 = 0x02;
@@ -64,7 +64,6 @@ pub const SID_CLANMEMBERSTATUSCHANGE: u8 = 0x7F;
 pub const SID_CLANMEMBERRANKCHANGE: u8 = 0x81;
 pub const SID_CLANMEMBERINFORMATION: u8 = 0x82;
 
-/// Returns a human-readable name for any BNCS packet identifier.
 pub fn packet_name(id: u8) -> &'static str {
     match id {
         SID_NULL => "SID_NULL (0x00)",

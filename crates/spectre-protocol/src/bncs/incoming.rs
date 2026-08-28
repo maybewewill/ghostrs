@@ -155,24 +155,17 @@ pub fn decode_ping(payload: &Bytes) -> Result<[u8; 4], ProtoError> {
     Ok([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
 
-/// One game entry from a `SID_GETADVLISTEX` reply.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvListEntry {
-    /// Host address the server hands to a joining client, network order.
+
     pub ip: [u8; 4],
-    /// Host port the server hands to a joining client. Big-endian on the wire.
+
     pub port: u16,
     pub game_name: String,
-    /// Decoded from the 8 reversed ASCII hex chars, `None` if unparseable.
+
     pub host_counter: Option<u32>,
 }
 
-/// Decodes a `SID_GETADVLISTEX` reply payload (BNCS header already stripped).
-///
-/// Wire format transcribed from `bnetprotocol.cpp:52-93` (`RECEIVE_SID_GETADVLISTEX`).
-///
-/// Returns `Ok(None)` when the server reports zero games found — that is a valid
-/// reply meaning "no such game", not a protocol error.
 pub fn decode_getadvlistex(payload: &[u8]) -> Result<Option<AdvListEntry>, ProtoError> {
     let games_found_bytes = payload.get(0..4).ok_or(ProtoError::Truncated {
         need: 4,
@@ -404,13 +397,13 @@ mod tests {
     #[test]
     fn getadvlistex_decodes_address_port_and_host_counter() {
         let mut payload = Vec::new();
-        payload.extend_from_slice(&[1, 0, 0, 0]); // games_found = 1
-        payload.extend_from_slice(&[0u8; 10]); // 10 unknown/reserved bytes
-        payload.extend_from_slice(&[0x17, 0xE1]); // port 6113 BE
-        payload.extend_from_slice(&[93, 184, 216, 34]); // IP
-        payload.extend_from_slice(b"spectre probe4\0"); // GameName + NUL
-        payload.extend_from_slice(&[0, 0]); // 2 unknown/reserved bytes
-        payload.extend_from_slice(b"1fedcba0"); // HostCounter (0x0ABCDEF1 in reversed hex)
+        payload.extend_from_slice(&[1, 0, 0, 0]);
+        payload.extend_from_slice(&[0u8; 10]);
+        payload.extend_from_slice(&[0x17, 0xE1]);
+        payload.extend_from_slice(&[93, 184, 216, 34]);
+        payload.extend_from_slice(b"spectre probe4\0");
+        payload.extend_from_slice(&[0, 0]);
+        payload.extend_from_slice(b"1fedcba0");
 
         let entry = decode_getadvlistex(&payload)
             .expect("decoding valid SID_GETADVLISTEX must succeed")
@@ -431,7 +424,7 @@ mod tests {
 
     #[test]
     fn getadvlistex_rejects_truncated_entry() {
-        let payload = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // 12 bytes
+        let payload = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let result = decode_getadvlistex(&payload);
         assert!(result.is_err());
     }
@@ -439,18 +432,18 @@ mod tests {
     #[test]
     fn friendslist_decodes_multiple_friends() {
         let mut payload = Vec::new();
-        payload.push(2); // total = 2
-        // Friend 1
+        payload.push(2);
+
         payload.extend_from_slice(b"Alice\0");
-        payload.push(1); // status (Mutual)
-        payload.push(3); // area (Public Game)
-        payload.extend_from_slice(&[0, 0, 0, 0]); // 4 bytes unknown
+        payload.push(1);
+        payload.push(3);
+        payload.extend_from_slice(&[0, 0, 0, 0]);
         payload.extend_from_slice(b"PX3WDOTA\0");
-        // Friend 2
+
         payload.extend_from_slice(b"Bob\0");
-        payload.push(0); // status
-        payload.push(0); // area (Offline)
-        payload.extend_from_slice(&[0, 0, 0, 0]); // 4 bytes unknown
+        payload.push(0);
+        payload.push(0);
+        payload.extend_from_slice(&[0, 0, 0, 0]);
         payload.extend_from_slice(b".\0");
 
         let friends = decode_friendslist(&payload).expect("friendslist decoding succeeds");
@@ -469,17 +462,17 @@ mod tests {
     #[test]
     fn clanmemberlist_decodes_members() {
         let mut payload = Vec::new();
-        payload.extend_from_slice(&[0, 0, 0, 0]); // 4 unknown bytes
-        payload.push(2); // total = 2
-        // Member 1
+        payload.extend_from_slice(&[0, 0, 0, 0]);
+        payload.push(2);
+
         payload.extend_from_slice(b"ChieftainUser\0");
-        payload.push(4); // rank (Leader)
-        payload.push(1); // status (Online)
+        payload.push(4);
+        payload.push(1);
         payload.extend_from_slice(b"PX3WChannel\0");
-        // Member 2
+
         payload.extend_from_slice(b"PeonUser\0");
-        payload.push(1); // rank (Peon)
-        payload.push(0); // status (Offline)
+        payload.push(1);
+        payload.push(0);
         payload.extend_from_slice(b"\0");
 
         let members = decode_clanmemberlist(&payload).expect("clanmemberlist decoding succeeds");
@@ -497,8 +490,8 @@ mod tests {
     #[test]
     fn clan_creation_and_invitation_decode() {
         let mut payload = Vec::new();
-        payload.extend_from_slice(&[0, 0, 0, 0]); // cookie
-        payload.extend_from_slice(b"TEST"); // tag
+        payload.extend_from_slice(&[0, 0, 0, 0]);
+        payload.extend_from_slice(b"TEST");
         payload.extend_from_slice(b"MyClan\0");
         payload.extend_from_slice(b"InviterGuy\0");
 

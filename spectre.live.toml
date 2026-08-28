@@ -1,67 +1,47 @@
-# =============================================================================
-# Spectre Configuration (spectre.live.toml)
-# Converted from default.cfg with all original values preserved
-# =============================================================================
 
 [bot]
-# Bind address and port for player connections
 bind_address = "0.0.0.0"
 host_port = 6123
 port_pool_start = 41000
 port_pool_end = 41150
 gproxy_reconnect_port = 6114
 
-# Maximum concurrent games (pool supports up to 150 games)
 max_games = 100
 
-# Expansion pack (The Frozen Throne = true)
 tft = true
 
-# Default map (e.g. "iCCup DotA 454.w3x")
 default_map = "iCCup DotA 454.w3x"
 
-# Directory where maps are stored
 map_path = "maps"
 
-# Directory where Warcraft III mpq / scripts are located (common.j, blizzard.j)
 war3_path = "war3"
 
-# Download settings
 allow_downloads = true
 max_downloaders = 3
 max_download_speed = 1000000
 
-# Ping settings
 autokick_ping = 400
 lc_pings = true
 
-# LAN and Broadcast settings
 udp_broadcast_target = "192.168.100.184"
 
 [bnet]
-# Battle.net / PvPGN server address and port
 server = "127.0.0.1"
 server_alias = "iCCup"
 port = 6112
 
-# Bot account credentials
 username = "BOT"
 password = "test"
 
-# CD Keys (ROC & TFT)
 cdkey_roc = "E2CDWX92HKY68XCFT2F9BJVZGK"
 cdkey_tft = "RTG4KBRCZB2PKPX8PKZVHM9ZK9"
 
-# Channel to join upon login
 first_channel = "iccup.pro"
 
-# Root administrators who have full control over the bot
 root_admins = ["slash", "bonjour", "animal", "fff"]
 
-# Command trigger prefix character
 command_trigger = "!"
 
-# Warcraft III version (26 = 1.26a)
 war3_version = 26
 exe_version = [1, 0, 26, 1]
 password_hash_type = "pvpgn"
@@ -69,36 +49,24 @@ pvpgn_realm_name = "PvPGN Realm"
 reconnect_delay_sec = 5
 
 [game]
-# Latency in milliseconds (tick rate: 15ms as in default.cfg)
 latency_ms = 15
 
-# Sync limit in milliseconds before lag screen appears
 sync_limit = 500
 
-# Virtual host name displayed in player slot list
 virtual_host_name = "|cFFEB0000iCCup"
 
-# Reconnect wait time for GProxy++ clients (in seconds)
 reconnect_wait_sec = 180
 
-# Automatic HCL mode from game name (e.g. "-ap", "-ar", "-sd")
 hcl_from_game_name = true
 
-# Votekick settings
 votekick_allowed = true
 votekick_percentage = 100
 
-# Lobby time limit in minutes without reserved player (0 = disabled)
 lobby_time_limit = 10
 
 [spectator]
-# DotaTV / Spectator relay server
 enabled = true
 port = 6125
-# Live replay-stream spectating: viewers boot straight into replay playback via
-# war3.exe -loadfile and are fed the match as it happens. Separate from the W3GS
-# relay above; each game gets its own port, offset from this base by the game's
-# host-port offset.
 dotatv_enabled = true
 dotatv_port = 6126
 delay_sec = 120
@@ -106,5 +74,4 @@ max_viewers = 32
 history_max_mb = 64
 
 [database]
-# SQLite database file path
 path = "data/spectre-live.db"

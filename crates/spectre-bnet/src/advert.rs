@@ -15,7 +15,6 @@ pub struct MapAdvert {
     pub flags: u32,
 }
 
-/// Encodes stat string for Battle.net (BNCS SID_STARTADVEX3), which includes the 20-byte map SHA1 at the end.
 pub fn encode_bnet_statstring(map: &MapAdvert, _game_name: &str, host_name: &str) -> Vec<u8> {
     let mut raw = Vec::with_capacity(64 + map.path.len() + host_name.len());
     raw.extend_from_slice(&map.flags.to_le_bytes());
@@ -32,7 +31,6 @@ pub fn encode_bnet_statstring(map: &MapAdvert, _game_name: &str, host_name: &str
     encode_statstring(&raw)
 }
 
-/// Encodes stat string for LAN (W3GS_GAMEINFO), which does NOT include the map SHA1.
 pub fn encode_lan_statstring(map: &MapAdvert, _game_name: &str, host_name: &str) -> Vec<u8> {
     let mut raw = Vec::with_capacity(44 + map.path.len() + host_name.len());
     raw.extend_from_slice(&map.flags.to_le_bytes());
@@ -80,7 +78,6 @@ mod tests {
         assert!(!bnet_enc.contains(&0));
         assert!(!lan_enc.contains(&0));
 
-        // LAN statstring must be strictly smaller than BNCS statstring by the encoded SHA1 size
         assert!(
             lan_enc.len() < bnet_enc.len(),
             "lan statstring len {} must be < bnet statstring len {}",
@@ -91,8 +88,6 @@ mod tests {
         let bnet_dec = decode_statstring(&bnet_enc);
         let lan_dec = decode_statstring(&lan_enc);
 
-        // BNCS raw payload: 4(flags) + 1(0) + 2(w) + 2(h) + 4(crc) + path + 1(0) + host + 1(0) + 1(0) + 20(sha1)
-        // LAN raw payload: 4(flags) + 1(0) + 2(w) + 2(h) + 4(crc) + path + 1(0) + host + 1(0) + 1(0)
         assert_eq!(lan_dec.len() + 20, bnet_dec.len());
         assert_eq!(&bnet_dec[..lan_dec.len()], &lan_dec[..]);
         assert_eq!(&bnet_dec[lan_dec.len()..], &sha1);

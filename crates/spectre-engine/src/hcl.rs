@@ -1,11 +1,10 @@
 ﻿use bytes::{Bytes, BytesMut};
 use spectre_protocol::w3gs::SlotInfo;
 
-/// HCL (Hostbot Command Line) utility for setting game modes in Warcraft 3 maps.
 pub struct Hcl;
 
 impl Hcl {
-    /// Extracts game mode (e.g. "-apem", "-sd", "-arso") from game names like "DotA -apem 5v5".
+
     pub fn parse_from_gamename(game_name: &str) -> Option<String> {
         for word in game_name.split_whitespace() {
             if let Some(mode) = word.strip_prefix('-')
@@ -18,7 +17,6 @@ impl Hcl {
         None
     }
 
-    /// Encodes HCL command string into slot handicaps matching GHost++ `CBaseGame::EventCountDownStart` (game_base.cpp:3326-3367).
     pub fn encode_hcl_into_slots(hcl: &str, slots: &mut [SlotInfo]) -> bool {
         let occupied_count = slots.iter().filter(|s| s.slot_status == 2).count();
         if hcl.is_empty() || hcl.len() > occupied_count {
@@ -32,7 +30,7 @@ impl Hcl {
         let mut encoding_map = [0u8; 256];
         let mut j: u8 = 0;
         for slot in &mut encoding_map {
-            // The following 7 handicap values are forbidden by Warcraft 3
+
             if j == 0 || j == 50 || j == 60 || j == 70 || j == 80 || j == 90 || j == 100 {
                 j = j.wrapping_add(1);
             }
@@ -57,7 +55,6 @@ impl Hcl {
         true
     }
 
-    /// Encodes HCL as map check handoff string.
     pub fn format_hcl_string(hcl: &str) -> Bytes {
         let mut b = BytesMut::new();
         b.extend_from_slice(hcl.as_bytes());
@@ -88,7 +85,7 @@ mod tests {
             SlotInfo {
                 pid: 2,
                 download_status: 100,
-                slot_status: 2, // occupied
+                slot_status: 2,
                 computer: 0,
                 team: 0,
                 colour: 1,
@@ -99,7 +96,7 @@ mod tests {
             SlotInfo {
                 pid: 3,
                 download_status: 100,
-                slot_status: 2, // occupied
+                slot_status: 2,
                 computer: 0,
                 team: 0,
                 colour: 2,

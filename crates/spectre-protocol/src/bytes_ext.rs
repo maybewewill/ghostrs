@@ -42,7 +42,6 @@ pub trait BufExt: bytes::Buf {
         Ok(self.copy_to_bytes(n))
     }
 
-    /// Reads a NUL-terminated string. Non-UTF8 bytes are replaced, never panics.
     fn try_get_cstring(&mut self) -> Result<String, ProtoError> {
         let mut out = Vec::new();
         loop {
@@ -65,16 +64,12 @@ pub fn put_cstring(buf: &mut BytesMut, s: &str) {
     buf.put_u8(0);
 }
 
-/// Battle.net statstring encoding matching GHost++ UTIL_EncodeStatString and Warcraft III:
-/// Each group of 7 bytes is prefixed by a mask byte (bit 0 is always 1).
-/// When payload byte is even, it is incremented by 1 and the mask bit is 0.
-/// When payload byte is odd, it is kept as-is and the mask bit is set to 1.
 pub fn encode_statstring(raw: &[u8]) -> Vec<u8> {
     let mut result = Vec::with_capacity(raw.len() + raw.len().div_ceil(7));
     for chunk in raw.chunks(7) {
         let mut mask = 1u8;
         let start = result.len();
-        result.push(0); // placeholder for mask
+        result.push(0);
         for (i, &byte) in chunk.iter().enumerate() {
             if byte.is_multiple_of(2) {
                 result.push(byte.wrapping_add(1));

@@ -4,7 +4,6 @@ services:
     container_name: spectre
     restart: unless-stopped
     entrypoint: ["/app/spectre"]
-    # host networking ensures direct high-performance socket access without Docker bridge/NAT overhead
     network_mode: host
     environment:
       - RUST_LOG=info

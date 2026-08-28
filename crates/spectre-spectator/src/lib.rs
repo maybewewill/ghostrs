@@ -15,13 +15,6 @@ pub use dotatv_server::{
 pub use relay::{Relay, RelayCmd, RelayConfig, RelayError, RelayHandle, spawn_relay};
 pub use w3g::W3gWriter;
 
-/// Packs and writes a replay on a blocking thread. zlib on a 4 MB body takes
-/// tens of milliseconds — far more than one 100 ms tick can spare. Callers
-/// get that guarantee from `tokio::task::spawn_blocking` moving `body.finish()`,
-/// `W3gWriter::pack()`, and `std::fs::write()` onto the blocking thread pool;
-/// it is not re-verified by every test in this module (see
-/// `an_awaiting_caller_can_still_make_progress_while_a_replay_saves` below for
-/// the one test that does observe it).
 pub async fn save_replay(
     path: std::path::PathBuf,
     body: ReplayBody,
@@ -70,21 +63,6 @@ mod save_tests {
         );
     }
 
-    /// Proves `save_replay` does not block the runtime it's awaited on, rather
-    /// than just asserting file contents. `#[tokio::test]` defaults to the
-    /// single-threaded `current_thread` flavor, so if `save_replay` ran its
-    /// zlib pass and disk write inline on the caller's task instead of via
-    /// `spawn_blocking`, that single OS thread would be pinned for the whole
-    /// call and the concurrently spawned `ticker` task below could not be
-    /// polled even once — it would only get CPU time after `save_replay`
-    /// resolves, and `ticks` would still read 0 at that point. Because
-    /// `spawn_blocking` moves the blocking work to a separate thread pool,
-    /// the `current_thread` runtime is free to poll other ready tasks while
-    /// awaiting the `JoinHandle`, so `ticker` gets scheduled and increments
-    /// `ticks` before `save_replay` completes. The body is large (~4 MB)
-    /// specifically to give the ticker a wide window to be scheduled at
-    /// least once, making the assertion effectively deterministic rather
-    /// than a real-world race.
     #[tokio::test]
     async fn an_awaiting_caller_can_still_make_progress_while_a_replay_saves() {
         let dir = std::env::temp_dir().join("spectre-w3g-test");
@@ -93,8 +71,7 @@ mod save_tests {
 
         let mut b = ReplayBody::new(1, "host");
         b.set_start(vec![0u8; 9], 1, 0, 1).unwrap();
-        // ~4 MB of timeslot data so pack()'s zlib pass takes real wall-clock
-        // time, giving the concurrently spawned ticker task room to run.
+
         let chunk = vec![0xAAu8; 4096];
         for _ in 0..1000 {
             b.add_timeslot(100, &chunk);

@@ -70,7 +70,6 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
     let mut st = GameState::new(test_game_cfg());
     st.create_virtual_host();
 
-    // 1. Join 3 players
     let mut rxs = Vec::new();
     for i in 1..=3 {
         let (tx, mut rx) = mpsc::channel(64);
@@ -89,10 +88,9 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
         );
         rxs.push(rx);
     }
-    assert_eq!(st.players.len(), 4); // 3 humans + 1 virtual host
+    assert_eq!(st.players.len(), 4);
     assert_eq!(st.phase, GamePhase::Lobby);
 
-    // 2. All 3 players send MAP_SIZE
     for i in 1..=3 {
         let conn_id = i as u64;
         let mut p = BytesMut::new();
@@ -108,18 +106,15 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
             .all(|p| p.download_status == 100)
     );
 
-    // 3. Start game countdown
     st.handle_cmd(GameCmd::Start {
         by: "HostPlayer".into(),
     });
     assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
-    // Drain countdown chat announcements
     for rx in &mut rxs {
         let _ = drain_all_ids(rx);
     }
 
-    // Fast-forward countdown duration past total (2.5s)
     if let GamePhase::Countdown {
         ref mut started_at, ..
     } = st.phase
@@ -128,9 +123,8 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
     }
     st.on_tick(0);
     assert_eq!(st.phase, GamePhase::Loading);
-    assert_eq!(st.virtual_host_pid, 255); // Virtual host removed on loading
+    assert_eq!(st.virtual_host_pid, 255);
 
-    // Verify COUNTDOWN_START and COUNTDOWN_END received
     for (i, rx) in rxs.iter_mut().enumerate() {
         let received = drain_all_ids(rx);
         assert!(
@@ -145,13 +139,11 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
         );
     }
 
-    // 4. All 3 players send GAME_LOADED_SELF
     for i in 1..=3 {
         st.handle_loaded(i as u64);
     }
     assert_eq!(st.phase, GamePhase::Playing);
 
-    // 5. Verify action ticks are broadcast to all players
     st.on_tick(0);
     for (i, rx) in rxs.iter_mut().enumerate() {
         let received = drain_all_ids(rx);
@@ -162,10 +154,9 @@ async fn full_join_mapcheck_countdown_load_play_lifecycle() {
         );
     }
 
-    // 6. Action propagation test: Player 1 sends an OUTGOING_ACTION
     let mut act_payload = BytesMut::new();
-    act_payload.put_u32_le(0xABCD_1234); // CRC
-    act_payload.put_slice(&[0x01, 0x02, 0x03, 0x04]); // sample action data
+    act_payload.put_u32_le(0xABCD_1234);
+    act_payload.put_slice(&[0x01, 0x02, 0x03, 0x04]);
     st.handle_action(1, &act_payload.freeze());
 
     st.on_tick(0);
@@ -191,24 +182,19 @@ async fn countdown_aborted_by_leaver_lifecycle() {
     st.add_conn(2, PlayerLink::for_test(tx2), [127, 0, 0, 2]);
     st.handle_req_join(2, &make_reqjoin("Player_2"));
 
-    // Start countdown
     st.handle_cmd(GameCmd::Start {
         by: "Player_1".into(),
     });
     assert!(matches!(st.phase, GamePhase::Countdown { .. }));
 
-    // Drain pending packets from rx2
     let _ = drain_all_ids(&mut rx2);
 
-    // Player 1 leaves during countdown
     st.handle_leave(1, 13);
     st.reap_left_players();
 
-    // Must revert to Lobby phase
     assert_eq!(st.phase, GamePhase::Lobby);
     assert_eq!(st.players.len(), 1);
 
-    // Player 2 must receive chat notification and updated slot table
     let received = drain_all_ids(&mut rx2);
     assert!(received.contains(&ids::CHAT_FROM_HOST));
     assert!(received.contains(&ids::SLOT_INFO));
@@ -228,29 +214,23 @@ async fn loading_timeout_and_leaver_recovery_lifecycle() {
     st.add_conn(3, PlayerLink::for_test(tx3), [127, 0, 0, 3]);
     st.handle_req_join(3, &make_reqjoin("Player_3"));
 
-    // Begin loading
     st.begin_loading();
     assert_eq!(st.phase, GamePhase::Loading);
 
-    // Player 1 loads
     st.handle_loaded(1);
     assert_eq!(st.phase, GamePhase::Loading);
 
-    // Player 2 disconnects during loading
     st.handle_leave(2, 13);
     st.reap_left_players();
-    // Still waiting on Player 3
+
     assert_eq!(st.phase, GamePhase::Loading);
 
-    // Fast-forward loading timer past 60s timeout for Player 3
     st.started_loading_at = Some(std::time::Instant::now() - Duration::from_secs(65));
     st.on_tick(0);
 
-    // Player 3 timed out and dropped, leaving only Player 1 who is loaded -> game starts!
     assert_eq!(st.phase, GamePhase::Playing);
     assert_eq!(st.players.len(), 1);
 
-    // Action ticks flow to Player 1
     st.on_tick(0);
     let received = drain_all_ids(&mut rx1);
     assert!(received.contains(&ids::INCOMING_ACTION));

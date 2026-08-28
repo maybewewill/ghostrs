@@ -5,10 +5,8 @@ use spectre_protocol::w3gs::{incoming, incoming::MapSizeReport, outgoing};
 
 use crate::state::{GamePhase, GameState};
 
-/// Wire chunk size used by Warcraft III map downloads.
 pub const MAP_CHUNK: usize = 1442;
-/// Chunks sent per player per tick. Bounds how much of the tick budget map
-/// downloads may consume; at 100 ms that is ~144 KB/s per downloader.
+
 pub const MAX_PARTS_PER_TICK: usize = 10;
 
 #[derive(Debug, Clone)]
@@ -195,7 +193,6 @@ impl GameState {
         }
     }
 
-    /// Sends the next slice of every in-flight map download. Called once per tick.
     pub fn pump_downloads(&mut self) {
         if !matches!(self.phase, GamePhase::Lobby) {
             return;
@@ -226,7 +223,6 @@ impl GameState {
                 break;
             }
 
-            // Up to 100 parts per 100ms cycle (matching GHost++ game_base.cpp:599-634)
             let burst_limit = d.acked_upto.saturating_add((MAP_CHUNK * 100) as u32);
             while d.sent_upto < burst_limit && d.sent_upto < total {
                 if max_speed_bytes > 0 && self.download_counter >= max_speed_bytes {
@@ -303,13 +299,13 @@ mod tests {
         let mut p = bytes::BytesMut::new();
         bytes::BufMut::put_slice(&mut p, &[0, 0, 0, 0]);
         bytes::BufMut::put_u8(&mut p, 1);
-        bytes::BufMut::put_u32_le(&mut p, 0); // has 0 of 100000 bytes
+        bytes::BufMut::put_u32_le(&mut p, 0);
         st.handle_map_size(1, &p.freeze());
 
         assert_eq!(st.downloads.len(), 1);
         let first_pkt = rxs[0].try_recv().expect("must receive START_DOWNLOAD");
         assert_eq!(first_pkt[1], ids::START_DOWNLOAD);
-        // Wire verification B1: fromPID is host PID (1), not 255
+
         assert_eq!(first_pkt[4], 1, "START_DOWNLOAD fromPID must be host PID");
     }
 
@@ -325,7 +321,7 @@ mod tests {
 
         let part_pkt = rxs[0].try_recv().expect("must receive MAP_PART");
         assert_eq!(part_pkt[1], ids::MAP_PART);
-        // Wire verification B1: fromPID is host PID (1), toPID is 1
+
         assert_eq!(part_pkt[4], 1, "MAP_PART fromPID must be host PID");
         assert_eq!(part_pkt[5], 1, "MAP_PART toPID must be receiver PID");
     }
@@ -347,14 +343,14 @@ mod tests {
         let (mut st, mut rxs) = seated_game(1);
         st.cfg.map.size = 100_000;
         st.cfg.map.data = Some(std::sync::Arc::new(vec![0u8; 100_000]));
-        st.cfg.max_download_speed = 5; // 5 KB/s = 5120 bytes max in 1 sec window
+        st.cfg.max_download_speed = 5;
         st.downloads.push(Download::new(1));
         let _ = drain_ids(&mut rxs[0]);
 
         st.pump_downloads();
 
         let sent = drain_ids(&mut rxs[0]);
-        // 5120 bytes / 1442 bytes per part = at most 4 parts sent
+
         assert!(sent.len() <= 4, "must throttle to max_download_speed");
     }
 
@@ -377,7 +373,7 @@ mod tests {
     fn client_without_map_is_dropped_when_downloads_are_disabled() {
         let (mut st, mut rxs) = seated_game(2);
         st.cfg.map.size = 50_000;
-        st.cfg.map.data = None; // downloads disabled
+        st.cfg.map.data = None;
         for rx in &mut rxs {
             let _ = drain_ids(rx);
         }
@@ -385,12 +381,11 @@ mod tests {
         let mut p = bytes::BytesMut::new();
         bytes::BufMut::put_slice(&mut p, &[0, 0, 0, 0]);
         bytes::BufMut::put_u8(&mut p, 1);
-        bytes::BufMut::put_u32_le(&mut p, 0); // client has 0 bytes
+        bytes::BufMut::put_u32_le(&mut p, 0);
         st.handle_map_size(1, &p.freeze());
 
-        // Player 1 must be dropped and slot freed
         assert!(st.players.by_pid(1).is_none());
-        assert_eq!(st.slots.as_wire()[0].slot_status, 0); // open slot
+        assert_eq!(st.slots.as_wire()[0].slot_status, 0);
         let sent = drain_ids(&mut rxs[1]);
         assert!(sent.contains(&ids::PLAYER_LEAVE_OTHERS));
         assert!(sent.contains(&ids::SLOT_INFO));
@@ -408,19 +403,16 @@ mod tests {
 
         let _ = drain_ids(&mut rxs[0]);
 
-        // Client reports MAP_PART_NOT_OK at 1442 bytes (corrupted second part)
         let mut p = bytes::BytesMut::new();
-        bytes::BufMut::put_u8(&mut p, 1); // to
-        bytes::BufMut::put_u8(&mut p, 1); // from
+        bytes::BufMut::put_u8(&mut p, 1);
+        bytes::BufMut::put_u8(&mut p, 1);
         bytes::BufMut::put_u32_le(&mut p, 1442);
         st.handle_map_part_not_ok(1, &p.freeze());
 
-        // Download state must be rewound to 1442
         let d_now = st.downloads.iter().find(|d| d.pid == 1).unwrap();
         assert_eq!(d_now.sent_upto, 1442);
         assert_eq!(d_now.acked_upto, 1442);
 
-        // Next pump_downloads must send map part starting from 1442
         st.pump_downloads();
         let part_pkt = rxs[0]
             .try_recv()

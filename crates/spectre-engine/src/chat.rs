@@ -306,8 +306,6 @@ impl GameState {
         };
         tracing::info!(conn_id, pid, name = %name, from = chat.from_pid, flag = format!("0x{:02X}", chat.flag), to = ?chat.to_pids, extra = format!("{:02X?}", &chat.extra[..]), msg = %chat.message, "chat to host");
 
-        // GHost++ game_base.cpp:2900: only honour chat claiming to come from
-        // this player; a mismatched from-PID is ignored.
         if chat.from_pid != pid {
             tracing::debug!(
                 conn_id,
@@ -319,19 +317,15 @@ impl GameState {
 
         let trigger = '!';
 
-        // GHost++ game_base.cpp:2952: "?trigger" replies with the command
-        // trigger and is still relayed like any other message.
         if chat.message == "?trigger" {
             self.send_chat_to(pid, &format!("Command trigger: {trigger}"));
         }
 
-        // Team/colour/race/handicap change requests only apply in the lobby.
         if (0x11..=0x14).contains(&chat.flag) {
             if matches!(self.phase, GamePhase::Lobby)
                 && self.apply_slot_request(pid, chat.flag, chat.byte)
             {
-                // GHost++ sends SLOT_INFO inside each change handler, only after
-                // the change actually applied.
+
                 self.send_all_slot_info();
             }
             return;
@@ -343,7 +337,7 @@ impl GameState {
 
         match parse_command(trigger, &chat.message) {
             Some(cmd) => {
-                // C1: Start and Abort are restricted to owner/admin
+
                 let public_cmd = matches!(
                     cmd,
                     ChatCommand::Ping
@@ -366,7 +360,7 @@ impl GameState {
                 self.run_command(pid, &name, cmd);
             }
             None => {
-                // If player is muted or global mute is on, don't relay their chat
+
                 if (is_muted || self.muted_all) && !is_owner {
                     return;
                 }
@@ -394,12 +388,6 @@ impl GameState {
                     return;
                 }
 
-                // GHost++ relays to exactly the recipient list the client sent
-                // (game_base.cpp:2986 `Send(chatPlayer->GetToPIDs(), ...)`); the
-                // client never lists itself, so the sender never sees its own
-                // message echoed back. When the client sent an empty list, fall
-                // back to every seated player but the sender. The virtual host is
-                // never addressed (it has no socket).
                 let to_pids: Vec<u8> = if chat.to_pids.is_empty() {
                     self.players
                         .iter()
@@ -1151,11 +1139,6 @@ impl GameState {
         }
     }
 
-    /// Applies a lobby slot-change request (team/colour/race/handicap) exactly
-    /// like GHost++ `EventPlayerChangeTeam` / `ChangeColour` / `ChangeRace` /
-    /// `ChangeHandicap` (game_base.cpp:3021-3160). Returns whether the slot
-    /// table actually changed; the caller broadcasts SLOT_INFO only then,
-    /// matching GHost++ which sends it inside each handler after a success.
     fn apply_slot_request(&mut self, pid: u8, flag: u8, value: u8) -> bool {
         let Some(sid) = self.slots.sid_of_pid(pid) else {
             return false;
@@ -1167,8 +1150,7 @@ impl GameState {
             0x11 => {
                 let target_team = value;
                 if custom_forces {
-                    // game_base.cpp:3028: on custom-forces maps a team change is
-                    // a move to another slot, GetEmptySlot(team, PID) + SwapSlots.
+
                     if let Some(target_sid) = self.slots.first_open_in_team_from(sid, target_team) {
                         self.slots
                             .swap_slots(sid, target_sid, fixed_settings, custom_forces);
@@ -1176,12 +1158,12 @@ impl GameState {
                     }
                     return false;
                 }
-                // Direct team set on the player's own slot (game_base.cpp:3038).
+
                 if target_team > MAX_SLOTS as u8 {
                     return false;
                 }
                 if target_team == MAX_SLOTS as u8 {
-                    // Observer team is only reachable when the map allows observers.
+
                     let obs = self.cfg.map.observers();
                     if obs != crate::map::MAPOBS_ALLOWED && obs != crate::map::MAPOBS_REFEREES {
                         return false;
@@ -1190,8 +1172,7 @@ impl GameState {
                     if target_team >= self.cfg.map.num_players {
                         return false;
                     }
-                    // game_base.cpp:3056: don't let more players in than the map
-                    // supports (counts occupied non-observer slots except self).
+
                     let num_other = self
                         .slots
                         .as_wire()
@@ -1211,10 +1192,10 @@ impl GameState {
                 };
                 updated.team = target_team;
                 if target_team == MAX_SLOTS as u8 {
-                    // joining observers gives them the observer colour
+
                     updated.colour = MAX_SLOTS as u8;
                 } else if updated.colour == MAX_SLOTS as u8 {
-                    // leaving the observer team gets an unused colour
+
                     updated.colour = self.slots.unused_colour();
                 }
                 self.slots.replace(sid, updated);
@@ -1232,7 +1213,7 @@ impl GameState {
                     return false;
                 };
                 if slot.team == MAX_SLOTS as u8 {
-                    // observers can't change colour (game_base.cpp:3105)
+
                     return false;
                 }
                 self.colour_slot(sid, colour)
@@ -1242,18 +1223,18 @@ impl GameState {
                     return false;
                 }
                 if self.cfg.map.has_random_races() {
-                    // MAPFLAG_RANDOMRACES blocks race changes (game_base.cpp:3120)
+
                     return false;
                 }
                 if !matches!(value, 1 | 2 | 4 | 8 | 32) {
-                    // SLOTRACE_HUMAN/ORC/NIGHTELF/UNDEAD/RANDOM only
+
                     return false;
                 }
                 let Some(slot) = self.slots.as_wire().get(sid as usize).copied() else {
                     return false;
                 };
                 let mut updated = slot;
-                updated.race = value | 0x40; // SLOTRACE_SELECTABLE
+                updated.race = value | 0x40;
                 self.slots.replace(sid, updated);
                 true
             }
@@ -1276,10 +1257,6 @@ impl GameState {
         }
     }
 
-    /// GHost++ `ColourSlot` (game_base.cpp:4014): if the requested colour is
-    /// held by an unoccupied slot, swap the player's current colour into it so
-    /// colours stay unique; if it is held by an occupied player, ignore the
-    /// request.
     fn colour_slot(&mut self, sid: u8, colour: u8) -> bool {
         if sid as usize >= self.slots.len() || colour >= MAX_SLOTS as u8 {
             return false;
@@ -1421,16 +1398,15 @@ mod tests {
 
     #[tokio::test]
     async fn chat_from_a_mismatched_pid_is_ignored() {
-        // GHost++ game_base.cpp:2900: only chat whose from-PID matches the
-        // sender is honoured.
+
         let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
         crate::actor::tests_support::drain_ids(&mut rxs[0]);
 
         let mut b = BytesMut::new();
-        b.put_u8(1); // count
-        b.put_u8(0); // to_pid
-        b.put_u8(7); // from_pid != player pid 1
-        b.put_u8(0x10); // flag
+        b.put_u8(1);
+        b.put_u8(0);
+        b.put_u8(7);
+        b.put_u8(0x10);
         b.put_slice(b"hello\0");
         st.handle_chat_to_host(1, &b.freeze());
 
@@ -1442,8 +1418,7 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_question_mark_gets_the_command_trigger_reply() {
-        // GHost++ game_base.cpp:2952: "?trigger" is answered with the trigger
-        // and the message is still relayed.
+
         let (mut st, mut rxs) = crate::actor::tests_support::seated_game(1);
         crate::actor::tests_support::drain_ids(&mut rxs[0]);
 
@@ -1464,12 +1439,11 @@ mod tests {
 
     #[test]
     fn team_change_on_a_custom_forces_map_moves_the_player_slot() {
-        // GHost++ EventPlayerChangeTeam (game_base.cpp:3028): on custom-forces
-        // maps the player moves to an open slot of the target team.
+
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
         st.cfg.map.options = crate::map::MAPOPT_CUSTOMFORCES;
         st.cfg.map.layout_style = 1;
-        // player 1 is in slot 0 (team 0); slot 6 is the first open slot of team 1
+
         assert_eq!(st.slots.sid_of_pid(1), Some(0));
         assert!(st.apply_slot_request(1, 0x11, 1));
         assert_eq!(st.slots.sid_of_pid(1), Some(6));
@@ -1482,31 +1456,26 @@ mod tests {
 
     #[test]
     fn direct_team_change_is_rejected_when_the_map_is_full() {
-        // GHost++ game_base.cpp:3056: no more players than the map supports.
+
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(3);
         st.cfg.map.num_players = 2;
 
-        // team 1 is within bounds but the map is already full of other players
         assert!(!st.apply_slot_request(1, 0x11, 1));
         assert_eq!(st.slots.as_wire()[0].team, 0, "team must be unchanged");
 
-        // a team number past the map's player count is rejected outright
         assert!(!st.apply_slot_request(1, 0x11, 2));
         assert_eq!(st.slots.as_wire()[0].team, 0);
     }
 
     #[test]
     fn observer_team_change_requires_a_map_that_allows_observers() {
-        // GHost++ game_base.cpp:3041: the observer team is only reachable when
-        // the map allows observers, and joining it assigns the observer colour.
+
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
         st.cfg.map.num_players = 12;
 
-        // map without observers -> rejected
         assert!(!st.apply_slot_request(1, 0x11, MAX_SLOTS as u8));
         assert_eq!(st.slots.as_wire()[0].team, 0);
 
-        // map allowing observers (MAPOBS_ALLOWED baked into game flags)
         st.cfg.map.flags |= 0x0000_3000;
         assert!(st.apply_slot_request(1, 0x11, MAX_SLOTS as u8));
         assert_eq!(st.slots.as_wire()[0].team, MAX_SLOTS as u8);
@@ -1515,10 +1484,9 @@ mod tests {
 
     #[test]
     fn colour_change_swaps_with_an_unoccupied_slot_instead_of_duplicating() {
-        // GHost++ ColourSlot (game_base.cpp:4014): a colour held by an open
-        // slot is swapped so colours stay unique.
+
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
-        // player 1 at slot 0 (colour 0); open slot 1 holds colour 1 by default
+
         assert!(st.apply_slot_request(1, 0x12, 1));
         let wire = st.slots.as_wire();
         assert_eq!(wire[0].colour, 1, "player takes the requested colour");
@@ -1528,24 +1496,23 @@ mod tests {
     #[test]
     fn colour_change_is_ignored_when_held_by_an_occupied_player() {
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(2);
-        // player 2 sits in slot 1 with colour 1
+
         assert!(!st.apply_slot_request(1, 0x12, 1));
         assert_eq!(st.slots.as_wire()[0].colour, 0, "request must be ignored");
     }
 
     #[test]
     fn race_change_rejects_invalid_races_and_random_races_maps() {
-        // GHost++ EventPlayerChangeRace (game_base.cpp:3113): only the five
-        // SLOTRACE values are accepted and MAPFLAG_RANDOMRACES blocks changes.
+
         let (mut st, _rxs) = crate::actor::tests_support::seated_game(1);
 
         assert!(!st.apply_slot_request(1, 0x13, 3));
         assert_eq!(st.slots.as_wire()[0].race, 0x20);
 
-        assert!(st.apply_slot_request(1, 0x13, 1)); // Human
-        assert_eq!(st.slots.as_wire()[0].race, 0x41); // 1 | SLOTRACE_SELECTABLE
+        assert!(st.apply_slot_request(1, 0x13, 1));
+        assert_eq!(st.slots.as_wire()[0].race, 0x41);
 
-        st.cfg.map.flags |= 0x0400_0000; // MAPFLAG_RANDOMRACES baked in
+        st.cfg.map.flags |= 0x0400_0000;
         assert!(!st.apply_slot_request(1, 0x13, 2));
         assert_eq!(st.slots.as_wire()[0].race, 0x41);
     }

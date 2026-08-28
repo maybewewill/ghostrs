@@ -20,10 +20,10 @@ pub fn stopadv() -> Bytes {
 
 pub fn getadvlistex(game_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(20 + game_name.len());
-    p.put_slice(&[255, 3, 0, 0]); // map filter 1
-    p.put_slice(&[255, 3, 0, 0]); // map filter 2
-    p.put_slice(&[0, 0, 0, 0]); // map filter 3
-    p.put_slice(&[1, 0, 0, 0]); // num games
+    p.put_slice(&[255, 3, 0, 0]);
+    p.put_slice(&[255, 3, 0, 0]);
+    p.put_slice(&[0, 0, 0, 0]);
+    p.put_slice(&[1, 0, 0, 0]);
     put_cstring(&mut p, game_name);
     p.put_u8(0);
     p.put_u8(0);
@@ -59,12 +59,6 @@ pub fn checkad() -> Bytes {
         .expect("16-byte checkad fits")
 }
 
-/// Game visibility on Battle.net, sent as the `SID_STARTADVEX3` state field.
-///
-/// `bnetprotocol.cpp:702` documents the field as
-/// "State (16 = public, 17 = private, 18 = close)", and `gameprotocol.h:32-33`
-/// defines the constants. There is no valid zero state: a game advertised with
-/// 0 is listed by name but cannot be joined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum GameVisibility {
@@ -101,11 +95,11 @@ pub fn startadvex3(
     p.put_slice(&[0, 0, 0]);
     p.put_u32_le(up_time);
     p.put_slice(&map_game_type);
-    p.put_slice(&[255, 3, 0, 0]); // unknown
-    p.put_slice(&[0, 0, 0, 0]); // custom game
+    p.put_slice(&[255, 3, 0, 0]);
+    p.put_slice(&[0, 0, 0, 0]);
     put_cstring(&mut p, game_name);
     p.put_u8(0);
-    // GHost++ uses 98 (char 'b') for 12-slot games (11 free slots) on Warcraft 1.26a
+
     p.put_u8(98);
     p.put_slice(host_counter_string.as_bytes());
     p.put_slice(stat_string);
@@ -115,8 +109,8 @@ pub fn startadvex3(
 
 pub fn notifyjoin(game_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(9 + game_name.len());
-    p.put_slice(&[0, 0, 0, 0]); // product id
-    p.put_slice(&[14, 0, 0, 0]); // product version
+    p.put_slice(&[0, 0, 0, 0]);
+    p.put_slice(&[14, 0, 0, 0]);
     put_cstring(&mut p, game_name);
     Frame::new(ids::SID_NOTIFYJOIN, p.freeze()).encode_with(BNCS_HEADER)
 }
@@ -178,7 +172,7 @@ pub fn friendslist() -> Result<Bytes, ProtoError> {
 
 pub fn clanmemberlist() -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(4);
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     Frame::new(ids::SID_CLANMEMBERLIST, p.freeze()).encode_with(BNCS_HEADER)
 }
 
@@ -198,17 +192,17 @@ pub fn auth_info(
     country: &str,
 ) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(36 + country_abbrev.len() + country.len());
-    p.put_slice(&[0, 0, 0, 0]); // protocol id
-    p.put_slice(&[54, 56, 88, 73]); // platform id "IX86" reversed
+    p.put_slice(&[0, 0, 0, 0]);
+    p.put_slice(&[54, 56, 88, 73]);
     if tft {
-        p.put_slice(&[80, 88, 51, 87]); // "PX3W"
+        p.put_slice(&[80, 88, 51, 87]);
     } else {
-        p.put_slice(&[51, 82, 65, 87]); // "3RAW"
+        p.put_slice(&[51, 82, 65, 87]);
     }
     p.put_slice(&[ver, 0, 0, 0]);
-    p.put_slice(&[83, 85, 110, 101]); // language "SUne" ("enUS" reversed)
-    p.put_slice(&[127, 0, 0, 1]); // local IP
-    p.put_slice(&[44, 1, 0, 0]); // time zone bias
+    p.put_slice(&[83, 85, 110, 101]);
+    p.put_slice(&[127, 0, 0, 1]);
+    p.put_slice(&[44, 1, 0, 0]);
     p.put_u32_le(locale_id);
     p.put_u32_le(locale_id);
     put_cstring(&mut p, country_abbrev);
@@ -234,7 +228,7 @@ pub fn auth_check(
     p.put_slice(&exe_version);
     p.put_slice(&exe_version_hash);
     p.put_u32_le(num_keys);
-    p.put_u32_le(0); // spawn key = 0
+    p.put_u32_le(0);
     p.put_slice(key_info_roc);
     if tft {
         p.put_slice(key_info_tft);
@@ -261,21 +255,21 @@ pub fn account_logon_proof(client_password_proof: &[u8]) -> Result<Bytes, ProtoE
 
 pub fn claninvitation(account_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(5 + account_name.len());
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     put_cstring(&mut p, account_name);
     Frame::new(ids::SID_CLANINVITATION, p.freeze()).encode_with(BNCS_HEADER)
 }
 
 pub fn clanremovemember(account_name: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(5 + account_name.len());
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     put_cstring(&mut p, account_name);
     Frame::new(ids::SID_CLANREMOVEMEMBER, p.freeze()).encode_with(BNCS_HEADER)
 }
 
 pub fn clanchangerank(account_name: &str, rank: u8) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(6 + account_name.len());
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     put_cstring(&mut p, account_name);
     p.put_u8(rank);
     Frame::new(ids::SID_CLANCHANGERANK, p.freeze()).encode_with(BNCS_HEADER)
@@ -283,7 +277,7 @@ pub fn clanchangerank(account_name: &str, rank: u8) -> Result<Bytes, ProtoError>
 
 pub fn clansetmotd(motd: &str) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(5 + motd.len());
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     put_cstring(&mut p, motd);
     Frame::new(ids::SID_CLANSETMOTD, p.freeze()).encode_with(BNCS_HEADER)
 }
@@ -294,7 +288,7 @@ pub fn clancreationinvitation(
     accept: bool,
 ) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(9 + inviter_name.len());
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     p.put_slice(tag);
     put_cstring(&mut p, inviter_name);
     p.put_u8(if accept { 0x06 } else { 0x04 });
@@ -307,7 +301,7 @@ pub fn claninvitationresponse(
     accept: bool,
 ) -> Result<Bytes, ProtoError> {
     let mut p = BytesMut::with_capacity(9 + inviter_name.len());
-    p.put_slice(&[0, 0, 0, 0]); // cookie
+    p.put_slice(&[0, 0, 0, 0]);
     p.put_slice(tag);
     put_cstring(&mut p, inviter_name);
     p.put_u8(if accept { 0x06 } else { 0x04 });
@@ -359,15 +353,13 @@ mod tests {
 
         assert_eq!(pkt_pub[0], 0xFF);
         assert_eq!(pkt_pub[1], 0x1C);
-        // gameprotocol.h:32 GAME_PUBLIC = 16; bnetprotocol.cpp:702 documents the field.
+
         assert_eq!(pkt_pub[4], 16, "public game state must be 16");
         assert_eq!(&pkt_pub[5..8], &[0, 0, 0]);
 
-        // [header 4][state 4][uptime 4][game_type 4][unknown 4][custom 4]
-        // [game_name + NUL][password NUL][slots_free 1][host_counter 8]...
         let name_len = "DotA 5v5\0".len();
         let slots_free_offset = 4 + 4 + 4 + 4 + 4 + 4 + name_len + 1;
-        // bnetprotocol.cpp:712-714 sends 110 when MAX_SLOTS > 12; gameslot.h:39 sets it to 24.
+
         assert_eq!(
             pkt_pub[slots_free_offset], 98,
             "slots_free must be 98 (char 'b', 11 slots free for MAX_SLOTS = 12)"
@@ -418,13 +410,13 @@ mod tests {
     fn auth_info_declares_the_configured_war3_version() {
         let p = auth_info(26, true, 1033, "USA", "United States").unwrap();
         assert_eq!(p[1], ids::SID_AUTH_INFO);
-        // Product is "PX3W" (W3XP reversed) for The Frozen Throne.
+
         assert!(p.windows(4).any(|w| w == b"PX3W"));
     }
 
     #[test]
     fn test_startadvex3_stat_string_size_validation() {
-        let valid_stat_string = vec![0x41; 127]; // 127 bytes < 128
+        let valid_stat_string = vec![0x41; 127];
         let res_ok = startadvex3(
             GameVisibility::Public,
             [1, 0, 0, 0],
@@ -436,7 +428,7 @@ mod tests {
         );
         assert!(res_ok.is_ok(), "127-byte stat string must be accepted");
 
-        let invalid_stat_string = vec![0x41; 128]; // 128 bytes >= 128
+        let invalid_stat_string = vec![0x41; 128];
         let res_err = startadvex3(
             GameVisibility::Public,
             [1, 0, 0, 0],
@@ -457,7 +449,7 @@ mod tests {
         let p_inv = claninvitation("Newbie").unwrap();
         assert_eq!(p_inv[0], 0xFF);
         assert_eq!(p_inv[1], ids::SID_CLANINVITATION);
-        assert_eq!(&p_inv[4..8], &[0, 0, 0, 0]); // cookie
+        assert_eq!(&p_inv[4..8], &[0, 0, 0, 0]);
         assert_eq!(&p_inv[8..15], b"Newbie\0");
 
         let p_rem = clanremovemember("Oldie").unwrap();

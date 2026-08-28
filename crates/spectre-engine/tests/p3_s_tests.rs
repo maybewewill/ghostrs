@@ -17,21 +17,17 @@ fn test_s1_dota_stats_courier_tower_rax_and_hero_parsing() {
     dota.add_player(1, "Player1".into());
     dota.add_player(7, "Player2".into());
 
-    // In-game actions:
-    // Player 1 destroys Sentinel top level 1 tower (Alliance 0, Level 1, Side 0)
     dota.process_action(&make_dota_action("Data", "Tower010", 1));
-    // Player 1 destroys Scourge mid level 2 tower (Alliance 1, Level 2, Side 1)
+
     dota.process_action(&make_dota_action("Data", "Tower121", 1));
-    // Player 7 kills courier
+
     dota.process_action(&make_dota_action("Data", "Courier1", 7));
-    // Player 1 destroys Sentinel bottom melee rax (Alliance 0, Side 2, Type 0)
+
     dota.process_action(&make_dota_action("Data", "Rax020", 1));
 
-    // End-game hero code for Player 1: "Ekee" (Keeper of the Light)
     let hero_val = u32::from_le_bytes([b'e', b'e', b'k', b'E']);
     dota.process_action(&make_dota_action("1", "9", hero_val));
 
-    // End-game hero code for Player 7: "Obla" (Bloodseeker)
     let hero_val_7 = u32::from_le_bytes([b'a', b'l', b'b', b'O']);
     dota.process_action(&make_dota_action("7", "9", hero_val_7));
 

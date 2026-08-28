@@ -1,9 +1,4 @@
-﻿//! BNCSutil CD-Key Decoding Implementation
-//!
-//! Supports decoding, validation, value extraction, and hash computation for:
-//! - StarCraft 13-character keys
-//! - Warcraft II / Diablo II 16-character keys
-//! - Warcraft III 26-character keys
+﻿
 
 use sha1::{Digest, Sha1};
 use thiserror::Error;
@@ -34,7 +29,6 @@ pub struct CdKeyInfo {
     pub hash: [u8; 20],
 }
 
-/// Object-oriented CD-Key Decoder mirroring BNCSutil's `CDKeyDecoder` class.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CdKeyDecoder {
     key_type: KeyType,
@@ -45,7 +39,7 @@ pub struct CdKeyDecoder {
 }
 
 impl CdKeyDecoder {
-    /// Creates and validates a new CD-key decoder from a raw key string.
+
     pub fn new(cdkey: &str) -> Result<Self, CdKeyError> {
         let (key_type, product, public_value, val2, long_val2) = decode_key_components(cdkey)?;
         Ok(Self {
@@ -101,7 +95,6 @@ impl CdKeyDecoder {
         }
     }
 
-    /// Calculates the 20-byte hash suitable for SID_AUTH_CHECK (0x51).
     pub fn calculate_hash(&self, client_token: u32, server_token: u32) -> [u8; 20] {
         match self.key_type {
             KeyType::StarCraft | KeyType::WarCraft2 => {
@@ -203,7 +196,6 @@ const W2_MAP: [u8; 256] = [
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 ];
 
-/// Decodes a 13-digit, 16-character, or 26-character Battle.net CD-key.
 pub fn decode_cd_key(
     cdkey: &str,
     client_token: u32,
@@ -220,7 +212,6 @@ pub fn decode_cd_key(
     })
 }
 
-/// One-shot quick CD-key decoding matching BNCSutil `kd_quick`.
 #[inline]
 pub fn kd_quick(
     cdkey: &str,
@@ -524,8 +515,6 @@ fn get_num_value(c: u8) -> u32 {
     }
 }
 
-/// Encodes the 36-byte CD-Key info buffer required for BNCS SID_AUTH_CHECK (0x51).
-/// Wire layout: key_len (4) + product (4) + public_val (4) + val2 (4) + hash (20).
 pub fn create_key_info(
     cdkey: &str,
     client_token: u32,
@@ -587,9 +576,7 @@ mod tests {
 
     #[test]
     fn decodes_starcraft_key_with_decoder() {
-        // Valid 13-digit key checksum test
-        // Let's create a known 13-digit key: e.g. "1234567890123"
-        // Let's test invalid key first
+
         assert!(CdKeyDecoder::new("1234567890120").is_err());
     }
 

@@ -8,20 +8,19 @@ use std::time::Duration;
 
 #[test]
 fn test_m1_map_flags_wire_decomposition() {
-    // flags = MAPFLAG_TEAMSTOGETHER | MAPFLAG_FIXEDTEAMS (3)
+
     let flags_3 = calculate_game_flags(
         MAPSPEED_FAST,
         MAPVIS_DEFAULT,
         MAPOBS_NONE,
         MAPFLAG_TEAMSTOGETHER | MAPFLAG_FIXEDTEAMS,
     );
-    // Wire flags: FAST (0x02) | DEFAULT (0x800) | TEAMSTOGETHER (0x4000) | FIXEDTEAMS (0x60000) = 0x00064802
+
     assert_eq!(
         flags_3,
         0x0000_0002 | 0x0000_0800 | 0x0000_4000 | 0x0006_0000
     );
 
-    // flags = MAPFLAG_RANDOMRACES (16)
     let flags_races = calculate_game_flags(
         MAPSPEED_FAST,
         MAPVIS_DEFAULT,
@@ -30,7 +29,6 @@ fn test_m1_map_flags_wire_decomposition() {
     );
     assert_eq!(flags_races, 0x0000_0002 | 0x0000_0800 | 0x0400_0000);
 
-    // flags = MAPFLAG_UNITSHARE (4) | MAPFLAG_RANDOMHERO (8)
     let flags_share_hero = calculate_game_flags(
         MAPSPEED_NORMAL,
         MAPVIS_HIDETERRAIN,
@@ -45,11 +43,7 @@ fn test_m1_map_flags_wire_decomposition() {
 
 #[test]
 fn test_m2_m3_game_type_four_independent_filters() {
-    // Default GHost++ values:
-    // maker: MAPFILTER_MAKER_USER (1) -> MAPGAMETYPE_MAKERUSER (1<<13)
-    // type: MAPFILTER_TYPE_SCENARIO (2) -> MAPGAMETYPE_TYPESCENARIO (1<<16)
-    // size: MAPFILTER_SIZE_LARGE (4) -> MAPGAMETYPE_SIZELARGE (1<<19)
-    // obs: MAPFILTER_OBS_NONE (4) -> MAPGAMETYPE_OBSNONE (1<<22)
+
     let default_gt = calculate_game_type(
         MAPFILTER_MAKER_USER,
         MAPFILTER_TYPE_SCENARIO,
@@ -64,7 +58,6 @@ fn test_m2_m3_game_type_four_independent_filters() {
             | MAPGAMETYPE_OBSNONE
     );
 
-    // Melee game type
     let melee_gt = calculate_game_type(
         MAPFILTER_MAKER_BLIZZARD,
         MAPFILTER_TYPE_MELEE,
@@ -79,7 +72,6 @@ fn test_m2_m3_game_type_four_independent_filters() {
             | MAPGAMETYPE_OBSFULL
     );
 
-    // Multiple bits in filter_size (SMALL | MEDIUM) and filter_obs (FULL | ONDEATH)
     let multi_gt = calculate_game_type(
         MAPFILTER_MAKER_USER,
         MAPFILTER_TYPE_SCENARIO,
@@ -107,7 +99,7 @@ fn test_m4_melee_slots_initialization() {
             computer: 0,
             team: 0,
             colour: 0,
-            race: 0x01, // Human
+            race: 0x01,
             computer_type: 1,
             handicap: 100,
         },
@@ -118,7 +110,7 @@ fn test_m4_melee_slots_initialization() {
             computer: 0,
             team: 0,
             colour: 1,
-            race: 0x02, // Orc
+            race: 0x02,
             computer_type: 1,
             handicap: 100,
         },
@@ -129,7 +121,7 @@ fn test_m4_melee_slots_initialization() {
             computer: 0,
             team: 0,
             colour: 2,
-            race: 0x04, // Undead
+            race: 0x04,
             computer_type: 1,
             handicap: 100,
         },
@@ -140,7 +132,7 @@ fn test_m4_melee_slots_initialization() {
             computer: 0,
             team: 0,
             colour: 3,
-            race: 0x08, // NightElf
+            race: 0x08,
             computer_type: 1,
             handicap: 100,
         },
@@ -164,7 +156,7 @@ fn test_m5_forced_random_races() {
             computer: 0,
             team: 0,
             colour: 0,
-            race: 0x01, // Human
+            race: 0x01,
             computer_type: 1,
             handicap: 100,
         },
@@ -175,7 +167,7 @@ fn test_m5_forced_random_races() {
             computer: 0,
             team: 1,
             colour: 1,
-            race: 0x02, // Orc
+            race: 0x02,
             computer_type: 1,
             handicap: 100,
         },
@@ -202,7 +194,6 @@ fn test_m6_observer_slots_and_editor_version() {
         })
         .collect::<Vec<_>>();
 
-    // Modern editor version >= 6060 -> default max slots = 24
     let mut slots_24 = slots.clone();
     add_observer_slots(&mut slots_24, MAPOBS_ALLOWED, 6060, None);
     assert_eq!(slots_24.len(), 24);
@@ -212,7 +203,6 @@ fn test_m6_observer_slots_and_editor_version() {
         assert_eq!(s.race, 0x20);
     }
 
-    // Legacy editor version < 6060 -> default max slots = 12
     let mut slots_12 = slots.clone();
     add_observer_slots(&mut slots_12, MAPOBS_ALLOWED, 5000, None);
     assert_eq!(slots_12.len(), 12);
@@ -222,7 +212,6 @@ fn test_m6_observer_slots_and_editor_version() {
         assert_eq!(s.race, 0x20);
     }
 
-    // Overridden max slots = 16
     let mut slots_custom = slots.clone();
     add_observer_slots(&mut slots_custom, MAPOBS_ALLOWED, 6060, Some(16));
     assert_eq!(slots_custom.len(), 16);
@@ -230,12 +219,12 @@ fn test_m6_observer_slots_and_editor_version() {
 
 #[test]
 fn test_m7_closed_slots_and_num_players() {
-    // In GHost++, closed slots are not in m_Slots and MapNumPlayers = RawMapNumPlayers - ClosedSlots
+
     let raw_slots = vec![
         SlotInfo {
             pid: 0,
             download_status: 255,
-            slot_status: SlotStatus::Open as u8, // Open
+            slot_status: SlotStatus::Open as u8,
             computer: 0,
             team: 0,
             colour: 0,
@@ -246,7 +235,7 @@ fn test_m7_closed_slots_and_num_players() {
         SlotInfo {
             pid: 0,
             download_status: 255,
-            slot_status: SlotStatus::Closed as u8, // Closed (should be excluded)
+            slot_status: SlotStatus::Closed as u8,
             computer: 0,
             team: 0,
             colour: 1,
@@ -257,7 +246,7 @@ fn test_m7_closed_slots_and_num_players() {
         SlotInfo {
             pid: 0,
             download_status: 255,
-            slot_status: SlotStatus::Occupied as u8, // Computer occupied
+            slot_status: SlotStatus::Occupied as u8,
             computer: 1,
             team: 1,
             colour: 2,
@@ -286,7 +275,7 @@ fn test_m8_map_fields_and_stats_and_hcl_dispatch() {
     map.matchmaking_category = "dota_ladder".into();
 
     let cfg = GameConfig {
-        name: "Casual Game".into(), // no HCL in name
+        name: "Casual Game".into(),
         owner: "slash".into(),
         host_counter: 1,
         num_slots: 10,
@@ -328,22 +317,18 @@ fn test_m9_check_valid() {
     let mut map = MapInfo::test_default();
     assert!(map.check_valid().is_ok());
 
-    // Path empty
     map.path = "".into();
     assert!(map.check_valid().is_err());
 
-    // Path > 53 chars
     map.path = "Maps\\Download\\ThisIsAnExtremelyLongMapPathThatExceedsFiftyThreeChars.w3x".into();
     assert!(map.check_valid().is_err());
 
     map.path = "Maps\\Download\\test.w3x".into();
 
-    // If validation checks dimensions
     let mut bad_dim = map.clone();
     bad_dim.width = 0;
     assert!(bad_dim.check_valid().is_err());
 
-    // Size mismatch with data
     let mut bad_size = map.clone();
     bad_size.data = Some(Arc::new(vec![0u8; 500]));
     bad_size.size = 1000;

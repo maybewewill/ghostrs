@@ -1,7 +1,4 @@
-﻿//! BNCSutil ExeInfo Implementation
-//!
-//! Extracts executable version and generates the formatted exe_info string required for
-//! Battle.net logon (`SID_AUTH_CHECK` 0x51).
+﻿
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -21,8 +18,6 @@ pub struct ExeInfo {
     pub version: u32,
 }
 
-/// Reads file size and modification timestamp to build the Battle.net exe_info string
-/// (e.g. "warcraft.exe 08/15/26 00:12:26 471040") and extracts version information from PE/Mac headers.
 pub fn get_exe_info(file_path: &Path, platform: u32) -> Result<ExeInfo, std::io::Error> {
     let metadata = std::fs::metadata(file_path)?;
     let file_size = metadata.len();
@@ -60,7 +55,7 @@ pub fn get_exe_info(file_path: &Path, platform: u32) -> Result<ExeInfo, std::io:
             }
         }
         _ => {
-            // Default Windows / x86 PE parser
+
             crate::bncsutil::pe::extract_pe_version_from_file(file_path).unwrap_or(0x011a0001)
         }
     };
@@ -78,7 +73,6 @@ fn timestamp_to_utc_parts(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
     let min = ((rem % 3600) / 60) as u32;
     let sec = (rem % 60) as u32;
 
-    // Euclidean affine algorithm for Gregorian calendar (Hinnant)
     let z = days + 719468;
     let era = z / 146097;
     let doe = z - era * 146097;

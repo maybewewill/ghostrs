@@ -1,7 +1,4 @@
-﻿//! BNCSutil New Logon System (NLS / SRP-6a) Implementation
-//!
-//! Provides the complete SRP-6a client state machine and 1024-bit RSA server signature
-//! verification for Battle.net account login and creation.
+﻿
 
 use num_bigint::BigUint;
 use num_traits::Zero;
@@ -14,25 +11,20 @@ pub enum NlsError {
     InvalidServerPublicKey,
 }
 
-// 256-bit safe prime modulus N used by Battle.net NLS (little-endian byte array)
 pub const NLS_PRIME_BYTES: [u8; 32] = [
     0x87, 0xC7, 0x23, 0x85, 0x65, 0xF6, 0x16, 0x12, 0xD9, 0x12, 0x32, 0xC7, 0x78, 0x6C, 0x97, 0x7E,
     0x55, 0xB5, 0x92, 0xA0, 0x8C, 0xB6, 0x86, 0x21, 0x03, 0x18, 0x99, 0x61, 0x8B, 0x1A, 0xFF, 0xF8,
 ];
 
-// Generator g = 47 (0x2F)
 pub const NLS_G: u32 = 47;
 
-// Constant I = SHA1(g) ^ SHA1(N) used in Blizzard M1 calculation
 pub const NLS_I: [u8; 20] = [
     0x6C, 0x0E, 0x97, 0xED, 0x0A, 0xF9, 0x6B, 0xAB, 0xB1, 0x58, 0x89, 0xEB, 0x8B, 0xBA, 0x25, 0xA4,
     0xF0, 0x8C, 0x01, 0xF8,
 ];
 
-// Server signature RSA public exponent (65537)
 pub const NLS_SIGNATURE_KEY: u32 = 0x10001;
 
-// Server signature 1024-bit RSA modulus (little-endian byte array)
 pub const NLS_SIG_N: [u8; 128] = [
     0xD5, 0xA3, 0xD6, 0xAB, 0x0F, 0x0D, 0xC5, 0x0F, 0xC3, 0xFA, 0x6E, 0x78, 0x9D, 0x0B, 0xE3, 0x32,
     0xB0, 0xFA, 0x20, 0xE8, 0x42, 0x19, 0xB4, 0xA1, 0x3A, 0x3B, 0xCD, 0x0E, 0x8F, 0xB5, 0x56, 0xB5,
@@ -64,8 +56,6 @@ pub struct NlsChangeProofPacket {
     pub new_v: [u8; 32],
 }
 
-/// Owns the client-side SRP-6a state machine for Battle.net account logons.
-/// Replaces the legacy C `nls_init_l` / `nls_get_A` / `nls_get_M1` raw handle pattern.
 #[derive(Debug, Clone)]
 pub struct NlsSession {
     username: String,
@@ -75,7 +65,7 @@ pub struct NlsSession {
 }
 
 impl NlsSession {
-    /// Creates a new NLS session with a randomly generated 256-bit private key `a`.
+
     pub fn new(username: &str, password: &str) -> Self {
         let n = BigUint::from_bytes_le(&NLS_PRIME_BYTES);
         let g = BigUint::from(NLS_G);
@@ -100,7 +90,6 @@ impl NlsSession {
         }
     }
 
-    /// Test-friendly constructor with deterministic private key.
     pub fn with_private_key_for_test(username: &str, password: &str, private_key: u32) -> Self {
         let n = BigUint::from_bytes_le(&NLS_PRIME_BYTES);
         let g = BigUint::from(NLS_G);
@@ -120,19 +109,16 @@ impl NlsSession {
         }
     }
 
-    /// Returns the username associated with this NLS session.
     #[inline]
     pub fn username(&self) -> &str {
         &self.username
     }
 
-    /// Returns the 32-byte client public ephemeral key A to send in `SID_AUTH_ACCOUNTLOGON` (0x53).
     #[inline]
     pub fn client_public_key(&self) -> [u8; 32] {
         self.a_pub
     }
 
-    /// Computes the password verifier `v = g^x mod N` (32 bytes).
     pub fn compute_v(&self, salt: &[u8; 32]) -> [u8; 32] {
         let n = BigUint::from_bytes_le(&NLS_PRIME_BYTES);
         let g = BigUint::from(NLS_G);
@@ -159,7 +145,6 @@ impl NlsSession {
         BigUint::from_bytes_le(&x_bytes)
     }
 
-    /// Computes the 32-byte shared secret value S = (B - v)^(a + u*x) mod N.
     pub fn compute_s(
         &self,
         server_public_key: &[u8; 32],
@@ -192,7 +177,6 @@ impl NlsSession {
         Ok(s_bytes)
     }
 
-    /// Computes the 40-byte key K by interleaving SHA1(odd(S)) and SHA1(even(S)).
     pub fn compute_k(&self, s_bytes: &[u8; 32]) -> [u8; 40] {
         let mut odd = [0u8; 16];
         let mut even = [0u8; 16];
@@ -211,7 +195,6 @@ impl NlsSession {
         k
     }
 
-    /// Computes the 20-byte client session proof M1 for `SID_AUTH_ACCOUNTLOGONPROOF` (0x54).
     pub fn compute_m1(
         &self,
         server_public_key: &[u8; 32],
@@ -237,7 +220,6 @@ impl NlsSession {
         Ok(m1)
     }
 
-    /// Computes the expected 20-byte server proof M2 = SHA1(A + M1 + K).
     pub fn compute_m2(
         &self,
         server_public_key: &[u8; 32],
@@ -258,7 +240,6 @@ impl NlsSession {
         Ok(m2)
     }
 
-    /// Validates the 20-byte server session proof M2 received from Battle.net (`nls_check_M2`).
     pub fn check_m2(
         &self,
         var_m2: &[u8; 20],
@@ -274,7 +255,6 @@ impl NlsSession {
         }
     }
 
-    /// Builds account creation parameters (`SID_AUTH_ACCOUNTCREATE` 0x52) with a newly generated salt.
     pub fn account_create(&self) -> NlsAccountCreatePacket {
         let mut salt = [0u8; 32];
         for b in &mut salt {
@@ -288,7 +268,6 @@ impl NlsSession {
         }
     }
 
-    /// Builds account logon parameters (`SID_AUTH_ACCOUNTLOGON` 0x53).
     pub fn account_logon(&self) -> NlsAccountLogonPacket {
         NlsAccountLogonPacket {
             a_pub: self.a_pub,
@@ -296,7 +275,6 @@ impl NlsSession {
         }
     }
 
-    /// Generates password change proof packet (`SID_AUTH_ACCOUNTCHANGEPROOF` 0x55) and returns a new session.
     pub fn account_change_proof(
         &self,
         new_password: &str,
@@ -323,10 +301,6 @@ impl NlsSession {
     }
 }
 
-/// Verifies the 128-byte RSA server signature received in `SID_AUTH_INFO` (0x50).
-///
-/// Address parameter should be IPv4 in network byte order.
-/// Returns true if signature decrypts to `[address (4 bytes), 0xBB * 28]`.
 pub fn check_signature(server_ip_be: u32, signature_raw: &[u8; 128]) -> bool {
     let mut check = [0xBBu8; 32];
     check[0..4].copy_from_slice(&server_ip_be.to_ne_bytes());

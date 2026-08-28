@@ -1,4 +1,4 @@
-﻿//! W3GS packet identifiers.
+﻿
 pub const PING_FROM_HOST: u8 = 0x01;
 pub const SLOT_INFO_JOIN: u8 = 0x04;
 pub const REJECT_JOIN: u8 = 0x05;
@@ -37,7 +37,6 @@ pub const MAP_PART_NOT_OK: u8 = 0x45;
 pub const PONG_TO_HOST: u8 = 0x46;
 pub const INCOMING_ACTION2: u8 = 0x48;
 
-// PLAYERLEAVE_* constants matching GHost++ gameprotocol.h:38-45
 pub const PLAYERLEAVE_DISCONNECT: u32 = 1;
 pub const PLAYERLEAVE_LOST: u32 = 7;
 pub const PLAYERLEAVE_LOSTBUILDINGS: u32 = 8;

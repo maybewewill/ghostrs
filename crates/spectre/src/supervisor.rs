@@ -104,7 +104,6 @@ impl Supervisor {
         let (conn_event_tx, conn_event_rx) = mpsc::channel(1024);
         let (game_event_tx, game_event_rx) = mpsc::channel(64);
 
-        // Warcraft 3 client listens on UDP port 6112 for LAN game broadcasts
         const WAR3_LAN_UDP_PORT: u16 = 6112;
         let target_ip = cfg.bot.resolved_udp_broadcast_target();
         let udp_broadcaster = match UdpBroadcaster::bind_target(target_ip, WAR3_LAN_UDP_PORT).await
@@ -1004,7 +1003,7 @@ impl Supervisor {
         visibility: spectre_protocol::GameVisibility,
     ) {
         let (map_info, map_game_type, custom_slots) = self.resolve_map_info(name);
-        // Low 28 bits identify the game counter; top nibble identifies the battle.net connection.
+
         const HOST_COUNTER_ID: u32 = 0;
         let host_counter: u32 = (self.host_counter & 0x0FFF_FFFF) | (HOST_COUNTER_ID << 28);
         self.host_counter = self.host_counter.wrapping_add(1);
@@ -1082,9 +1081,7 @@ impl Supervisor {
         handle.send(GameCmd::CreateVirtualHost);
 
         if self.cfg.spectator.dotatv_enabled {
-            // One listener per game: viewers are pointed at a specific match, so
-            // the port has to be distinct. Derived from the game's own host port
-            // offset to stay stable and collision-free across concurrent games.
+
             let tv_port = self
                 .cfg
                 .spectator
@@ -1094,13 +1091,10 @@ impl Supervisor {
 
             let shared =
                 spectre_spectator::DotaTvShared::new(spectre_spectator::DotaTvStream::for_126a());
-            // Default public feed runs 180s behind live (anti stream-snipe); the
-            // zero-delay live feed is the separate fog-locked MODE_STREAM_LIVE path.
+
             shared.set_stream_delay(spectre_spectator::STREAM_DELAY);
             handle.send(GameCmd::AttachDotaTv(shared.clone()));
 
-            // Admin/caster port = public port + 1, served at the live edge (0ms).
-            // Access-control this port at the firewall: it bypasses the 180s delay.
             let admin_addr = SocketAddr::from(([0, 0, 0, 0], tv_port.wrapping_add(1)));
             let admin_shared = shared.clone();
 
@@ -1274,7 +1268,6 @@ mod tests {
             port: 6113,
         };
 
-        // Simulated event from GameActor when 3 players join: open slots -> 7
         let ev = spectre_engine::GameEvent::LobbyStatus {
             host_counter: 1234,
             slots_open: 7,
@@ -1311,27 +1304,22 @@ mod tests {
         cfg.bnet.root_admins.push("admin".into());
         let mut sup = super::Supervisor::new_for_test(cfg, store, bnet_handle, bnet_event_rx);
 
-        // 1. !invite
         sup.handle_chat_command("admin", "!invite player1");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
         assert!(matches!(cmd, spectre_bnet::BnetCmd::ClanInvitation(name) if name == "player1"));
 
-        // Drain reply
         let _ = bnet_cmd_rx.try_recv();
 
-        // 2. !getclan
         sup.handle_chat_command("admin", "!getclan");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
         assert!(matches!(cmd, spectre_bnet::BnetCmd::GetClanList));
         let _ = bnet_cmd_rx.try_recv();
 
-        // 3. !getfriends
         sup.handle_chat_command("admin", "!getfriends");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
         assert!(matches!(cmd, spectre_bnet::BnetCmd::GetFriendsList));
         let _ = bnet_cmd_rx.try_recv();
 
-        // 4. !shaman
         sup.handle_chat_command("admin", "!shaman player1");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
         assert!(
@@ -1339,13 +1327,11 @@ mod tests {
         );
         let _ = bnet_cmd_rx.try_recv();
 
-        // 5. !motd
         sup.handle_chat_command("admin", "!motd Welcome to the clan!");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
         assert!(matches!(cmd, spectre_bnet::BnetCmd::ClanSetMotd(m) if m == "Welcome to the clan!"));
         let _ = bnet_cmd_rx.try_recv();
 
-        // 6. !accept
         sup.handle_chat_command("admin", "!accept");
         let cmd = bnet_cmd_rx.try_recv().unwrap();
         assert!(matches!(cmd, spectre_bnet::BnetCmd::ClanAcceptInvite(true)));
@@ -1367,7 +1353,6 @@ mod tests {
 
         let mut sup = super::Supervisor::new_for_test(cfg, store, bnet_handle, bnet_event_rx);
 
-        // Host first game
         sup.create_game("Game 1", "admin", spectre_protocol::GameVisibility::Public);
         assert_eq!(sup.games.len(), 1);
         assert_eq!(sup.games[0].port, 6113);
@@ -1380,7 +1365,6 @@ mod tests {
             panic!("Expected CreateGame cmd");
         }
 
-        // Host second game concurrently
         sup.create_game("Game 2", "admin", spectre_protocol::GameVisibility::Public);
         assert_eq!(sup.games.len(), 2);
         assert_eq!(sup.games[1].port, 6114);
@@ -1393,7 +1377,6 @@ mod tests {
             panic!("Expected CreateGame cmd");
         }
 
-        // Check !getgames and !status
         sup.handle_chat_command("admin", "!getgames");
         let chat_cmd = bnet_cmd_rx.try_recv().unwrap();
         if let spectre_bnet::BnetCmd::SendChat(msg) = chat_cmd {
@@ -1404,13 +1387,11 @@ mod tests {
             panic!("Expected SendChat cmd");
         }
 
-        // Unhost Game 1 specifically
         sup.handle_chat_command("admin", "!unhost Game 1");
         assert_eq!(sup.games.len(), 1);
         assert_eq!(sup.games[0].name, "Game 2");
         assert!(!sup.allocated_ports.contains(&6113));
 
-        // Host Game 3 -> port 6113 is recycled!
         sup.create_game("Game 3", "admin", spectre_protocol::GameVisibility::Public);
         assert_eq!(sup.games.len(), 2);
         assert_eq!(sup.games[1].port, 6113);

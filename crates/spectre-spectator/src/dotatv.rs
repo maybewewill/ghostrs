@@ -1,4 +1,4 @@
-﻿//! DotaTV live replay streaming for spectator clients.
+﻿
 
 use std::io::Write;
 use std::sync::Arc;
@@ -9,21 +9,14 @@ use flate2::write::ZlibEncoder;
 
 use crate::w3g::W3gWriter;
 
-/// Size of a `.w3g` data block. Only the bootstrap *file* is built out of blocks:
-/// Game.dll's loader requires every block in the file to inflate to exactly this.
-/// The live wire frames are not blocks and are not tied to this size.
 pub const CHUNK_SIZE: usize = 8192;
 
-/// Greeting the server sends before any frame.
 pub const GREETING: [u8; 4] = *b"DTV1";
 
-/// Largest live frame put on the wire.
 const MAX_FRAME: usize = CHUNK_SIZE;
 
-/// Empty TimeSlot record: id 0x1F, zero action bytes, zero ms increment.
 const EMPTY_TIMESLOT: [u8; 5] = [0x1F, 0x02, 0x00, 0x00, 0x00];
 
-/// Wire CRC32 (IEEE, reflected, poly 0xEDB88320) lookup table.
 fn crc_table() -> [u32; 256] {
     let mut table = [0u32; 256];
     for i in 0..256u32 {
@@ -40,7 +33,6 @@ fn crc_table() -> [u32; 256] {
     table
 }
 
-/// Pushes `data` through an un-finalized CRC register.
 fn crc_push(mut reg: u32, data: &[u8], t: &[u32; 256]) -> u32 {
     for &b in data {
         reg = t[((reg ^ b as u32) & 0xFF) as usize] ^ (reg >> 8);
@@ -48,7 +40,6 @@ fn crc_push(mut reg: u32, data: &[u8], t: &[u32; 256]) -> u32 {
     reg
 }
 
-/// CRC32 of `data` (finalized).
 pub fn crc32(data: &[u8]) -> u32 {
     crc_push(0xFFFF_FFFF, data, &crc_table()) ^ 0xFFFF_FFFF
 }
@@ -56,18 +47,14 @@ pub fn crc32(data: &[u8]) -> u32 {
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub compressed: Arc<Vec<u8>>,
-    /// Decompressed size of this frame. Every byte is a real record: frames never
-    /// carry filler, so the client appends the whole payload.
+
     pub valid_bytes: u16,
-    /// CRC32 over the decompressed payload (`valid_bytes` bytes).
+
     pub crc: u32,
 }
 
 impl Chunk {
-    /// Wire frame: `u16 compressedSize, u16 validBytes, u32 crc32, u8 data[]`, little endian.
-    /// The CRC covers the decompressed payload; the client verifies it after
-    /// inflating and disconnects on mismatch instead of feeding Game.dll a
-    /// torn record stream.
+
     pub fn frame(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8 + self.compressed.len());
         out.extend_from_slice(&(self.compressed.len() as u16).to_le_bytes());
@@ -80,63 +67,33 @@ impl Chunk {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DotaTvError {
-    /// zlib expanded a chunk past what the append guard accepts. Only reachable
-    /// with incompressible data, which action streams are not, but a rejected
-    /// block would tear a hole in the stream so it is surfaced rather than
-    /// silently dropped.
+
     #[error("compressed chunk is {0} bytes, exceeds the {CHUNK_SIZE}-byte limit")]
     ChunkTooLarge(usize),
 }
 
-/// Append-only decompressed body plus the compressed frames cut from it.
-///
-/// `raw` is a rolling window over the record stream: framed bytes are trimmed
-/// from its front as soon as they are cut into [`Chunk`]s, because the frames
-/// alone carry everything a viewer needs (the bootstrap is built from the
-/// separately retained prologue copy). This keeps resident memory proportional
-/// to the compressed history plus one unframed tail, not the whole decompressed
-/// match.
-///
-/// Frames cover `raw[..framed_len]` with no gaps and no filler, and every frame
-/// boundary that matters (a [`CHUNK_SIZE`] multiple, in absolute body
-/// coordinates) is also a bootstrap split point, so a viewer that loads a
-/// bootstrap covering N bytes resumes exactly at the frame starting at N.
 pub struct DotaTvStream {
-    /// Rolling window over the body. `raw[0]` sits at absolute offset
-    /// [`Self::raw_base`](Self::raw_base); framed bytes are drained from the
-    /// front by [`Self::flush`].
+
     raw: Vec<u8>,
-    /// Absolute body offset of `raw[0]`.
+
     raw_base: usize,
     frames: Vec<Chunk>,
-    /// Wall-clock publish time of each frame, aligned 1:1 with `frames`. Frames
-    /// are never trimmed (only `raw` is), so this stays aligned for the life of
-    /// the stream. Populated in [`Self::flush`]; drives the broadcast delay the
-    /// default (non-live) feed applies via [`Self::count_published_before`].
-    /// Monotonic non-decreasing because frames are appended in order.
+
     frame_times: Vec<Instant>,
-    /// Bytes of `raw` already cut into frames.
+
     framed_len: usize,
-    /// Copy of the body prefix that belongs to the prologue (player records,
-    /// game name, stat string, slots, start blocks), taken at
-    /// [`Self::mark_prologue_end`]. The bootstrap is built exclusively from
-    /// this copy, which is what lets `raw` be trimmed freely afterwards.
-    /// Action timeslots crash the 1.26a parser behind the loading screen.
+
     prologue: Vec<u8>,
-    /// Absolute body offset just past the last prologue byte.
+
     prologue_end: usize,
     war3_version: u32,
     build: u16,
     tft: bool,
-    /// Un-finalized CRC32 register over every published body byte
-    /// (`raw_base + framed_len` bytes). The heartbeat marker carries its
-    /// finalized value so a viewer can verify the stream end to end.
+
     crc_reg: u32,
     crc_table: [u32; 256],
 }
 
-/// Framed bytes retained ahead of the unframed tail before a flush trims them.
-/// Only affects memory; framing itself uses absolute coordinates.
 const RAW_TRIM_KEEP: usize = CHUNK_SIZE;
 
 impl DotaTvStream {
@@ -157,17 +114,12 @@ impl DotaTvStream {
         }
     }
 
-    /// Marks the current end of `raw` as the prologue boundary and snapshots it.
-    /// Called once, right after the prologue bytes are pushed and before any
-    /// timeslot data. The snapshot is what makes later trimming safe.
     pub fn mark_prologue_end(&mut self) {
         self.prologue_end = self.raw_base + self.raw.len();
         self.prologue.clear();
         self.prologue.extend_from_slice(&self.raw);
     }
 
-    /// Marks an absolute body offset as the prologue boundary (raw-replay mode:
-    /// the whole body is pushed at once, so the boundary sits mid-buffer).
     pub fn mark_prologue_end_at(&mut self, abs_offset: usize) {
         self.prologue_end = abs_offset;
         self.prologue.clear();
@@ -175,29 +127,19 @@ impl DotaTvStream {
         self.prologue.extend_from_slice(&self.raw[..end]);
     }
 
-    /// Stream for Warcraft III 1.26a. The build number is the one carried by the
-    /// `.w3g` format and checked at `0x6F5A42EA`, which is 6059 — not the 6401
-    /// in the `game.dll` file version.
     pub fn for_126a() -> Self {
         Self::new(26, 6059, true)
     }
 
-    /// Appends decompressed body bytes. Nothing is published until [`Self::flush`].
     pub fn push_body(&mut self, bytes: &[u8]) -> Result<usize, DotaTvError> {
         self.raw.extend_from_slice(bytes);
         Ok(0)
     }
 
-    /// Publishes everything buffered so far as one or more frames.
-    ///
-    /// Frames carry only real records — no filler — so the viewer's engine never
-    /// executes synthetic turns. That is what keeps playback smooth and keeps the match
-    /// clock driven purely by the host's own TimeSlot records.
     pub fn flush(&mut self) -> Result<usize, DotaTvError> {
         let mut cut = 0;
         while self.framed_len < self.raw.len() {
-            // Frame boundaries are tracked in absolute body coordinates so the
-            // block-alignment guarantee survives front-trimming.
+
             let start_abs = self.raw_base + self.framed_len;
             let block_end = (start_abs / CHUNK_SIZE + 1) * CHUNK_SIZE;
             let end_abs = (self.raw_base + self.raw.len())
@@ -226,9 +168,6 @@ impl DotaTvStream {
             cut += 1;
         }
 
-        // Drop framed bytes from the window. The frames own that data now, and
-        // the prologue snapshot owns the bootstrap prefix, so nothing is lost.
-        // The tail (< CHUNK_SIZE after a full drain) stays for the next flush.
         if self.framed_len > RAW_TRIM_KEEP {
             let framed = self.framed_len;
             self.raw.drain(..framed);
@@ -238,13 +177,10 @@ impl DotaTvStream {
         Ok(cut)
     }
 
-    /// Buffered body bytes not yet published as frames.
     pub fn pending_len(&self) -> usize {
         self.raw.len() - self.framed_len
     }
 
-    /// Body bytes still held in memory outside the compressed frames: the
-    /// unframed tail plus whatever has not crossed the trim threshold yet.
     pub fn retained_len(&self) -> usize {
         self.raw.len()
     }
@@ -253,31 +189,18 @@ impl DotaTvStream {
         self.frames.len()
     }
 
-    /// Number of frames published at least `delay` ago. Used by the default
-    /// (non-live) feed to hold viewers a fixed wall-clock delay behind the live
-    /// edge — a broadcast delay that defeats stream-sniping. `frame_times` is
-    /// monotonic, so the answer is the position of the first frame newer than the
-    /// cutoff. `delay == 0` yields the full count (live feed, no delay).
     pub fn count_delayed(&self, delay: Duration) -> usize {
         if delay.is_zero() {
             return self.frames.len();
         }
-        // checked_sub: early in the process Instant's epoch can be < delay, and
-        // bare subtraction panics on underflow. No cutoff means every frame is
-        // newer than the delay window, so none are eligible yet.
+
         let Some(cutoff) = Instant::now().checked_sub(delay) else {
             return 0;
         };
-        // partition_point: first index whose time is strictly after cutoff.
+
         self.frame_times.partition_point(|t| *t <= cutoff)
     }
 
-    /// Readiness of the delayed feed for a viewer resuming at `start_index`.
-    /// Returns `(ready, secs_until_ready)`. Ready when at least one frame past
-    /// `start_index` has aged beyond `delay`, so playback can actually advance.
-    /// Otherwise the viewer joined before the broadcast delay elapsed and the
-    /// second value is the seconds until the frame at `start_index` becomes
-    /// releasable — enough for the client to show a buffering countdown.
     pub fn status(&self, start_index: usize, delay: Duration) -> (bool, u64) {
         if delay.is_zero() || start_index >= self.frames.len() {
             return (true, 0);
@@ -293,36 +216,16 @@ impl DotaTvStream {
         self.frames.get(index).cloned()
     }
 
-    /// Body bytes covered by published frames.
     pub fn published_len(&self) -> usize {
         self.raw_base + self.framed_len
     }
 
-    /// Finalized CRC32 over every published body byte. Matches what a viewer
-    /// that received every frame from 0 computes incrementally.
     pub fn published_crc(&self) -> u32 {
         self.crc_reg ^ 0xFFFF_FFFF
     }
 
-    /// Builds a `.w3g` carrying the prologue plus empty-timeslot padding, and
-    /// returns the frame index a viewer loading it must resume from.
-    ///
-    /// War3 needs the prologue to know which map to load — without it the engine
-    /// cannot set up the game at all. It also needs at least one TimeSlot record
-    /// after the start blocks: a replay that ends right on the third start block
-    /// is rejected with NETERROR_CANTLOADREPLAYDATA. But real DotA 507 action
-    /// data crashes the 1.26a parser behind the loading screen, so the padding
-    /// uses empty timeslots (record 0x1F, zero actions, zero increment) — valid
-    /// no-op ticks that carry no actions for the parser to choke on.
-    ///
-    /// The declared body length covers the whole padded block, matching the
-    /// bootstrap layout that is known to load. Every real timeslot arrives over
-    /// the live chunk stream; the injected client resumes at the first frame
-    /// past the prologue boundary.
     pub fn bootstrap(&self, replay_length_ms: u32) -> (Vec<u8>, u32) {
-        // Built from the prologue snapshot, not `raw`: by the time a late
-        // viewer asks, the prologue bytes have long been trimmed from the
-        // rolling window.
+
         debug_assert_eq!(
             self.prologue.len(),
             self.prologue_end,
@@ -334,9 +237,6 @@ impl DotaTvStream {
         let mut writer = W3gWriter::new(self.war3_version, self.build, self.tft);
         writer.set_replay_length(replay_length_ms);
 
-        // The prologue is typically 200-500 bytes — less than one CHUNK_SIZE.
-        // The .w3g format requires whole blocks, so fill the rest of the block
-        // with empty timeslots and declare the full length.
         let aligned = prefix.div_ceil(CHUNK_SIZE) * CHUNK_SIZE;
         let mut padded = self.prologue[..prefix.min(self.prologue.len())].to_vec();
         while padded.len() + EMPTY_TIMESLOT.len() <= aligned {
@@ -348,8 +248,6 @@ impl DotaTvStream {
             .pack_chunk_aligned_declaring(&padded, aligned)
             .expect("padded is block-aligned by construction");
 
-        // The resume index is the first frame that starts at or after `prefix`.
-        // Frames never cross a block boundary, so such a frame always exists.
         let mut covered = 0usize;
         let mut resume = self.frames.len();
         for (i, f) in self.frames.iter().enumerate() {
@@ -363,29 +261,10 @@ impl DotaTvStream {
         (file, resume as u32)
     }
 
-    /// Like [`Self::bootstrap`] but embeds the ENTIRE recorded body so far, not
-    /// just the prologue, and resumes at the live edge.
-    ///
-    /// A viewer loading this seeks to match-time BEHIND its loading screen: the
-    /// injected client drains the whole engine buffer before revealing the 3D
-    /// world, so a spectator who joins at minute 15 sees the world appear
-    /// already at 15:00 instead of watching a visible fast-forward.
-    ///
-    /// History note: real action timeslots once crashed the 1.26a parser behind
-    /// the loading screen, which is why the plain [`Self::bootstrap`] pads with
-    /// empty timeslots. The injected client's accumulated parser guards
-    /// (script-parser null guard, player-leave slot guard, unpack-block guard,
-    /// div-zero VEH, page healer) now digest real action data there: verified by
-    /// draining a full 45-minute real DotA replay (3.2 MB, real actions) in
-    /// ~480 ms behind the loading screen with Desyncs=0 and no crash. This path
-    /// is opt-in via `MODE_BOOTSTRAP_FULL`; the prologue-only `bootstrap` stays
-    /// the default for launchers that only need a live-edge join.
     pub fn bootstrap_full(&self, replay_length_ms: u32) -> (Vec<u8>, u32) {
         use flate2::read::ZlibDecoder;
         use std::io::Read as _;
 
-        // Frames cover body[0..] with no gaps or filler, so inflating each in
-        // order reconstructs the full published body verbatim.
         let mut body = Vec::new();
         for f in &self.frames {
             let mut raw = Vec::new();
@@ -398,8 +277,6 @@ impl DotaTvStream {
         let mut writer = W3gWriter::new(self.war3_version, self.build, self.tft);
         writer.set_replay_length(replay_length_ms);
 
-        // Pad the final partial block with empty timeslots so the declared body
-        // is block-aligned, exactly like `bootstrap`.
         let aligned = body.len().div_ceil(CHUNK_SIZE) * CHUNK_SIZE;
         let mut padded = body;
         while padded.len() + EMPTY_TIMESLOT.len() <= aligned {
@@ -454,12 +331,10 @@ mod tests {
         s.flush().unwrap();
         assert_eq!(s.chunk_count(), 1);
 
-        // Zero delay always exposes the live edge.
         assert_eq!(s.count_delayed(Duration::ZERO), 1);
-        // A frame just published is younger than the delay window: withheld.
+
         assert_eq!(s.count_delayed(Duration::from_secs(60)), 0);
 
-        // Once it ages past a short delay, it becomes eligible.
         std::thread::sleep(Duration::from_millis(40));
         assert_eq!(s.count_delayed(Duration::from_millis(20)), 1);
     }
@@ -467,26 +342,24 @@ mod tests {
     #[test]
     fn count_delayed_boundary_is_monotonic_across_frames() {
         let mut s = DotaTvStream::for_126a();
-        // First frame published now.
+
         s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
         s.flush().unwrap();
         std::thread::sleep(Duration::from_millis(40));
-        // Second frame published ~40ms later.
+
         s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
         s.flush().unwrap();
         assert_eq!(s.chunk_count(), 2);
 
-        // With a 20ms delay only the older frame has aged past the cutoff.
         assert_eq!(s.count_delayed(Duration::from_millis(20)), 1);
-        // After both age out, both are eligible.
+
         std::thread::sleep(Duration::from_millis(40));
         assert_eq!(s.count_delayed(Duration::from_millis(20)), 2);
     }
 
     #[test]
     fn a_small_flush_publishes_a_small_frame_with_no_filler() {
-        // This is the property that keeps playback smooth: a quiet tick is a handful of
-        // bytes and must go out as a handful of bytes, not padded to a block.
+
         let mut s = DotaTvStream::for_126a();
         s.push_body(&[0x1F, 0x02, 0x00, 0x64, 0x00]).unwrap();
         s.flush().unwrap();
@@ -537,8 +410,7 @@ mod tests {
 
     #[test]
     fn frames_never_cross_a_block_boundary() {
-        // Bootstraps split on block boundaries, so a resuming viewer must always find a
-        // frame that starts exactly there.
+
         let mut s = DotaTvStream::for_126a();
         s.push_body(&vec![0x66; CHUNK_SIZE * 2 + 500]).unwrap();
         s.flush().unwrap();
@@ -559,8 +431,7 @@ mod tests {
     #[test]
     fn bootstrap_is_header_only_and_resumes_at_zero() {
         let mut s = DotaTvStream::for_126a();
-        // Two whole blocks plus a tail, published in small pieces the way a live match
-        // produces them.
+
         for _ in 0..(CHUNK_SIZE * 2 + 500) / 5 {
             s.push_body(&[0x1F, 0x02, 0x00, 0x0A, 0x00]).unwrap();
             s.flush().unwrap();
@@ -568,9 +439,6 @@ mod tests {
 
         let (file, resume) = s.bootstrap(4242);
 
-        // The 1.26a parser crashes on any non-trivial replay body behind the
-        // loading screen, so the bootstrap must be a bare header: zero blocks,
-        // zero declared body bytes.
         assert_eq!(resume, 0, "header-only bootstrap resumes at frame 0");
         let declared = read_u32(&file, 40) as usize;
         let blocks = read_u32(&file, 44) as usize;
@@ -581,13 +449,10 @@ mod tests {
         assert_eq!(read_u32(&file, 60), 4242, "replay length ms");
     }
 
-    /// The whole history must still reach the viewer — through the stream. The
-    /// bootstrap carries nothing, so every published byte must come out of frame
-    /// 0 onwards with no gap and no overlap.
     #[test]
     fn a_long_match_streams_its_whole_history_without_a_hole() {
         let mut s = DotaTvStream::for_126a();
-        // 20 whole blocks plus a ragged tail: five real minutes of DotA is this order.
+
         let total = CHUNK_SIZE * 20 + 777;
         for i in 0..total / 5 {
             let t = (i % 251) as u8;
@@ -616,13 +481,10 @@ mod tests {
         s.flush().unwrap();
         let (_, next_index) = s.bootstrap(0);
 
-        // Live data arriving after the viewer took its bootstrap.
         let live: Vec<u8> = (0..CHUNK_SIZE).map(|i| (i % 97) as u8).collect();
         s.push_body(&live).unwrap();
         s.flush().unwrap();
 
-        // Resume is 0, so the viewer receives everything: the backlog first,
-        // then exactly the new bytes.
         let mut resumed = Vec::new();
         for i in next_index as usize..s.chunk_count() {
             resumed.extend_from_slice(&inflate(&s.chunk(i).unwrap().compressed));
@@ -659,8 +521,7 @@ mod tests {
 
     #[test]
     fn flush_keeps_the_raw_window_bounded() {
-        // A multi-block match must not accumulate the whole decompressed body:
-        // framed bytes are trimmed from the rolling window as frames own them.
+
         let mut s = DotaTvStream::for_126a();
         let mut rebuilt = Vec::new();
         for block in 0..40 {
@@ -693,8 +554,7 @@ mod tests {
 
     #[test]
     fn bootstrap_is_stable_across_raw_trimming() {
-        // The prologue snapshot must survive front-trimming: a bootstrap taken
-        // after hours of streamed data is byte-identical to one taken early.
+
         let prologue: Vec<u8> = (0..500).map(|i| (i % 13) as u8).collect();
 
         let mut early = DotaTvStream::for_126a();
@@ -707,7 +567,7 @@ mod tests {
         late.push_body(&prologue).unwrap();
         late.flush().unwrap();
         late.mark_prologue_end();
-        // Hours of live data, flushed in ticks so trimming runs repeatedly.
+
         for block in 0..40 {
             let body: Vec<u8> = (0..CHUNK_SIZE).map(|i| ((i ^ block) % 199) as u8).collect();
             late.push_body(&body).unwrap();
@@ -722,12 +582,10 @@ mod tests {
 
     #[test]
     fn frames_never_cross_a_block_boundary_even_after_front_trimming() {
-        // Trimming shifts the window, but block alignment is tracked in
-        // absolute body coordinates, so the guarantee must hold for the whole
-        // stream, not just the untrimmed prefix.
+
         let mut s = DotaTvStream::for_126a();
         for block in 0..25 {
-            // Ragged pieces so frame cuts land at non-trivial offsets.
+
             s.push_body(&vec![0x51; CHUNK_SIZE / 3 + block]).unwrap();
             s.flush().unwrap();
         }
