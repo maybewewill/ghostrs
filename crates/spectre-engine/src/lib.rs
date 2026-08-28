@@ -3,6 +3,8 @@
 pub mod actions;
 pub mod actor;
 pub mod chat;
+pub mod full_history;
+pub mod full_rejoin;
 pub mod gproxy;
 pub mod handle;
 pub mod hcl;
@@ -19,6 +21,7 @@ pub mod tick;
 pub use actions::MAX_ACTION_PAYLOAD;
 pub use actor::spawn_game;
 pub use chat::{ChatCommand, parse_command};
+pub use full_history::FullHistory;
 pub use gproxy::GProxyBuffer;
 pub use handle::{GameCmd, GameEvent, GameHandle};
 pub use hcl::Hcl;
