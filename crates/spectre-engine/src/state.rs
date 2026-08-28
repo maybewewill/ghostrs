@@ -213,6 +213,8 @@ pub struct GameState {
     pub last_game_name: String,
     pub refresh_rehosted: bool,
     pub fake_player_pid: Option<u8>,
+    pub full_history: crate::full_history::FullHistory,
+    pub pending_full: std::collections::HashMap<u64, (u8, u32)>,
 }
 
 impl GameState {
@@ -305,6 +307,8 @@ impl GameState {
             last_game_name: cfg.name.clone(),
             refresh_rehosted: false,
             fake_player_pid: None,
+            full_history: crate::full_history::FullHistory::new(),
+            pending_full: std::collections::HashMap::new(),
             cfg,
         }
     }
@@ -328,6 +332,9 @@ impl GameState {
     pub const MAX_CONSECUTIVE_DROPS: u32 = 100;
 
     pub fn broadcast(&mut self, bytes: Bytes) {
+        if matches!(self.phase, GamePhase::Playing) {
+            self.full_history.push(bytes.clone());
+        }
         for p in self.players.iter_mut() {
             if p.left.is_some() || p.virtual_host {
                 continue;
@@ -581,5 +588,46 @@ impl GameState {
             pid,
             spectre_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
         ));
+    }
+}
+
+#[cfg(test)]
+mod full_history_recording_tests {
+    use super::*;
+    use crate::actor::tests_support::seated_game;
+
+    #[test]
+    fn lobby_broadcasts_are_not_recorded() {
+        let (mut st, _rxs) = seated_game(1);
+        st.broadcast(Bytes::from_static(&[0xF7, 0x0F, 0x04, 0x00]));
+        assert_eq!(
+            st.full_history.len(),
+            0,
+            "lobby packets must not enter FullHistory"
+        );
+    }
+
+    #[test]
+    fn playing_broadcasts_are_recorded_byte_identical() {
+        let (mut st, _rxs) = seated_game(1);
+        st.begin_playing();
+        let pkt = Bytes::from_static(&[0xF7, 0x0C, 0x06, 0x00, 0x64, 0x00]);
+        st.broadcast(pkt.clone());
+        assert_eq!(st.full_history.len(), 1);
+        assert_eq!(st.full_history.snapshot_from(0)[0], pkt);
+    }
+
+    #[test]
+    fn history_survives_gproxy_buffer_eviction() {
+        let (mut st, _rxs) = seated_game(1);
+        st.begin_playing();
+        st.players.by_pid_mut(1).unwrap().gproxy = true;
+        st.players.by_pid_mut(1).unwrap().gproxy_buffer =
+            Some(crate::gproxy::GProxyBuffer::new(500));
+        for i in 0..600u32 {
+            st.broadcast(Bytes::from(i.to_le_bytes().to_vec()));
+        }
+        // per-player GProxyBuffer(500) вытеснил префикс, но глобальный лог держит всё
+        assert_eq!(st.full_history.len(), 600);
     }
 }
