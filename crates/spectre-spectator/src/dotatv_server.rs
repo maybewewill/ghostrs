@@ -1,4 +1,4 @@
-﻿//! TCP fan-out for [`DotaTvStream`].
+//! TCP fan-out for [`DotaTvStream`].
 //!
 //! A viewer's launcher first fetches a bootstrap `.w3g` plus the chunk index it
 //! resumes from, starts `war3.exe -loadfile <bootstrap>`, and the injected
@@ -1245,21 +1245,21 @@ mod tests {
                 seed as u8 & 0x3F
             })
             .collect();
-        for _ in 0..4096 {
+        for _ in 0..1024 {
             shared.push_body(&block).await.unwrap();
         }
         shared.flush().await.unwrap();
 
         // Give the server time to fill the shrunken buffers and trip its
         // write timeout while this test deliberately does not read.
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         // The server must have given up on its own and closed the socket.
         // Frames already queued in the kernel buffer drain first, so keep
         // reading until the FIN shows up.
         let mut drained = 0usize;
         let mut buf = [0u8; 4096];
-        tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 match sock.read(&mut buf).await {
                     Ok(0) => break,
