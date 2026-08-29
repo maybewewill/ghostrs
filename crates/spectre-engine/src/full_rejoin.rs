@@ -336,4 +336,69 @@ mod tests {
         assert!(st.players.by_pid(1).unwrap().left.is_none(), "catching-up player must not be dropped");
         assert!(st.players.by_pid(2).unwrap().left.is_none(), "lone live player must not be dropped");
     }
+
+    #[test]
+    fn catch_up_cursor_is_eviction_safe_across_pumps() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        // tiny cap so eviction is trivial to force
+        st.full_history = crate::full_history::FullHistory::new_with_cap(6);
+        // capacity-1 link so each pump sends exactly one packet then backpressures
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        {
+            let p = st.players.by_pid_mut(1).unwrap();
+            p.link = PlayerLink::for_test(tx);
+            p.conn_id = 99;
+            p.loaded = true;
+            // NB: leave disconnected_since = Some(..) from the fixture during the seed
+            // below, so the 6 seeds are recorded into history WITHOUT a live send into
+            // the cap-1 channel (same shape as pump_feeds_history_in_order_...). Clearing
+            // it before seeding would pre-fill the single slot and desync the lockstep.
+        }
+        // seed 6 packets: markers 0..=5, all retained (cap 6), history-only (player held)
+        for i in 0..6u8 {
+            st.broadcast(Bytes::from(vec![0xF7, 0x0C, i]));
+        }
+        // re-attach live and arm the cursor at the oldest retained packet
+        {
+            let p = st.players.by_pid_mut(1).unwrap();
+            p.disconnected_since = None;
+        }
+        st.players.by_pid_mut(1).unwrap().catchup_cursor = Some(st.full_history.first_seq());
+
+        // Feed one packet per pump (channel cap 1), draining between pumps, while the
+        // live game keeps advancing and EVICTING the oldest — the exact race that broke
+        // the relative cursor.
+        let mut received: Vec<u8> = Vec::new();
+        let mut next_live = 6u8;
+        for _ in 0..64 {
+            st.pump_rejoin_catchup();
+            while let Ok(b) = rx.try_recv() {
+                received.push(b[2]);
+            }
+            if st.players.by_pid(1).unwrap().catchup_cursor.is_none() {
+                break;
+            }
+            if next_live < 20 {
+                st.broadcast(Bytes::from(vec![0xF7, 0x0C, next_live]));
+                next_live += 1;
+            }
+        }
+
+        // No gaps / no reorder: every received marker is exactly prev + 1.
+        for w in received.windows(2) {
+            assert_eq!(w[1], w[0] + 1, "gap or reorder in catch-up feed: {received:?}");
+        }
+        // Feed kept pace with eviction (cap 6, lockstep), so nobody was dropped and the
+        // player switched to live.
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_none(),
+            "must not be dropped: {:?}",
+            st.players.by_pid(1).unwrap().left
+        );
+        assert_eq!(st.players.by_pid(1).unwrap().catchup_cursor, None);
+        assert!(st.players.by_pid(1).unwrap().catching_up);
+        // sanity: received the full ordered run 0..=19
+        assert_eq!(received.first().copied(), Some(0));
+        assert_eq!(received.last().copied(), Some(19));
+    }
 }

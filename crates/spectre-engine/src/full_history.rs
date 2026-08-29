@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 pub struct FullHistory {
     inner: VecDeque<Bytes>,
     cap: usize,
+    evicted: u64,
 }
 
 impl FullHistory {
@@ -18,6 +19,7 @@ impl FullHistory {
         Self {
             inner: VecDeque::with_capacity(4096),
             cap,
+            evicted: 0,
         }
     }
 
@@ -27,13 +29,26 @@ impl FullHistory {
         }
         if self.inner.len() >= self.cap {
             self.inner.pop_front();
+            self.evicted += 1;
         }
         self.inner.push_back(pkt);
     }
 
-    /// Все пакеты, начиная с индекса `start` (0 = вся история). `start` за пределом → пусто.
-    pub fn snapshot_from(&self, start: u32) -> Vec<Bytes> {
-        self.inner.iter().skip(start as usize).cloned().collect()
+    /// Абсолютный индекс самого старого удержанного пакета (== число вытесненных).
+    pub fn first_seq(&self) -> u64 {
+        self.evicted
+    }
+
+    /// Абсолютный индекс, который получит следующий push (== всего когда-либо добавлено).
+    pub fn next_seq(&self) -> u64 {
+        self.evicted + self.inner.len() as u64
+    }
+
+    /// Пакеты, начиная с АБСОЛЮТНОГО индекса `seq`. Если `seq` уже вытеснен
+    /// (`seq < first_seq()`) — отдаёт с самого старого удержанного (front).
+    pub fn snapshot_from_seq(&self, seq: u64) -> Vec<Bytes> {
+        let rel = seq.saturating_sub(self.evicted) as usize;
+        self.inner.iter().skip(rel).cloned().collect()
     }
 
     pub fn len(&self) -> u32 {
@@ -72,7 +87,7 @@ mod tests {
         let mut h = FullHistory::new();
         h.push(Bytes::from_static(b"1"));
         h.push(Bytes::from_static(b"2"));
-        let s = h.snapshot_from(0);
+        let s = h.snapshot_from_seq(0);
         assert_eq!(s, vec![Bytes::from_static(b"1"), Bytes::from_static(b"2")]);
     }
 
@@ -82,8 +97,8 @@ mod tests {
         h.push(Bytes::from_static(b"1"));
         h.push(Bytes::from_static(b"2"));
         h.push(Bytes::from_static(b"3"));
-        assert_eq!(h.snapshot_from(2), vec![Bytes::from_static(b"3")]);
-        assert_eq!(h.snapshot_from(3), Vec::<Bytes>::new());
+        assert_eq!(h.snapshot_from_seq(2), vec![Bytes::from_static(b"3")]);
+        assert_eq!(h.snapshot_from_seq(3), Vec::<Bytes>::new());
     }
 
     #[test]
@@ -93,7 +108,25 @@ mod tests {
         h.push(Bytes::from_static(b"2"));
         h.push(Bytes::from_static(b"3"));
         assert_eq!(h.len(), 2);
-        assert_eq!(h.snapshot_from(0)[0], Bytes::from_static(b"2"));
+        assert_eq!(h.first_seq(), 1);
+        assert_eq!(h.next_seq(), 3);
+        assert_eq!(h.snapshot_from_seq(1)[0], Bytes::from_static(b"2"));
+        assert_eq!(h.snapshot_from_seq(0)[0], Bytes::from_static(b"2"));
+    }
+
+    #[test]
+    fn evicted_advances_first_and_next_seq() {
+        let mut h = FullHistory::new_with_cap(2);
+        for i in 1u8..=5 {
+            h.push(Bytes::copy_from_slice(&[i]));
+        }
+        assert_eq!(h.first_seq(), 3);
+        assert_eq!(h.next_seq(), 5);
+        assert_eq!(h.len(), 2);
+        let s = h.snapshot_from_seq(3);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0], Bytes::copy_from_slice(&[4]));
+        assert_eq!(s[1], Bytes::copy_from_slice(&[5]));
     }
 
     #[test]

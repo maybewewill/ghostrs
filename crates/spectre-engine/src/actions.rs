@@ -177,6 +177,7 @@ impl GameState {
             return;
         };
         if self.players.by_pid(pid).map(|p| p.rejoin) == Some(crate::players::RejoinStage::AwaitingLoaded) {
+            let start_seq = self.full_history.first_seq();
             let others: Vec<u8> = self
                 .players
                 .iter()
@@ -189,7 +190,7 @@ impl GameState {
             if let Some(p) = self.players.by_pid_mut(pid) {
                 p.loaded = true;
                 p.rejoin = crate::players::RejoinStage::None;
-                p.catchup_cursor = Some(0);
+                p.catchup_cursor = Some(start_seq);
             }
             self.broadcast(outgoing::game_loaded_others(pid));
             return;

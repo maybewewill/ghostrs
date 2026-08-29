@@ -60,7 +60,7 @@ pub struct Player {
     pub last_gproxy_wait_notice: Option<Instant>,
     pub gproxy_disconnect_notice_sent: bool,
     pub rejoin: RejoinStage,
-    pub catchup_cursor: Option<u32>,
+    pub catchup_cursor: Option<u64>,
     pub catching_up: bool,
 }
 

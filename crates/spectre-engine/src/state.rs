@@ -375,7 +375,8 @@ impl GameState {
     /// Подаёт FULL-переджойнеру накопленную историю курсором, уважая backpressure.
     /// Когда курсор достигает конца лога — переключает игрока на живой эфир.
     pub fn pump_rejoin_catchup(&mut self) {
-        let total = self.full_history.len();
+        let next_seq = self.full_history.next_seq();
+        let first_seq = self.full_history.first_seq();
         for p in self.players.iter_mut() {
             let Some(cursor) = p.catchup_cursor else {
                 continue;
@@ -384,8 +385,19 @@ impl GameState {
                 p.catchup_cursor = None;
                 continue;
             }
+            // Догоняющий отстал: нужный пакет уже вытеснен из лога — молча пропустить
+            // нельзя (это тот самый ложный десинк). Явно роняем с понятной причиной.
+            if cursor < first_seq {
+                tracing::warn!(
+                    game = %self.cfg.name, pid = p.pid, cursor, first_seq,
+                    "FULL rejoin catch-up fell behind history eviction, dropping rejoiner"
+                );
+                p.left = Some("catch-up fell behind history eviction".into());
+                p.catchup_cursor = None;
+                continue;
+            }
             let mut cur = cursor;
-            let pending = self.full_history.snapshot_from(cur);
+            let pending = self.full_history.snapshot_from_seq(cur);
             for pkt in pending {
                 match p.link.try_send(pkt) {
                     Ok(()) => {
@@ -405,7 +417,7 @@ impl GameState {
                 }
             }
             if p.catchup_cursor.is_some() {
-                if cur >= total {
+                if cur >= next_seq {
                     p.catchup_cursor = None;
                     p.catching_up = true;
                 } else {
@@ -660,7 +672,7 @@ mod full_history_recording_tests {
         let pkt = Bytes::from_static(&[0xF7, 0x0C, 0x06, 0x00, 0x64, 0x00]);
         st.broadcast(pkt.clone());
         assert_eq!(st.full_history.len(), 1);
-        assert_eq!(st.full_history.snapshot_from(0)[0], pkt);
+        assert_eq!(st.full_history.snapshot_from_seq(0)[0], pkt);
     }
 
     #[test]
