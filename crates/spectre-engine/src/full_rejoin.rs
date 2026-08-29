@@ -135,6 +135,14 @@ mod tests {
         (st, 1, key)
     }
 
+    /// W3GS keepalive payload: [unknown u8][checksum u32-le], per decode_keepalive.
+    fn keepalive_bytes(checksum: u32) -> Bytes {
+        let mut b = bytes::BytesMut::new();
+        bytes::BufMut::put_u8(&mut b, 0);
+        bytes::BufMut::put_u32_le(&mut b, checksum);
+        b.freeze()
+    }
+
     #[test]
     fn valid_full_rejoin_sends_join_handshake_and_sets_stage() {
         let (mut st, _pid, _key) = playing_with_disconnected("Slash");
@@ -587,39 +595,108 @@ mod tests {
         assert!(p.started_lagging.is_none());
     }
 
-    // I1: at the catch-up boundary the rejoiner's stale-turn checksum must not be
-    // queued, and ALL active queues re-baseline so live comparison resumes aligned.
+    // I1 (boundary timing): catch-up must complete ONLY at exact parity with the game
+    // turn counter. Completing early (while still behind) makes the rejoiner resume
+    // pushing checksums for older turns → positional misalignment → false desync-kick.
     #[test]
-    fn catch_up_completion_rebaselines_all_checksum_queues() {
+    fn catch_up_completes_only_at_true_parity_not_early() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_playing();
+        st.sync_counter = 10;
+        {
+            let p1 = st.players.by_pid_mut(1).unwrap();
+            p1.loaded = true;
+            p1.catching_up = true;
+            p1.sync_counter = 7; // → 8 after this keepalive; 8 < 10, still behind
+            p1.conn_id = 11;
+        }
+        st.handle_keepalive(11, &keepalive_bytes(0x1234));
+        assert!(
+            st.players.by_pid(1).unwrap().catching_up,
+            "must NOT declare caught-up while still behind the live turn"
+        );
+        // advance to exact parity: next keepalive brings sync_counter to 10 == game sc
+        st.players.by_pid_mut(1).unwrap().sync_counter = 9;
+        st.handle_keepalive(11, &keepalive_bytes(0x1234));
+        assert!(
+            !st.players.by_pid(1).unwrap().catching_up,
+            "at parity (player sync_counter == game sync_counter) catch-up completes"
+        );
+    }
+
+    // I1 (no stale push): while catching_up, replay-turn checksums must NOT be queued
+    // (independent of the boundary re-baseline — this fires with catching_up still set).
+    #[test]
+    fn catching_up_keepalive_does_not_queue_stale_checksums() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_playing();
+        st.sync_counter = 10;
+        {
+            let p1 = st.players.by_pid_mut(1).unwrap();
+            p1.loaded = true;
+            p1.catching_up = true;
+            p1.sync_counter = 3; // far behind → stays catching_up, no re-baseline
+            p1.conn_id = 11;
+        }
+        st.handle_keepalive(11, &keepalive_bytes(0xDEAD));
+        assert!(
+            st.players.by_pid(1).unwrap().catching_up,
+            "still catching up (not at parity)"
+        );
+        assert!(
+            st.players.by_pid(1).unwrap().checksums.is_empty(),
+            "replay-turn checksums must not be queued while catching up"
+        );
+    }
+
+    // I1 (re-baseline + stays aligned): at the parity boundary ALL active queues clear,
+    // and from the next (now-aligned) turn matching checksums are consumed with no kick.
+    #[test]
+    fn catch_up_completion_rebaselines_and_stays_aligned() {
         let (mut st, _rxs) = seated_game(2);
         st.begin_playing();
         st.sync_counter = 10;
         {
             let p2 = st.players.by_pid_mut(2).unwrap();
             p2.loaded = true;
-            p2.checksums.push_back(0x1111); // live player mid-stream
+            p2.sync_counter = 10;
+            p2.conn_id = 22;
+            p2.checksums.push_back(0x1111); // stray live residual, must be re-baselined away
         }
         {
             let p1 = st.players.by_pid_mut(1).unwrap();
             p1.loaded = true;
             p1.catching_up = true;
-            p1.sync_counter = 9; // 9 + 2 >= 10 → this keepalive completes catch-up
-            p1.conn_id = 77;
+            p1.sync_counter = 9; // → 10 == sc: parity, completes on this keepalive
+            p1.conn_id = 11;
         }
-        let mut ka = bytes::BytesMut::new();
-        bytes::BufMut::put_u8(&mut ka, 0);
-        bytes::BufMut::put_u32_le(&mut ka, 0xDEAD); // stale-turn checksum, must NOT be kept
-        st.handle_keepalive(77, &ka.freeze());
-
-        let p1 = st.players.by_pid(1).unwrap();
-        assert!(!p1.catching_up, "catch-up must complete on this keepalive");
+        st.handle_keepalive(11, &keepalive_bytes(0xAAAA)); // parity: completes + re-baseline
+        assert!(!st.players.by_pid(1).unwrap().catching_up);
         assert!(
-            p1.checksums.is_empty(),
-            "stale catch-up checksum must not be queued"
+            st.players.by_pid(1).unwrap().checksums.is_empty(),
+            "rejoiner's parity checksum is not queued"
         );
         assert!(
             st.players.by_pid(2).unwrap().checksums.is_empty(),
-            "all active queues re-baselined at the catch-up boundary"
+            "live residual re-baselined away at the boundary"
+        );
+
+        // both clients now at turn 10; their next acks are turn 11 with an identical
+        // in-sync checksum → matched and consumed, nobody kicked.
+        st.handle_keepalive(11, &keepalive_bytes(0xBEEF));
+        st.handle_keepalive(22, &keepalive_bytes(0xBEEF));
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_none(),
+            "in-sync rejoiner must not be desync-kicked after catch-up"
+        );
+        assert!(
+            st.players.by_pid(2).unwrap().left.is_none(),
+            "in-sync live player must not be kicked"
+        );
+        assert!(
+            st.players.by_pid(1).unwrap().checksums.is_empty()
+                && st.players.by_pid(2).unwrap().checksums.is_empty(),
+            "the matching turn-11 pair was consumed, no lingering false desync"
         );
     }
 
