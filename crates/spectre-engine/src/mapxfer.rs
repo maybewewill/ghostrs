@@ -32,6 +32,14 @@ impl GameState {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
             return;
         };
+        if self.players.by_pid(pid).map(|p| p.rejoin) == Some(crate::players::RejoinStage::AwaitingMapSize) {
+            self.send_to(pid, spectre_protocol::w3gs::outgoing::countdown_start());
+            self.send_to(pid, spectre_protocol::w3gs::outgoing::countdown_end());
+            if let Some(p) = self.players.by_pid_mut(pid) {
+                p.rejoin = crate::players::RejoinStage::AwaitingLoaded;
+            }
+            return;
+        }
         let report = match MapSizeReport::decode(payload) {
             Ok(r) => r,
             Err(e) => {

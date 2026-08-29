@@ -172,6 +172,24 @@ impl GameState {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
             return;
         };
+        if self.players.by_pid(pid).map(|p| p.rejoin) == Some(crate::players::RejoinStage::AwaitingLoaded) {
+            let others: Vec<u8> = self
+                .players
+                .iter()
+                .filter(|q| q.pid != pid && !q.virtual_host && q.left.is_none())
+                .map(|q| q.pid)
+                .collect();
+            for opid in others {
+                self.send_to(pid, outgoing::game_loaded_others(opid));
+            }
+            if let Some(p) = self.players.by_pid_mut(pid) {
+                p.loaded = true;
+                p.rejoin = crate::players::RejoinStage::None;
+                p.catchup_cursor = Some(0);
+            }
+            self.broadcast(outgoing::game_loaded_others(pid));
+            return;
+        }
         if let Some(p) = self.players.by_pid_mut(pid) {
             p.loaded = true;
             p.finished_loading_at = Some(std::time::Instant::now());

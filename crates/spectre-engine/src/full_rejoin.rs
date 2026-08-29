@@ -170,4 +170,44 @@ mod tests {
         let (tx2, _r2) = tokio::sync::mpsc::channel(64);
         assert!(!st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
     }
+
+    #[test]
+    fn map_size_during_awaiting_advances_to_countdown() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, mut rx2) = tokio::sync::mpsc::channel(256);
+        assert!(st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
+        let _ = drain_ids(&mut rx2); // drain the join handshake
+
+        // client reports it has the full map: MAPSIZE(size_flag=1, map_size >= size).
+        // (The rejoin branch returns before decode, so the exact bytes are irrelevant.)
+        let mut mp = bytes::BytesMut::new();
+        bytes::BufMut::put_slice(&mut mp, &[0, 0, 0, 0]);
+        bytes::BufMut::put_u8(&mut mp, 1);
+        bytes::BufMut::put_u32_le(&mut mp, st.cfg.map.size);
+        st.handle_map_size(99, &mp.freeze());
+
+        assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::AwaitingLoaded);
+        let ids_sent = drain_ids(&mut rx2);
+        assert!(ids_sent.contains(&ids::COUNTDOWN_START), "got {ids_sent:?}");
+        assert!(ids_sent.contains(&ids::COUNTDOWN_END));
+    }
+
+    #[test]
+    fn game_loaded_self_starts_catch_up() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, mut rx2) = tokio::sync::mpsc::channel(256);
+        st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2));
+        st.players.by_pid_mut(1).unwrap().rejoin = RejoinStage::AwaitingLoaded;
+        let _ = drain_ids(&mut rx2);
+
+        st.handle_loaded(99);
+
+        let p = st.players.by_pid(1).unwrap();
+        assert_eq!(p.rejoin, RejoinStage::None);
+        assert!(p.loaded, "rejoiner must be marked loaded");
+        assert_eq!(p.catchup_cursor, Some(0), "catch-up cursor must start at 0");
+        assert_eq!(st.phase, GamePhase::Playing);
+    }
 }
