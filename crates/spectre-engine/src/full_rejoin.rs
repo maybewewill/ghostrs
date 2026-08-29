@@ -20,7 +20,7 @@ impl GameState {
         &mut self,
         conn_id: u64,
         req: &ReqJoin,
-        _external_ip: [u8; 4],
+        external_ip: [u8; 4],
         link: PlayerLink,
     ) -> bool {
         if !matches!(self.phase, GamePhase::Playing | GamePhase::Loading) {
@@ -56,19 +56,23 @@ impl GameState {
         self.pending_full.remove(&conn_id);
 
         // Отправляем ТОЛЬКО новому link (не broadcast): его личный join-flow.
+        // Место уже переотдано и токен потрачён — путь не самолечится, поэтому
+        // ошибку сборки любого пакета логируем (не глотаем молча).
         let listen_port = req.listen_port;
-        let ext_ip = _external_ip;
         // a) SLOTINFOJOIN — оригинальный pid, текущий расклад слотов, тот же seed.
-        if let Ok(b) = outgoing::slot_info_join(
+        match outgoing::slot_info_join(
             pid,
             listen_port,
-            ext_ip,
+            external_ip,
             self.slots.as_wire(),
             self.random_seed,
             self.cfg.map.layout_style,
             self.cfg.map.num_players,
         ) {
-            self.send_to(pid, b);
+            Ok(b) => self.send_to(pid, b),
+            Err(e) => {
+                tracing::warn!(game = %self.cfg.name, pid, error = %e, "FULL rejoin: failed to build slotinfojoin")
+            }
         }
         // b) PLAYERINFO про всех ОСТАЛЬНЫХ живых игроков.
         let others: Vec<(u8, String, [u8; 4], [u8; 4])> = self
@@ -78,19 +82,25 @@ impl GameState {
             .map(|q| (q.pid, q.name.clone(), q.external_ip, q.internal_ip))
             .collect();
         for (opid, oname, oext, oint) in others {
-            if let Ok(b) = outgoing::player_info(opid, &oname, oext, oint) {
-                self.send_to(pid, b);
+            match outgoing::player_info(opid, &oname, oext, oint) {
+                Ok(b) => self.send_to(pid, b),
+                Err(e) => {
+                    tracing::warn!(game = %self.cfg.name, pid, opid, error = %e, "FULL rejoin: failed to build playerinfo")
+                }
             }
         }
         // c) MAPCHECK — клиент ответит MAPSIZE (карта у него есть).
-        if let Ok(b) = outgoing::map_check(
+        match outgoing::map_check(
             &self.cfg.map.path,
             self.cfg.map.size,
             self.cfg.map.info,
             self.cfg.map.crc,
             self.cfg.map.sha1,
         ) {
-            self.send_to(pid, b);
+            Ok(b) => self.send_to(pid, b),
+            Err(e) => {
+                tracing::warn!(game = %self.cfg.name, pid, error = %e, "FULL rejoin: failed to build mapcheck")
+            }
         }
 
         tracing::info!(game = %self.cfg.name, pid, name = %req.name, "FULL rejoin accepted, handshake started");
