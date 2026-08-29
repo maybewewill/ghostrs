@@ -210,4 +210,56 @@ mod tests {
         assert_eq!(p.catchup_cursor, Some(0), "catch-up cursor must start at 0");
         assert_eq!(st.phase, GamePhase::Playing);
     }
+
+    #[test]
+    fn rejoiner_load_broadcasts_to_others_and_does_not_restart_game() {
+        let (mut st, _rxs) = seated_game(2);
+        st.players.by_pid_mut(1).unwrap().name = "Slash".to_string();
+        st.players.by_pid_mut(1).unwrap().gproxy = true;
+        st.begin_playing();
+        let key = st.players.by_pid(1).unwrap().reconnect_key;
+        st.players.by_pid_mut(1).unwrap().disconnected_since = Some(std::time::Instant::now());
+        st.pending_full.insert(99, (1, key));
+
+        // observer channel for the live player (pid 2), so we can see broadcast delivery
+        let (tx_p2, mut rx_p2) = tokio::sync::mpsc::channel(256);
+        st.players.by_pid_mut(2).unwrap().link = PlayerLink::for_test(tx_p2);
+
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, mut rx2) = tokio::sync::mpsc::channel(256);
+        assert!(st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
+        st.players.by_pid_mut(1).unwrap().rejoin = RejoinStage::AwaitingLoaded;
+        let _ = drain_ids(&mut rx2);
+        let _ = drain_ids(&mut rx_p2);
+
+        // sentinel: begin_playing() unconditionally zeroes game_ticks (actions.rs:225-226);
+        // if the rejoin branch wrongly fell through to the all-loaded check it would re-fire.
+        st.game_ticks = 4242;
+
+        st.handle_loaded(99);
+
+        // rejoiner: GAME_LOADED_OTHERS(pid2) from the send_to loop + GAME_LOADED_OTHERS(pid1) from broadcast (which includes self) = 2
+        let to_rejoiner = drain_ids(&mut rx2);
+        let n_rej = to_rejoiner
+            .iter()
+            .filter(|&&x| x == ids::GAME_LOADED_OTHERS)
+            .count();
+        assert_eq!(
+            n_rej, 2,
+            "rejoiner gets others-loaded (send_to) + own (broadcast): {to_rejoiner:?}"
+        );
+        // observer: only GAME_LOADED_OTHERS(pid1) via broadcast = 1. If send_to were swapped to broadcast, this becomes 2.
+        let to_obs = drain_ids(&mut rx_p2);
+        let n_obs = to_obs
+            .iter()
+            .filter(|&&x| x == ids::GAME_LOADED_OTHERS)
+            .count();
+        assert_eq!(
+            n_obs, 1,
+            "observer gets only rejoiner-loaded via broadcast: {to_obs:?}"
+        );
+        // guard held: both players now loaded, but begin_playing must NOT have re-fired
+        assert_eq!(st.game_ticks, 4242, "rejoin load must not restart the game");
+        assert_eq!(st.phase, GamePhase::Playing);
+    }
 }
