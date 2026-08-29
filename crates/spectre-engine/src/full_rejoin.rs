@@ -135,7 +135,10 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(256);
         let handled = st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx));
         assert!(handled);
-        assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::AwaitingMapSize);
+        assert_eq!(
+            st.players.by_pid(1).unwrap().rejoin,
+            RejoinStage::AwaitingMapSize
+        );
         assert_eq!(st.players.by_pid(1).unwrap().conn_id, 99);
         assert!(st.players.by_pid(1).unwrap().disconnected_since.is_none());
         let ids_sent = drain_ids(&mut rx);
@@ -188,7 +191,10 @@ mod tests {
         bytes::BufMut::put_u32_le(&mut mp, st.cfg.map.size);
         st.handle_map_size(99, &mp.freeze());
 
-        assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::AwaitingLoaded);
+        assert_eq!(
+            st.players.by_pid(1).unwrap().rejoin,
+            RejoinStage::AwaitingLoaded
+        );
         let ids_sent = drain_ids(&mut rx2);
         assert!(ids_sent.contains(&ids::COUNTDOWN_START), "got {ids_sent:?}");
         assert!(ids_sent.contains(&ids::COUNTDOWN_END));
@@ -310,7 +316,10 @@ mod tests {
         st.players.by_pid_mut(1).unwrap().catchup_cursor = Some(0);
         let _ = drain_ids(&mut rx);
         st.broadcast(Bytes::from(vec![0xF7, 0x0C, 1]));
-        assert!(drain_ids(&mut rx).is_empty(), "no direct live send during cursor feed");
+        assert!(
+            drain_ids(&mut rx).is_empty(),
+            "no direct live send during cursor feed"
+        );
         assert_eq!(st.full_history.len(), 1);
     }
 
@@ -333,8 +342,14 @@ mod tests {
         st.check_desync();
         // Without `&& !p.catching_up` this is a 1v1 checksum tie → check_desync drops ALL
         // active players. With it, pid1 is excluded, pid2 is the lone active → nobody dropped.
-        assert!(st.players.by_pid(1).unwrap().left.is_none(), "catching-up player must not be dropped");
-        assert!(st.players.by_pid(2).unwrap().left.is_none(), "lone live player must not be dropped");
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_none(),
+            "catching-up player must not be dropped"
+        );
+        assert!(
+            st.players.by_pid(2).unwrap().left.is_none(),
+            "lone live player must not be dropped"
+        );
     }
 
     #[test]
@@ -386,7 +401,11 @@ mod tests {
 
         // No gaps / no reorder: every received marker is exactly prev + 1.
         for w in received.windows(2) {
-            assert_eq!(w[1], w[0] + 1, "gap or reorder in catch-up feed: {received:?}");
+            assert_eq!(
+                w[1],
+                w[0] + 1,
+                "gap or reorder in catch-up feed: {received:?}"
+            );
         }
         // Feed kept pace with eviction (cap 6, lockstep), so nobody was dropped and the
         // player switched to live.
@@ -400,5 +419,79 @@ mod tests {
         // sanity: received the full ordered run 0..=19
         assert_eq!(received.first().copied(), Some(0));
         assert_eq!(received.last().copied(), Some(19));
+    }
+
+    #[test]
+    fn random_seed_is_identical_after_full_rejoin() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let seed_before = st.random_seed;
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, _r2) = tokio::sync::mpsc::channel(256);
+        st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2));
+        assert_eq!(
+            st.random_seed, seed_before,
+            "seed must never change on rejoin"
+        );
+    }
+
+    #[tokio::test]
+    async fn end_to_end_full_rejoin_via_actor_frames() {
+        use spectre_net::AnyFrame;
+        use spectre_protocol::frame::Frame;
+
+        let (mut st, _rxs) = seated_game(2);
+        st.players.by_pid_mut(1).unwrap().name = "Slash".into();
+        st.players.by_pid_mut(1).unwrap().gproxy = true;
+        st.begin_playing();
+        // накопим немного истории (каждый тик Playing шлёт INCOMING_ACTION в full_history)
+        for _ in 0..3 {
+            st.on_tick(0);
+        }
+        let key = st.players.by_pid(1).unwrap().reconnect_key;
+        // P1 «умер»: место удержано
+        st.players.by_pid_mut(1).unwrap().disconnected_since = Some(std::time::Instant::now());
+
+        // новый процесс: NewConn(конн 99) + GPS FULL + REQJOIN на игровом порту
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4096);
+        st.add_conn(99, PlayerLink::for_test(tx), [5, 6, 7, 8]);
+        st.on_frame(
+            99,
+            AnyFrame::Gps(Frame::new(
+                spectre_protocol::gps::ids::FULL,
+                spectre_protocol::gps::full(1, key).slice(4..),
+            )),
+        );
+        st.on_frame(
+            99,
+            AnyFrame::W3gs(Frame::new(ids::REQ_JOIN, reqjoin_bytes("Slash"))),
+        );
+
+        // клиент рапортует карту → сервер шлёт countdown
+        let mut mp = bytes::BytesMut::new();
+        bytes::BufMut::put_slice(&mut mp, &[0, 0, 0, 0]);
+        bytes::BufMut::put_u8(&mut mp, 1);
+        bytes::BufMut::put_u32_le(&mut mp, st.cfg.map.size);
+        st.on_frame(99, AnyFrame::W3gs(Frame::new(ids::MAP_SIZE, mp.freeze())));
+
+        // клиент догрузился → сервер запускает catch-up
+        st.on_frame(
+            99,
+            AnyFrame::W3gs(Frame::new(ids::GAME_LOADED_SELF, Bytes::new())),
+        );
+        // помпа отдаёт историю
+        st.pump_rejoin_catchup();
+
+        let got = drain_ids(&mut rx);
+        assert!(got.contains(&ids::SLOT_INFO_JOIN));
+        assert!(got.contains(&ids::MAP_CHECK));
+        assert!(got.contains(&ids::COUNTDOWN_START));
+        assert!(got.contains(&ids::COUNTDOWN_END));
+        assert!(got.contains(&ids::GAME_LOADED_OTHERS));
+        assert!(
+            got.contains(&ids::INCOMING_ACTION),
+            "history timeslots must be fed, got {got:?}"
+        );
+        assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::None);
+        assert!(st.players.by_pid(1).unwrap().loaded);
     }
 }
