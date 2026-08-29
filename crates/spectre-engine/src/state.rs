@@ -342,6 +342,9 @@ impl GameState {
             if let Some(buf) = p.gproxy_buffer.as_mut() {
                 buf.push(bytes.clone());
             }
+            if p.catchup_cursor.is_some() {
+                continue;
+            }
             if p.disconnected_since.is_some() {
                 continue;
             }
@@ -364,6 +367,49 @@ impl GameState {
                     } else {
                         p.left = Some("connection closed".into());
                     }
+                }
+            }
+        }
+    }
+
+    /// Подаёт FULL-переджойнеру накопленную историю курсором, уважая backpressure.
+    /// Когда курсор достигает конца лога — переключает игрока на живой эфир.
+    pub fn pump_rejoin_catchup(&mut self) {
+        let total = self.full_history.len();
+        for p in self.players.iter_mut() {
+            let Some(cursor) = p.catchup_cursor else {
+                continue;
+            };
+            if p.left.is_some() {
+                p.catchup_cursor = None;
+                continue;
+            }
+            let mut cur = cursor;
+            let pending = self.full_history.snapshot_from(cur);
+            for pkt in pending {
+                match p.link.try_send(pkt) {
+                    Ok(()) => {
+                        cur += 1;
+                        p.consecutive_send_failures = 0;
+                    }
+                    Err(spectre_net::LinkError::Backpressure) => break,
+                    Err(spectre_net::LinkError::Closed) => {
+                        if p.gproxy && p.disconnected_since.is_none() {
+                            p.disconnected_since = Some(std::time::Instant::now());
+                        } else {
+                            p.left = Some("connection closed during catch-up".into());
+                        }
+                        p.catchup_cursor = None;
+                        break;
+                    }
+                }
+            }
+            if p.catchup_cursor.is_some() {
+                if cur >= total {
+                    p.catchup_cursor = None;
+                    p.catching_up = true;
+                } else {
+                    p.catchup_cursor = Some(cur);
                 }
             }
         }

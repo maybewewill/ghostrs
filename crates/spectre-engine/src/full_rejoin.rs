@@ -113,6 +113,7 @@ mod tests {
     use super::*;
     use crate::actor::tests_support::{drain_ids, reqjoin_bytes, seated_game};
     use crate::players::RejoinStage;
+    use bytes::Bytes;
     use spectre_protocol::w3gs::{ids, incoming::ReqJoin};
 
     /// Ставит игру в Playing, роняет игрока pid в held-состояние, кэширует валидный токен.
@@ -237,8 +238,13 @@ mod tests {
         st.game_ticks = 4242;
 
         st.handle_loaded(99);
+        // A8: handle_loaded's rejoin branch sets catchup_cursor=Some(0) BEFORE broadcasting
+        // the "self loaded" packet, so per the cursor invariant that broadcast is deferred
+        // (recorded into full_history, not sent live) rather than delivered synchronously.
+        // Production feeds it on the very next on_tick() Playing-arm pump; simulate that here.
+        st.pump_rejoin_catchup();
 
-        // rejoiner: GAME_LOADED_OTHERS(pid2) from the send_to loop + GAME_LOADED_OTHERS(pid1) from broadcast (which includes self) = 2
+        // rejoiner: GAME_LOADED_OTHERS(pid2) from the send_to loop + GAME_LOADED_OTHERS(pid1) from the deferred cursor feed = 2
         let to_rejoiner = drain_ids(&mut rx2);
         let n_rej = to_rejoiner
             .iter()
@@ -261,5 +267,73 @@ mod tests {
         // guard held: both players now loaded, but begin_playing must NOT have re-fired
         assert_eq!(st.game_ticks, 4242, "rejoin load must not restart the game");
         assert_eq!(st.phase, GamePhase::Playing);
+    }
+
+    #[test]
+    fn pump_feeds_history_in_order_then_switches_to_live() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+        st.players.by_pid_mut(1).unwrap().link = PlayerLink::for_test(tx);
+        // fill history with 5 marker packets (pid1 is disconnected → recorded, not live-sent)
+        for i in 0..5u8 {
+            st.broadcast(Bytes::from(vec![0xF7, 0x0C, i]));
+        }
+        assert_eq!(st.full_history.len(), 5);
+        // caught-up rejoiner: re-attached (disconnected cleared), cursor at 0
+        st.players.by_pid_mut(1).unwrap().conn_id = 99;
+        st.players.by_pid_mut(1).unwrap().disconnected_since = None;
+        st.players.by_pid_mut(1).unwrap().loaded = true;
+        st.players.by_pid_mut(1).unwrap().catchup_cursor = Some(0);
+        let _ = drain_ids(&mut rx);
+
+        st.pump_rejoin_catchup();
+
+        let got = drain_ids(&mut rx);
+        assert_eq!(got.len(), 5, "all history must be fed");
+        assert_eq!(st.players.by_pid(1).unwrap().catchup_cursor, None);
+        assert!(st.players.by_pid(1).unwrap().catching_up);
+
+        // live broadcast now goes directly (cursor cleared, not disconnected)
+        st.broadcast(Bytes::from(vec![0xF7, 0x0C, 0x63]));
+        let live = drain_ids(&mut rx);
+        assert_eq!(live.len(), 1, "live packet delivered after catch-up");
+    }
+
+    #[test]
+    fn broadcast_skips_live_send_while_catching_up_via_cursor() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+        st.players.by_pid_mut(1).unwrap().link = PlayerLink::for_test(tx);
+        st.players.by_pid_mut(1).unwrap().conn_id = 99;
+        // re-attached (not disconnected) so the ONLY reason for the skip is the cursor
+        st.players.by_pid_mut(1).unwrap().disconnected_since = None;
+        st.players.by_pid_mut(1).unwrap().catchup_cursor = Some(0);
+        let _ = drain_ids(&mut rx);
+        st.broadcast(Bytes::from(vec![0xF7, 0x0C, 1]));
+        assert!(drain_ids(&mut rx).is_empty(), "no direct live send during cursor feed");
+        assert_eq!(st.full_history.len(), 1);
+    }
+
+    #[test]
+    fn catching_up_player_excluded_from_desync_drop() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_playing(); // Playing; both players loaded; checksums cleared
+        {
+            let p1 = st.players.by_pid_mut(1).unwrap();
+            p1.loaded = true;
+            p1.catching_up = true;
+            p1.checksums.push_back(0xDEAD); // divergent from pid2
+        }
+        {
+            let p2 = st.players.by_pid_mut(2).unwrap();
+            p2.loaded = true;
+            p2.catching_up = false;
+            p2.checksums.push_back(0xBEEF);
+        }
+        st.check_desync();
+        // Without `&& !p.catching_up` this is a 1v1 checksum tie → check_desync drops ALL
+        // active players. With it, pid1 is excluded, pid2 is the lone active → nobody dropped.
+        assert!(st.players.by_pid(1).unwrap().left.is_none(), "catching-up player must not be dropped");
+        assert!(st.players.by_pid(2).unwrap().left.is_none(), "lone live player must not be dropped");
     }
 }

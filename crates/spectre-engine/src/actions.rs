@@ -49,8 +49,12 @@ impl GameState {
             Ok(cs) => cs,
             Err(_) => return,
         };
+        let sc = self.sync_counter;
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.sync_counter = p.sync_counter.saturating_add(1);
+            if p.catching_up && p.sync_counter + 2 >= sc {
+                p.catching_up = false;
+            }
             if p.checksums.len() >= 512 {
                 p.checksums.pop_front();
             }
@@ -65,7 +69,7 @@ impl GameState {
             let mut all_have_checksum = true;
 
             for p in self.players.iter() {
-                if p.left.is_none() && !p.virtual_host && p.loaded {
+                if p.left.is_none() && !p.virtual_host && p.loaded && !p.catching_up {
                     if p.checksums.is_empty() {
                         all_have_checksum = false;
                         break;
@@ -497,6 +501,7 @@ impl GameState {
                 }
             }
             GamePhase::Playing => {
+                self.pump_rejoin_catchup();
                 if let Some(fpid) = self.fake_player_pid
                     && let Some(p) = self.players.by_pid_mut(fpid)
                 {
