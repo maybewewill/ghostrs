@@ -176,7 +176,9 @@ impl GameState {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
             return;
         };
-        if self.players.by_pid(pid).map(|p| p.rejoin) == Some(crate::players::RejoinStage::AwaitingLoaded) {
+        if self.players.by_pid(pid).map(|p| p.rejoin)
+            == Some(crate::players::RejoinStage::AwaitingLoaded)
+        {
             let start_seq = self.full_history.first_seq();
             let others: Vec<u8> = self
                 .players
