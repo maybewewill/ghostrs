@@ -52,6 +52,13 @@ impl GameState {
             p.consecutive_send_failures = 0;
             p.loaded = false;
             p.rejoin = RejoinStage::AwaitingMapSize;
+            // I1: клиент рестартнул начисто — старый sync_counter/чек-суммы/лаг
+            // от прошлой сессии недействительны. Сбрасываем, иначе первый же
+            // check_desync/check_lag сравнит несопоставимое.
+            p.sync_counter = 0;
+            p.checksums.clear();
+            p.lagging = false;
+            p.started_lagging = None;
         }
         self.pending_full.remove(&conn_id);
 
@@ -215,6 +222,10 @@ mod tests {
         assert_eq!(p.rejoin, RejoinStage::None);
         assert!(p.loaded, "rejoiner must be marked loaded");
         assert_eq!(p.catchup_cursor, Some(0), "catch-up cursor must start at 0");
+        assert!(
+            p.catching_up,
+            "I1: catch-up start must flag catching_up so the feed window is excluded from desync"
+        );
         assert_eq!(st.phase, GamePhase::Playing);
     }
 
@@ -493,5 +504,161 @@ mod tests {
         );
         assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::None);
         assert!(st.players.by_pid(1).unwrap().loaded);
+    }
+
+    // C1: during the rejoin handshake window (re-attached, cursor not yet armed,
+    // rejoin != None) broadcasts must be recorded but NOT live-sent — the rejoiner
+    // receives them exactly once via catch-up. A live send here = duplicate timeslot.
+    #[test]
+    fn broadcast_skips_live_send_during_rejoin_handshake() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+        {
+            let p = st.players.by_pid_mut(1).unwrap();
+            p.link = PlayerLink::for_test(tx);
+            p.conn_id = 99;
+            p.disconnected_since = None; // re-attached
+            p.catchup_cursor = None; // cursor not yet armed
+            p.rejoin = RejoinStage::AwaitingLoaded; // mid handshake, pre-GAMELOADED
+        }
+        let _ = drain_ids(&mut rx);
+        st.broadcast(Bytes::from(vec![0xF7, 0x0C, 1]));
+        assert!(
+            drain_ids(&mut rx).is_empty(),
+            "handshake-window packets must not be live-sent (they arrive once via catch-up)"
+        );
+        assert_eq!(
+            st.full_history.len(),
+            1,
+            "but they must be recorded into history"
+        );
+    }
+
+    // I2: if the log head was already evicted (first_seq>0) a fresh client cannot
+    // replay from turn 0. Feeding a partial tail is a silent desync — reject cleanly.
+    #[test]
+    fn full_rejoin_after_history_eviction_is_rejected() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        st.full_history = crate::full_history::FullHistory::new_with_cap(4);
+        // overflow the cap so the head is evicted (first_seq advances past 0)
+        for i in 0..8u8 {
+            st.broadcast(Bytes::from(vec![0xF7, 0x0C, i]));
+        }
+        assert!(st.full_history.first_seq() > 0, "head must be evicted");
+        st.players.by_pid_mut(1).unwrap().conn_id = 99;
+        st.players.by_pid_mut(1).unwrap().disconnected_since = None;
+        st.players.by_pid_mut(1).unwrap().rejoin = RejoinStage::AwaitingLoaded;
+
+        st.handle_loaded(99);
+
+        let p = st.players.by_pid(1).unwrap();
+        assert_eq!(p.rejoin, RejoinStage::None);
+        assert!(
+            p.catchup_cursor.is_none(),
+            "must not arm a cursor it cannot honor"
+        );
+        assert!(
+            p.left.is_some(),
+            "rejoiner must be dropped, not silently desynced"
+        );
+    }
+
+    // I1: a re-attached client restarted clean — the pre-crash sync_counter/checksums/
+    // lag flags are meaningless and must be reset, or the first desync/lag check
+    // compares incomparable state.
+    #[test]
+    fn full_rejoin_resets_stale_sync_state() {
+        let (mut st, _pid, key) = playing_with_disconnected("Slash");
+        {
+            let p = st.players.by_pid_mut(1).unwrap();
+            p.sync_counter = 999;
+            p.checksums.push_back(0xDEAD);
+            p.lagging = true;
+            p.started_lagging = Some(std::time::Instant::now());
+        }
+        st.pending_full.insert(99, (1, key));
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, _r2) = tokio::sync::mpsc::channel(256);
+        assert!(st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
+        let p = st.players.by_pid(1).unwrap();
+        assert_eq!(p.sync_counter, 0, "stale sync_counter must reset");
+        assert!(p.checksums.is_empty(), "stale checksums must clear");
+        assert!(!p.lagging);
+        assert!(p.started_lagging.is_none());
+    }
+
+    // I1: at the catch-up boundary the rejoiner's stale-turn checksum must not be
+    // queued, and ALL active queues re-baseline so live comparison resumes aligned.
+    #[test]
+    fn catch_up_completion_rebaselines_all_checksum_queues() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_playing();
+        st.sync_counter = 10;
+        {
+            let p2 = st.players.by_pid_mut(2).unwrap();
+            p2.loaded = true;
+            p2.checksums.push_back(0x1111); // live player mid-stream
+        }
+        {
+            let p1 = st.players.by_pid_mut(1).unwrap();
+            p1.loaded = true;
+            p1.catching_up = true;
+            p1.sync_counter = 9; // 9 + 2 >= 10 → this keepalive completes catch-up
+            p1.conn_id = 77;
+        }
+        let mut ka = bytes::BytesMut::new();
+        bytes::BufMut::put_u8(&mut ka, 0);
+        bytes::BufMut::put_u32_le(&mut ka, 0xDEAD); // stale-turn checksum, must NOT be kept
+        st.handle_keepalive(77, &ka.freeze());
+
+        let p1 = st.players.by_pid(1).unwrap();
+        assert!(!p1.catching_up, "catch-up must complete on this keepalive");
+        assert!(
+            p1.checksums.is_empty(),
+            "stale catch-up checksum must not be queued"
+        );
+        assert!(
+            st.players.by_pid(2).unwrap().checksums.is_empty(),
+            "all active queues re-baselined at the catch-up boundary"
+        );
+    }
+
+    // C2: a held (disconnected, awaiting FULL rejoin) seat looks lag-timed-out but must
+    // be waited on, never lag-dropped — dropping it forfeits the rejoin entirely.
+    #[test]
+    fn held_disconnected_seat_is_not_lag_dropped() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        {
+            let p = st.players.by_pid_mut(1).unwrap();
+            p.lagging = true;
+            p.started_lagging =
+                Some(std::time::Instant::now() - std::time::Duration::from_secs(120));
+            // disconnected_since already Some(..) from the fixture
+        }
+        st.drop_lagging_players(std::time::Duration::from_secs(60));
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_none(),
+            "a held (disconnected) seat must not be lag-dropped — it awaits FULL rejoin"
+        );
+    }
+
+    // C2: a rejoiner mid-replay (catching_up) is behind by construction and must not be
+    // lag-dropped for it.
+    #[test]
+    fn catching_up_player_is_not_lag_dropped() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        {
+            let p = st.players.by_pid_mut(1).unwrap();
+            p.disconnected_since = None; // re-attached, now replaying history
+            p.catching_up = true;
+            p.lagging = true;
+            p.started_lagging =
+                Some(std::time::Instant::now() - std::time::Duration::from_secs(120));
+        }
+        st.drop_lagging_players(std::time::Duration::from_secs(60));
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_none(),
+            "a catching-up rejoiner must not be lag-dropped mid-replay"
+        );
     }
 }

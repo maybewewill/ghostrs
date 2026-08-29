@@ -342,6 +342,13 @@ impl GameState {
             if let Some(buf) = p.gproxy_buffer.as_mut() {
                 buf.push(bytes.clone());
             }
+            // Во время rejoin-handshake (переджойнер переподключён, но ещё не
+            // прошёл GAMELOADED_SELF) НЕ шлём live: эти пакеты уже записаны в
+            // full_history и придут ему ровно один раз через catch-up. Иначе —
+            // дубль хода-таймслота и десинк переджойнера (C1).
+            if p.rejoin != crate::players::RejoinStage::None {
+                continue;
+            }
             if p.catchup_cursor.is_some() {
                 continue;
             }

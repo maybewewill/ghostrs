@@ -50,15 +50,31 @@ impl GameState {
             Err(_) => return,
         };
         let sc = self.sync_counter;
+        let mut caught_up_now = false;
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.sync_counter = p.sync_counter.saturating_add(1);
-            if p.catching_up && p.sync_counter + 2 >= sc {
-                p.catching_up = false;
+            if p.catching_up {
+                // Пока догоняет — чек-суммы старых ходов НЕ копим (они позиционно
+                // разъедутся с живыми). Только считаем sync_counter до догона.
+                if p.sync_counter + 2 >= sc {
+                    p.catching_up = false;
+                    caught_up_now = true;
+                }
+            } else {
+                if p.checksums.len() >= 512 {
+                    p.checksums.pop_front();
+                }
+                p.checksums.push_back(checksum);
             }
-            if p.checksums.len() >= 512 {
-                p.checksums.pop_front();
+        }
+        // I1 re-baseline: в момент догона обнуляем очереди всех активных игроков,
+        // чтобы с этого хода все сверялись синхронно (как в begin_playing).
+        if caught_up_now {
+            for p in self.players.iter_mut() {
+                if !p.virtual_host && p.left.is_none() {
+                    p.checksums.clear();
+                }
             }
-            p.checksums.push_back(checksum);
         }
         self.check_desync();
     }
@@ -180,6 +196,21 @@ impl GameState {
             == Some(crate::players::RejoinStage::AwaitingLoaded)
         {
             let start_seq = self.full_history.first_seq();
+            // I2: если голова истории уже вытеснена (first_seq>0), свежий клиент
+            // НЕ сможет проиграть с хода 0 — частичная подача = тихий десинк.
+            // Чисто роняем переджойнера вместо порчи партии.
+            if start_seq > 0 {
+                tracing::warn!(
+                    game = %self.cfg.name, pid, first_seq = start_seq,
+                    "FULL rejoin arrived after history eviction; cannot replay from turn 0, dropping"
+                );
+                if let Some(p) = self.players.by_pid_mut(pid) {
+                    p.rejoin = crate::players::RejoinStage::None;
+                    p.left = Some("cannot rejoin: game history too long to replay".into());
+                    p.left_code = spectre_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT;
+                }
+                return;
+            }
             let others: Vec<u8> = self
                 .players
                 .iter()
@@ -193,6 +224,10 @@ impl GameState {
                 p.loaded = true;
                 p.rejoin = crate::players::RejoinStage::None;
                 p.catchup_cursor = Some(start_seq);
+                // I1: с началом catch-up исключаем переджойнера из десинк-сверки
+                // на всё окно подачи (его чек-суммы позиционно не выровнены с
+                // живыми, пока он проигрывает лог). Снимется в handle_keepalive.
+                p.catching_up = true;
             }
             self.broadcast(outgoing::game_loaded_others(pid));
             return;
