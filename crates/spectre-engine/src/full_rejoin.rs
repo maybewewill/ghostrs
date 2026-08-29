@@ -1,1 +1,163 @@
-//! FULL rejoin — заполняется в Task A6
+//! FULL rejoin — переподключение игрока, полностью потерявшего клиент.
+//!
+//! Отличие от `handle_gps_reconnect` (gproxy.rs): тот — живой war3 с целым
+//! `GProxyBuffer` (докидывает хвост). FULL — холодный рестарт war3: истории у
+//! клиента нет, per-player буфер давно вытеснен, нужна ВСЯ история из
+//! `FullHistory`. Клиент проходит обычный join-in-progress handshake, а сервер
+//! реагирует на его штатные пакеты (REQJOIN → MAPSIZE → GAMELOADED_SELF).
+
+use spectre_net::PlayerLink;
+use spectre_protocol::w3gs::incoming::ReqJoin;
+use spectre_protocol::w3gs::outgoing;
+
+use crate::players::RejoinStage;
+use crate::state::{GamePhase, GameState};
+
+impl GameState {
+    /// Пытается обработать REQJOIN как FULL-rejoin. Предусловие вызова: phase != Lobby.
+    /// Возвращает true, если переджойн валиден и обработан.
+    pub fn try_full_rejoin(
+        &mut self,
+        conn_id: u64,
+        req: &ReqJoin,
+        _external_ip: [u8; 4],
+        link: PlayerLink,
+    ) -> bool {
+        if !matches!(self.phase, GamePhase::Playing | GamePhase::Loading) {
+            return false;
+        }
+        // Токен: pid+key из кэша GPS FULL по этому conn.
+        let Some(&(token_pid, token_key)) = self.pending_full.get(&conn_id) else {
+            return false;
+        };
+        // Место должно быть удержано (gproxy-grace, ещё не reaped).
+        let Some(p) = self.players.by_pid(token_pid) else {
+            return false;
+        };
+        let held = p.disconnected_since.is_some() && p.left.is_none();
+        let name_ok = p.name.eq_ignore_ascii_case(&req.name);
+        let key_ok = p.reconnect_key == token_key;
+        if !held || !name_ok || !key_ok {
+            return false;
+        }
+
+        // Re-attach: как handle_gps_reconnect, но без replay per-player буфера.
+        let pid = token_pid;
+        {
+            let p = self.players.by_pid_mut(pid).unwrap();
+            p.conn_id = conn_id;
+            p.link = link;
+            p.disconnected_since = None;
+            p.left = None;
+            p.consecutive_send_failures = 0;
+            p.loaded = false;
+            p.rejoin = RejoinStage::AwaitingMapSize;
+        }
+        self.pending_full.remove(&conn_id);
+
+        // Отправляем ТОЛЬКО новому link (не broadcast): его личный join-flow.
+        let listen_port = req.listen_port;
+        let ext_ip = _external_ip;
+        // a) SLOTINFOJOIN — оригинальный pid, текущий расклад слотов, тот же seed.
+        if let Ok(b) = outgoing::slot_info_join(
+            pid,
+            listen_port,
+            ext_ip,
+            self.slots.as_wire(),
+            self.random_seed,
+            self.cfg.map.layout_style,
+            self.cfg.map.num_players,
+        ) {
+            self.send_to(pid, b);
+        }
+        // b) PLAYERINFO про всех ОСТАЛЬНЫХ живых игроков.
+        let others: Vec<(u8, String, [u8; 4], [u8; 4])> = self
+            .players
+            .iter()
+            .filter(|q| q.pid != pid && !q.virtual_host && q.left.is_none())
+            .map(|q| (q.pid, q.name.clone(), q.external_ip, q.internal_ip))
+            .collect();
+        for (opid, oname, oext, oint) in others {
+            if let Ok(b) = outgoing::player_info(opid, &oname, oext, oint) {
+                self.send_to(pid, b);
+            }
+        }
+        // c) MAPCHECK — клиент ответит MAPSIZE (карта у него есть).
+        if let Ok(b) = outgoing::map_check(
+            &self.cfg.map.path,
+            self.cfg.map.size,
+            self.cfg.map.info,
+            self.cfg.map.crc,
+            self.cfg.map.sha1,
+        ) {
+            self.send_to(pid, b);
+        }
+
+        tracing::info!(game = %self.cfg.name, pid, name = %req.name, "FULL rejoin accepted, handshake started");
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actor::tests_support::{drain_ids, reqjoin_bytes, seated_game};
+    use crate::players::RejoinStage;
+    use spectre_protocol::w3gs::{ids, incoming::ReqJoin};
+
+    /// Ставит игру в Playing, роняет игрока pid в held-состояние, кэширует валидный токен.
+    fn playing_with_disconnected(name: &str) -> (GameState, u8, u32) {
+        let (mut st, _rxs) = seated_game(1);
+        st.players.by_pid_mut(1).unwrap().name = name.to_string();
+        st.players.by_pid_mut(1).unwrap().gproxy = true;
+        st.begin_playing();
+        let key = st.players.by_pid(1).unwrap().reconnect_key;
+        st.players.by_pid_mut(1).unwrap().disconnected_since = Some(std::time::Instant::now());
+        st.pending_full.insert(99, (1, key));
+        (st, 1, key)
+    }
+
+    #[test]
+    fn valid_full_rejoin_sends_join_handshake_and_sets_stage() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+        let handled = st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx));
+        assert!(handled);
+        assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::AwaitingMapSize);
+        assert_eq!(st.players.by_pid(1).unwrap().conn_id, 99);
+        assert!(st.players.by_pid(1).unwrap().disconnected_since.is_none());
+        let ids_sent = drain_ids(&mut rx);
+        assert!(ids_sent.contains(&ids::SLOT_INFO_JOIN), "got {ids_sent:?}");
+        assert!(ids_sent.contains(&ids::MAP_CHECK));
+    }
+
+    #[test]
+    fn wrong_key_is_not_full_rejoin() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        st.pending_full.insert(99, (1, 0xBAD));
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, _r2) = tokio::sync::mpsc::channel(64);
+        assert!(!st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
+        assert_eq!(st.players.by_pid(1).unwrap().rejoin, RejoinStage::None);
+    }
+
+    #[test]
+    fn no_token_is_not_full_rejoin() {
+        let (mut st, _pid, _key) = playing_with_disconnected("Slash");
+        st.pending_full.remove(&99);
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, _r2) = tokio::sync::mpsc::channel(64);
+        assert!(!st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
+    }
+
+    #[test]
+    fn a_live_seat_is_not_rejoinable() {
+        let (mut st, _pid, key) = playing_with_disconnected("Slash");
+        st.players.by_pid_mut(1).unwrap().disconnected_since = None;
+        st.pending_full.insert(99, (1, key));
+        let req = ReqJoin::decode(&reqjoin_bytes("Slash")).unwrap();
+        let (tx2, _r2) = tokio::sync::mpsc::channel(64);
+        assert!(!st.try_full_rejoin(99, &req, [5, 6, 7, 8], PlayerLink::for_test(tx2)));
+    }
+}

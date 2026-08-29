@@ -29,6 +29,9 @@ impl GameState {
         };
 
         if !matches!(self.phase, GamePhase::Lobby) {
+            if self.try_full_rejoin(conn_id, &req, external_ip, link.clone()) {
+                return;
+            }
             let _ = link.try_send(outgoing::reject_join(REJECT_STARTED));
             return;
         }
