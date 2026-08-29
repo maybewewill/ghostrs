@@ -119,7 +119,7 @@ impl GameState {
 mod tests {
     use super::*;
     use crate::actor::tests_support::{drain_ids, reqjoin_bytes, seated_game};
-    use crate::players::RejoinStage;
+    use crate::players::{ChecksumEntry, RejoinStage};
     use bytes::Bytes;
     use spectre_protocol::w3gs::{ids, incoming::ReqJoin};
 
@@ -350,13 +350,19 @@ mod tests {
             let p1 = st.players.by_pid_mut(1).unwrap();
             p1.loaded = true;
             p1.catching_up = true;
-            p1.checksums.push_back(0xDEAD); // divergent from pid2
+            p1.checksums.push_back(ChecksumEntry {
+                turn: 1,
+                checksum: 0xDEAD,
+            }); // divergent from pid2
         }
         {
             let p2 = st.players.by_pid_mut(2).unwrap();
             p2.loaded = true;
             p2.catching_up = false;
-            p2.checksums.push_back(0xBEEF);
+            p2.checksums.push_back(ChecksumEntry {
+                turn: 1,
+                checksum: 0xBEEF,
+            });
         }
         st.check_desync();
         // Without `&& !p.catching_up` this is a 1v1 checksum tie → check_desync drops ALL
@@ -580,7 +586,10 @@ mod tests {
         {
             let p = st.players.by_pid_mut(1).unwrap();
             p.sync_counter = 999;
-            p.checksums.push_back(0xDEAD);
+            p.checksums.push_back(ChecksumEntry {
+                turn: 999,
+                checksum: 0xDEAD,
+            });
             p.lagging = true;
             p.started_lagging = Some(std::time::Instant::now());
         }
@@ -649,19 +658,19 @@ mod tests {
         );
     }
 
-    // I1 (re-baseline + stays aligned): at the parity boundary ALL active queues clear,
-    // and from the next (now-aligned) turn matching checksums are consumed with no kick.
+    // I1 (turn-indexed alignment): when catch-up completes at parity, live players may trail
+    // due to in-flight latency (e.g. p2 at sync_counter=9 vs game sc=10). Turn-indexed desync
+    // checks safely consume p2's turn 10 without false desync, and accurately match turn 11.
     #[test]
-    fn catch_up_completion_rebaselines_and_stays_aligned() {
+    fn catch_up_completion_maintains_turn_alignment_with_lagging_live_peer() {
         let (mut st, _rxs) = seated_game(2);
         st.begin_playing();
         st.sync_counter = 10;
         {
             let p2 = st.players.by_pid_mut(2).unwrap();
             p2.loaded = true;
-            p2.sync_counter = 10;
+            p2.sync_counter = 9; // trailing live peer: acked turn 9, turn 10 in flight
             p2.conn_id = 22;
-            p2.checksums.push_back(0x1111); // stray live residual, must be re-baselined away
         }
         {
             let p1 = st.players.by_pid_mut(1).unwrap();
@@ -670,21 +679,24 @@ mod tests {
             p1.sync_counter = 9; // → 10 == sc: parity, completes on this keepalive
             p1.conn_id = 11;
         }
-        st.handle_keepalive(11, &keepalive_bytes(0xAAAA)); // parity: completes + re-baseline
+        st.handle_keepalive(11, &keepalive_bytes(0xAAAA)); // parity reached: catching_up cleared
         assert!(!st.players.by_pid(1).unwrap().catching_up);
         assert!(
             st.players.by_pid(1).unwrap().checksums.is_empty(),
-            "rejoiner's parity checksum is not queued"
-        );
-        assert!(
-            st.players.by_pid(2).unwrap().checksums.is_empty(),
-            "live residual re-baselined away at the boundary"
+            "rejoiner's catch-up completion keepalive is not queued"
         );
 
-        // both clients now at turn 10; their next acks are turn 11 with an identical
-        // in-sync checksum → matched and consumed, nobody kicked.
-        st.handle_keepalive(11, &keepalive_bytes(0xBEEF));
-        st.handle_keepalive(22, &keepalive_bytes(0xBEEF));
+        // P2's in-flight turn 10 arrives with checksum 0x1010 (different from turn 11's 0x1111)
+        st.handle_keepalive(22, &keepalive_bytes(0x1010));
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_none()
+                && st.players.by_pid(2).unwrap().left.is_none(),
+            "trailing turn 10 from live peer must not trigger false desync"
+        );
+
+        // Both clients now receive live turn 11 and send their keepalives with matching 0x1111
+        st.handle_keepalive(11, &keepalive_bytes(0x1111));
+        st.handle_keepalive(22, &keepalive_bytes(0x1111));
         assert!(
             st.players.by_pid(1).unwrap().left.is_none(),
             "in-sync rejoiner must not be desync-kicked after catch-up"
@@ -696,7 +708,44 @@ mod tests {
         assert!(
             st.players.by_pid(1).unwrap().checksums.is_empty()
                 && st.players.by_pid(2).unwrap().checksums.is_empty(),
-            "the matching turn-11 pair was consumed, no lingering false desync"
+            "the matching turn-11 pair was consumed, queues empty and clean"
+        );
+    }
+
+    // Post-rejoin real desync: if rejoiner diverges on turn 11, desync is accurately caught.
+    #[test]
+    fn post_rejoin_real_desync_is_detected_and_kicks() {
+        let (mut st, _rxs) = seated_game(2);
+        st.begin_playing();
+        st.sync_counter = 10;
+        {
+            let p2 = st.players.by_pid_mut(2).unwrap();
+            p2.loaded = true;
+            p2.sync_counter = 10;
+            p2.conn_id = 22;
+        }
+        {
+            let p1 = st.players.by_pid_mut(1).unwrap();
+            p1.loaded = true;
+            p1.catching_up = true;
+            p1.sync_counter = 9;
+            p1.conn_id = 11;
+        }
+        st.handle_keepalive(11, &keepalive_bytes(0xAAAA)); // parity reached
+        assert!(!st.players.by_pid(1).unwrap().catching_up);
+
+        // Turn 11: P1 has bad checksum, P2 has good checksum
+        st.handle_keepalive(11, &keepalive_bytes(0xBAD1));
+        st.handle_keepalive(22, &keepalive_bytes(0x1111));
+
+        // In 2-player game, desync tie kicks both; players marked left
+        assert!(
+            st.players.by_pid(1).unwrap().left.is_some(),
+            "desynced rejoiner must be dropped"
+        );
+        assert!(
+            st.players.by_pid(2).unwrap().left.is_some(),
+            "in 1v1 desync tie drops both players"
         );
     }
 

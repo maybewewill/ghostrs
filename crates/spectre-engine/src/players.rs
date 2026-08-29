@@ -1,4 +1,4 @@
-﻿use std::collections::VecDeque;
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use spectre_net::PlayerLink;
@@ -20,6 +20,13 @@ pub enum RejoinStage {
     None,
     AwaitingMapSize,
     AwaitingLoaded,
+}
+
+/// Запись чек-суммы состояния игры с привязкой к номеру хода.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChecksumEntry {
+    pub turn: u32,
+    pub checksum: u32,
 }
 
 #[derive(Debug)]
@@ -47,7 +54,7 @@ pub struct Player {
     pub reserved: bool,
     pub total_packets_sent: u32,
     pub total_packets_received: u32,
-    pub checksums: VecDeque<u32>,
+    pub checksums: VecDeque<ChecksumEntry>,
     pub consecutive_send_failures: u32,
     pub left_code: u32,
     pub left: Option<String>,
