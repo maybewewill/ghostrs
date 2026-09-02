@@ -301,6 +301,26 @@ pub fn game_info(
     Frame::new(ids::GAME_INFO, p.freeze()).encode()
 }
 
+pub fn rejoin_token(
+    pid: u8,
+    reconnect_key: u32,
+    host_port: u16,
+    map_crc: u32,
+    map_sha1: &[u8; 20],
+    game_name: &str,
+    map_name: &str,
+) -> Result<Bytes, ProtoError> {
+    let mut p = BytesMut::with_capacity(32 + game_name.len() + map_name.len());
+    p.put_u8(pid);
+    p.put_u32_le(reconnect_key);
+    p.put_u16_le(host_port);
+    p.put_u32_le(map_crc);
+    p.put_slice(map_sha1);
+    put_cstring(&mut p, game_name);
+    put_cstring(&mut p, map_name);
+    Frame::new(ids::REJOIN_TOKEN, p.freeze()).encode()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

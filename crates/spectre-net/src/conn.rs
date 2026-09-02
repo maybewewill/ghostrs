@@ -2,7 +2,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use spectre_protocol::ProtoError;
 use spectre_protocol::frame::{Frame, HeaderCodec};
-use spectre_protocol::gps::{GPS_HEADER, GpsCodec};
+use spectre_protocol::gps::{GPS_HEADER, GPS_ICCUP_HEADER, GpsCodec, IccupGpsCodec};
 use spectre_protocol::w3gs::{W3GS_HEADER, W3gsCodec};
 use thiserror::Error;
 use tokio::net::TcpStream;
@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 pub enum AnyFrame {
     W3gs(Frame),
     Gps(Frame),
+    IccupGps(Frame),
     DotaTv(Frame),
 }
 
@@ -45,6 +46,7 @@ impl Encoder<Bytes> for DotaTvConnCodec {
 pub struct DualCodec {
     w3gs: W3gsCodec,
     gps: GpsCodec,
+    iccup: IccupGpsCodec,
 }
 
 impl Decoder for DualCodec {
@@ -52,10 +54,14 @@ impl Decoder for DualCodec {
     type Error = ProtoError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<AnyFrame>, ProtoError> {
-        while !src.is_empty() && src[0] != W3GS_HEADER && src[0] != GPS_HEADER {
+        while !src.is_empty()
+            && src[0] != W3GS_HEADER
+            && src[0] != GPS_HEADER
+            && src[0] != GPS_ICCUP_HEADER
+        {
             match src
                 .iter()
-                .position(|&b| b == W3GS_HEADER || b == GPS_HEADER)
+                .position(|&b| b == W3GS_HEADER || b == GPS_HEADER || b == GPS_ICCUP_HEADER)
             {
                 Some(pos) => {
                     let skipped = src.split_to(pos);
@@ -82,8 +88,10 @@ impl Decoder for DualCodec {
 
         if src[0] == W3GS_HEADER {
             self.w3gs.decode(src).map(|opt| opt.map(AnyFrame::W3gs))
-        } else {
+        } else if src[0] == GPS_HEADER {
             self.gps.decode(src).map(|opt| opt.map(AnyFrame::Gps))
+        } else {
+            self.iccup.decode(src).map(|opt| opt.map(AnyFrame::IccupGps))
         }
     }
 }

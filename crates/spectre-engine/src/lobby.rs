@@ -137,6 +137,25 @@ impl GameState {
             let _ = player.link.try_send(b);
         }
 
+        let reconn_port = if self.cfg.gproxy_reconnect_port != 0 {
+            self.cfg.gproxy_reconnect_port
+        } else if self.cfg.host_port != 0 {
+            self.cfg.host_port
+        } else {
+            6114
+        };
+        if let Ok(tok) = outgoing::rejoin_token(
+            pid,
+            player.reconnect_key,
+            reconn_port,
+            self.cfg.map.crc,
+            &self.cfg.map.sha1,
+            &self.cfg.name,
+            &self.cfg.map.path,
+        ) {
+            let _ = player.link.try_send(tok);
+        }
+
         self.players.insert(player);
 
         if let Ok(b) = outgoing::player_info(pid, &req.name, external_ip, req.internal_ip) {

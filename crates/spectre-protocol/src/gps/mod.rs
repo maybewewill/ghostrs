@@ -1,4 +1,4 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::bytes_ext::BufExt;
 use crate::error::ProtoError;
@@ -7,12 +7,22 @@ use crate::frame::{Frame, HeaderCodec};
 pub const GPS_HEADER: u8 = 0xF8;
 pub type GpsCodec = HeaderCodec<GPS_HEADER>;
 
+pub const GPS_ICCUP_HEADER: u8 = 0x6F; // 'o'
+pub type IccupGpsCodec = HeaderCodec<GPS_ICCUP_HEADER>;
+
 pub mod ids {
     pub const INIT: u8 = 0x01;
     pub const RECONNECT: u8 = 0x02;
     pub const ACK: u8 = 0x03;
     pub const REJECT: u8 = 0x04;
     pub const FULL: u8 = 0x05;
+}
+
+pub mod iccup_ids {
+    pub const INIT: u8 = 0x08;
+    pub const RECONNECT: u8 = 0x16; // 22
+    pub const ACK: u8 = 0x32;       // 50
+    pub const REJECT: u8 = 0x64;    // 100
 }
 
 pub mod reject_reason {
@@ -62,6 +72,43 @@ pub fn full(pid: u8, reconnect_key: u32) -> Bytes {
     Frame::new(ids::FULL, p.freeze())
         .encode_with(GPS_HEADER)
         .expect("5-byte gps full always fits")
+}
+
+pub fn iccup_init(reconn_port: u16, pid: u8, reconnect_key: u32, num_empty_actions: u8) -> Bytes {
+    let mut p = BytesMut::with_capacity(12);
+    p.put_u16_le(reconn_port);
+    p.put_u32_le(0);
+    p.put_u8(pid);
+    p.put_u32_le(reconnect_key);
+    p.put_u8(num_empty_actions);
+    Frame::new(iccup_ids::INIT, p.freeze())
+        .encode_with(GPS_ICCUP_HEADER)
+        .expect("12-byte iccup init always fits")
+}
+
+pub fn iccup_reconnect_ok(last_packet: u32) -> Bytes {
+    let mut p = BytesMut::with_capacity(8);
+    p.put_u32_le(last_packet);
+    p.put_u32_le(0);
+    Frame::new(iccup_ids::RECONNECT, p.freeze())
+        .encode_with(GPS_ICCUP_HEADER)
+        .expect("8-byte iccup reconnect ok always fits")
+}
+
+pub fn iccup_ack(last_packet: u32) -> Bytes {
+    let mut p = BytesMut::with_capacity(4);
+    p.put_u32_le(last_packet);
+    Frame::new(iccup_ids::ACK, p.freeze())
+        .encode_with(GPS_ICCUP_HEADER)
+        .expect("4-byte iccup ack always fits")
+}
+
+pub fn iccup_reject(reason: u32) -> Bytes {
+    let mut p = BytesMut::with_capacity(4);
+    p.put_u32_le(reason);
+    Frame::new(iccup_ids::REJECT, p.freeze())
+        .encode_with(GPS_ICCUP_HEADER)
+        .expect("4-byte iccup reject always fits")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

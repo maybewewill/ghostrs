@@ -154,6 +154,7 @@ impl GameState {
         match frame {
             AnyFrame::W3gs(f) => self.on_w3gs_frame(conn_id, f),
             AnyFrame::Gps(f) => self.on_gps_frame(conn_id, f),
+            AnyFrame::IccupGps(f) => self.on_iccup_gps_frame(conn_id, f),
             AnyFrame::DotaTv(_) => {}
         }
     }
@@ -230,6 +231,62 @@ impl GameState {
             spectre_protocol::gps::ids::FULL => {
                 if let Ok((pid, key)) = spectre_protocol::gps::decode_full(&frame.payload) {
                     self.pending_full.insert(conn_id, (pid, key));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn on_iccup_gps_frame(&mut self, conn_id: u64, frame: Frame) {
+        match frame.id {
+            spectre_protocol::gps::iccup_ids::INIT => {
+                let empty_actions = self.gproxy_empty_actions();
+                let port = if self.cfg.gproxy_reconnect_port != 0 {
+                    self.cfg.gproxy_reconnect_port
+                } else if self.cfg.host_port != 0 {
+                    self.cfg.host_port
+                } else {
+                    6114
+                };
+                if let Some(p) = self.players.by_conn_mut(conn_id) {
+                    p.gproxy = true;
+                    if p.gproxy_buffer.is_none() {
+                        p.gproxy_buffer = Some(crate::gproxy::GProxyBuffer::new(500));
+                    }
+                    let _ = p.link.try_send(spectre_protocol::gps::iccup_init(
+                        port,
+                        p.pid,
+                        p.reconnect_key,
+                        empty_actions,
+                    ));
+                    if let Ok(tok) = spectre_protocol::w3gs::outgoing::rejoin_token(
+                        p.pid,
+                        p.reconnect_key,
+                        port,
+                        self.cfg.map.crc,
+                        &self.cfg.map.sha1,
+                        &self.cfg.name,
+                        &self.cfg.map.path,
+                    ) {
+                        let _ = p.link.try_send(tok);
+                    }
+                    tracing::info!(game = %self.cfg.name, pid = p.pid, name = %p.name, "player is using iCCup Reconnect.dll (handshake completed)");
+                }
+            }
+            spectre_protocol::gps::iccup_ids::ACK => {
+                if let Some(p) = self.players.by_conn_mut(conn_id) {
+                    p.gproxy = true;
+                    if p.gproxy_buffer.is_none() {
+                        p.gproxy_buffer = Some(crate::gproxy::GProxyBuffer::new(500));
+                    }
+                }
+            }
+            spectre_protocol::gps::iccup_ids::RECONNECT => {
+                if let Ok(req) = spectre_protocol::gps::decode_reconnect(&frame.payload)
+                    && let Some(idx) = self.pending.iter().position(|(id, _, _)| *id == conn_id)
+                {
+                    let (_, link, _) = self.pending.remove(idx);
+                    self.handle_gps_reconnect(conn_id, req, link);
                 }
             }
             _ => {}
@@ -525,5 +582,33 @@ mod tests {
         );
         st.on_gps_frame(conn_id, frame);
         assert_eq!(st.pending_full.get(&conn_id), Some(&(9u8, 0x1234_5678u32)));
+    }
+
+    #[tokio::test]
+    async fn iccup_gps_init_responds_with_iccup_packet_and_rejoin_token() {
+        let (mut st, mut rxs) = tests_support::seated_game(1);
+        let conn_id = st.players.by_pid(1).unwrap().conn_id;
+        let mut rx = rxs.remove(0);
+        // Drain initial lobby packets
+        while rx.try_recv().is_ok() {}
+
+        let frame = spectre_protocol::frame::Frame::new(
+            spectre_protocol::gps::iccup_ids::INIT,
+            Bytes::from_static(&[1, 0, 0, 0]),
+        );
+        st.on_iccup_gps_frame(conn_id, frame);
+
+        let mut received = Vec::new();
+        while let Ok(b) = rx.try_recv() {
+            received.push(b);
+        }
+        assert_eq!(received.len(), 2);
+        // First packet is iCCup Reconnect handshake response (0x6F, ID 0x08)
+        assert_eq!(received[0][0], spectre_protocol::gps::GPS_ICCUP_HEADER);
+        assert_eq!(received[0][1], spectre_protocol::gps::iccup_ids::INIT);
+        assert_eq!(received[0].len(), 16);
+        // Second packet is W3GS REJOIN_TOKEN (0xF7, ID 0x77)
+        assert_eq!(received[1][0], 0xF7);
+        assert_eq!(received[1][1], spectre_protocol::w3gs::ids::REJOIN_TOKEN);
     }
 }
