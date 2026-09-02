@@ -310,14 +310,14 @@ The project is structured as an 8-crate Cargo workspace with strict `#![forbid(u
 
 ```
 crates/
-├── spectre            # Entrypoint, supervisor actor, port pool, CLI
-├── spectre-engine     # Game state machine, tick scheduler, DotA & W3MMD parsers, full rejoin
+├── spectre            # Application binary, supervisor actor, port pool, CLI
 ├── spectre-bnet       # Battle.net client actor, SRP-6a/NLS, X-SHA1 authentication
-├── spectre-protocol   # Zero-copy decoders and encoders (W3GS, BNCS, GPS, DotaTV)
-├── spectre-spectator  # Live DotaTV streaming server, delay buffer, .w3g replay writer
+├── spectre-engine     # Game state machine, tick scheduler, DotA & W3MMD parsers, full rejoin
+├── spectre-loadtest   # High-throughput load testing harness and client simulator
 ├── spectre-net        # Framed TCP link actor, UDP LAN discovery broadcaster
-├── spectre-store      # Asynchronous SQLite actor with WAL mode
-└── spectre-mpq        # Pure-Rust MPQ archive parser and CRC32/SHA-1 validator
+├── spectre-protocol   # Zero-copy packet codecs (W3GS, BNCS, GPS, DotaTV)
+├── spectre-spectator  # Live DotaTV streaming server, delay buffer, .w3g replay writer
+└── spectre-store      # Asynchronous SQLite actor with WAL mode
 ```
 
 ---
