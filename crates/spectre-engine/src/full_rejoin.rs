@@ -44,7 +44,9 @@ impl GameState {
         // Re-attach: как handle_gps_reconnect, но без replay per-player буфера.
         let pid = token_pid;
         {
-            let p = self.players.by_pid_mut(pid).unwrap();
+            let Some(p) = self.players.by_pid_mut(pid) else {
+                return false;
+            };
             p.conn_id = conn_id;
             p.link = link;
             p.disconnected_since = None;

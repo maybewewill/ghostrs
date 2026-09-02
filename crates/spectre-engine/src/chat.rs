@@ -42,8 +42,8 @@ pub enum ChatCommand {
     VoteCancel,
     VoteKick(String),
     Yes,
-    SyncLimit(u32),
-    Latency(u32),
+    SyncLimit(Option<u32>),
+    Latency(Option<u32>),
     ShufflePlayers,
     Version,
     Say(String),
@@ -175,9 +175,14 @@ pub fn parse_command(trigger: char, msg: &str) -> Option<ChatCommand> {
         "votestart" => ChatCommand::VoteStart,
         "votecancel" => ChatCommand::VoteCancel,
         "votekick" | "vk" => ChatCommand::VoteKick(args.first()?.to_string()),
-        "yes" | "y" => ChatCommand::Yes,
-        "synclimit" => ChatCommand::SyncLimit(args.first()?.parse().ok()?),
-        "latency" => ChatCommand::Latency(args.first()?.parse().ok()?),
+        "synclimit" | "sl" => {
+            let limit = args.first().and_then(|s| s.parse().ok());
+            ChatCommand::SyncLimit(limit)
+        }
+        "latency" | "lat" | "l" => {
+            let lat = args.first().and_then(|s| s.parse().ok());
+            ChatCommand::Latency(lat)
+        }
         "sp" => ChatCommand::ShufflePlayers,
         "version" => ChatCommand::Version,
         "say" => ChatCommand::Say(args.join(" ")),
@@ -723,15 +728,27 @@ impl GameState {
                     }
                 }
             }
-            ChatCommand::SyncLimit(limit) => {
-                self.cfg.sync_limit = limit.clamp(10, 200);
-                self.send_chat_to(pid, &format!("Sync limit set to {}.", self.cfg.sync_limit));
+            ChatCommand::SyncLimit(maybe_limit) => {
+                if let Some(limit) = maybe_limit {
+                    self.cfg.sync_limit = limit.clamp(10, 500);
+                    self.send_chat_to(pid, &format!("Sync limit set to {}.", self.cfg.sync_limit));
+                } else {
+                    self.send_chat_to(pid, &format!("Current sync limit is {}.", self.cfg.sync_limit));
+                }
             }
-            ChatCommand::Latency(lat) => {
-                let d = std::time::Duration::from_millis(lat.clamp(20, 500) as u64);
-                self.tick.set_period(d);
-                self.cfg.latency = d;
-                self.send_chat_to(pid, &format!("Latency set to {} ms.", lat));
+            ChatCommand::Latency(maybe_lat) => {
+                if let Some(lat) = maybe_lat {
+                    let clamped = lat.clamp(10, 500);
+                    let d = std::time::Duration::from_millis(clamped as u64);
+                    self.tick.set_period(d);
+                    self.cfg.latency = d;
+                    self.send_chat_to(pid, &format!("Latency set to {} ms.", clamped));
+                } else {
+                    self.send_chat_to(
+                        pid,
+                        &format!("Current latency is {} ms.", self.cfg.latency.as_millis()),
+                    );
+                }
             }
             ChatCommand::ShufflePlayers => {
                 if matches!(self.phase, GamePhase::Lobby) {
@@ -1356,11 +1373,31 @@ mod tests {
         assert_eq!(parse_command('!', "!sp"), Some(ChatCommand::ShufflePlayers));
         assert_eq!(
             parse_command('!', "!synclimit 60"),
-            Some(ChatCommand::SyncLimit(60))
+            Some(ChatCommand::SyncLimit(Some(60)))
+        );
+        assert_eq!(
+            parse_command('!', "!sl 100"),
+            Some(ChatCommand::SyncLimit(Some(100)))
+        );
+        assert_eq!(
+            parse_command('!', "!sl"),
+            Some(ChatCommand::SyncLimit(None))
         );
         assert_eq!(
             parse_command('!', "!latency 50"),
-            Some(ChatCommand::Latency(50))
+            Some(ChatCommand::Latency(Some(50)))
+        );
+        assert_eq!(
+            parse_command('!', "!lat 25"),
+            Some(ChatCommand::Latency(Some(25)))
+        );
+        assert_eq!(
+            parse_command('!', "!l 15"),
+            Some(ChatCommand::Latency(Some(15)))
+        );
+        assert_eq!(
+            parse_command('!', "!lat"),
+            Some(ChatCommand::Latency(None))
         );
         assert_eq!(
             parse_command('!', "!hcl -apem"),

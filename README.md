@@ -234,8 +234,8 @@ docker run -d \
 | `!votecancel` | Cancel active vote |
 | `!draw` | Vote for mutual game draw |
 | `!mute [player]` | Mute player or toggle lobby mute |
-| `!latency <ms>` | Adjust turn latency period (20ms – 500ms) |
-| `!synclimit <turns>` | Adjust desync tolerance limit (10 – 200) |
+| `!latency <ms>` / `!lat` / `!l` | Adjust or query turn latency period (10ms – 500ms) |
+| `!synclimit <turns>` / `!sl` | Adjust or query lag-screen tolerance limit (10 – 500) |
 | `!stats [user]` | Query DotA stats from database during match |
 
 ---

@@ -46,6 +46,16 @@ pub fn decompress_multi(data: &[u8], out: &mut [u8]) -> Result<usize, MpqError> 
 }
 
 pub fn decompress_pkware(data: &[u8], out: &mut [u8]) -> Result<usize, MpqError> {
+    if data.is_empty() {
+        return Ok(0);
+    }
+    // Exploder in implode panics with unimplemented!() on mode 1 (ASCII)
+    if data[0] == 1 {
+        return Err(MpqError::DecompressionFailed(
+            "PKWARE ASCII compression mode is unsupported".to_string(),
+        ));
+    }
+
     let mut exploder = Exploder::new(&DEFAULT_CODE_TABLE);
     let mut cpos: usize = 0;
     let mut out_pos: usize = 0;

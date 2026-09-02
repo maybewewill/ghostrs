@@ -38,7 +38,7 @@ pub fn get_mpq_seed(mpq_number: i32) -> u32 {
         return 0;
     }
     let idx = mpq_number as usize;
-    let guard = SEED_REGISTRY.read().unwrap();
+    let guard = SEED_REGISTRY.read().unwrap_or_else(|e| e.into_inner());
     if let Some(seeds) = &*guard {
         seeds.get(idx).copied().unwrap_or(0)
     } else {
@@ -51,7 +51,7 @@ pub fn set_mpq_seed(mpq_number: i32, new_seed: u32) -> u32 {
         return 0;
     }
     let idx = mpq_number as usize;
-    let mut guard = SEED_REGISTRY.write().unwrap();
+    let mut guard = SEED_REGISTRY.write().unwrap_or_else(|e| e.into_inner());
     let seeds = guard.get_or_insert_with(|| DEFAULT_MPQ_SEEDS.to_vec());
     if idx >= seeds.len() {
         seeds.resize(idx + 1, 0);
