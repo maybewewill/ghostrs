@@ -1,6 +1,6 @@
-# FULL REJOIN 100% — Полная сводка + автономный прогон `--dangerously-skip-permissions`
+# FULL REJOIN 100% — Полная сводка реализации
 
-> **Режим**: `opencode` / `claude` с флагом `--dangerously-skip-permissions` — никаких подтверждений, все `write`/`edit`/`bash` без пауз. План — copy-paste в агента. Всё ниже верифицировано `get_bytes`/`disasm` в `game.dll` (PE `0x6F000000`, сессия `970c21c7`, md5 `ba5a2fe...`, 78276 funcs) и чтением `crates/*:line`. Адреса/байты — не править.
+> Всё ниже верифицировано через дизассемблирование `game.dll` (PE `0x6F000000`, сессия `970c21c7`, md5 `ba5a2fe...`, 78276 funcs) и чтением `crates/*:line`. Адреса/байты — не править.
 
 ---
 

@@ -70,6 +70,9 @@ fn test_game_cfg(relay_handle: RelayHandle) -> GameConfig {
         min_score: 0.0,
         max_score: 0.0,
         matchmaking: false,
+        hcl_from_game_name: true,
+        votekick_allowed: true,
+        votekick_percentage: 100,
     }
 }
 

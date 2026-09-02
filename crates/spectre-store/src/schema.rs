@@ -1,4 +1,4 @@
-﻿use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result};
 
 pub const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -86,6 +86,17 @@ CREATE TABLE IF NOT EXISTS downloads (
     created    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_downloads_name ON downloads(name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS w3mmd_vars (
+    id         INTEGER PRIMARY KEY,
+    game_id    INTEGER NOT NULL REFERENCES games(id),
+    pid        INTEGER NOT NULL,
+    var_name   TEXT NOT NULL,
+    val_num    REAL,
+    val_str    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_w3mmd_game ON w3mmd_vars(game_id);
+CREATE INDEX IF NOT EXISTS idx_w3mmd_var  ON w3mmd_vars(var_name);
 "#;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {

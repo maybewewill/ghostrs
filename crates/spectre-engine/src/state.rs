@@ -141,6 +141,9 @@ pub struct GameConfig {
     pub min_score: f64,
     pub max_score: f64,
     pub matchmaking: bool,
+    pub hcl_from_game_name: bool,
+    pub votekick_allowed: bool,
+    pub votekick_percentage: u32,
 }
 
 pub const COUNTDOWN_STEP: Duration = Duration::from_millis(500);
@@ -187,6 +190,7 @@ pub struct GameState {
     pub jitter_histogram: [u64; 5],
     pub last_jitter_report: Instant,
     pub dota: Option<crate::stats_dota::StatsDotA>,
+    pub w3mmd: Option<crate::w3mmd::W3Mmd>,
     pub game_over_time: Option<tokio::time::Instant>,
     pub hcl: Option<String>,
     pub muted_all: bool,
@@ -279,8 +283,21 @@ impl GameState {
             } else {
                 None
             },
+            w3mmd: if cfg.map.map_type == "w3mmd"
+                || (!cfg.map.map_type.is_empty() && cfg.map.map_type != "dota")
+                || cfg.map.map_type.is_empty()
+            {
+                Some(crate::w3mmd::W3Mmd::new())
+            } else {
+                None
+            },
             game_over_time: None,
-            hcl: crate::hcl::Hcl::parse_from_gamename(&cfg.name).or_else(|| {
+            hcl: if cfg.hcl_from_game_name {
+                crate::hcl::Hcl::parse_from_gamename(&cfg.name)
+            } else {
+                None
+            }
+            .or_else(|| {
                 if !cfg.map.default_hcl.is_empty() {
                     Some(cfg.map.default_hcl.clone())
                 } else {

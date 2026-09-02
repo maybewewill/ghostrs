@@ -430,8 +430,11 @@ impl GameState {
 
         let fpid = self.players.next_free_pid()?;
         let slot_idx = self.slots.first_open()?;
-        let (tx, rx) = tokio::sync::mpsc::channel(128);
-        std::mem::forget(rx);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        // Drain task so FakePlayer never hits backpressure (was mem::forget -> 100 drops -> left)
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move { while rx.recv().await.is_some() {} });
+        }
         let mut p = crate::players::Player::new(
             fpid,
             "FakePlayer".to_string(),
@@ -610,7 +613,18 @@ impl GameState {
             .iter()
             .filter(|p| !p.virtual_host && p.left.is_none())
             .count();
-        if real_players_count == 0 && matches!(self.phase, GamePhase::Playing | GamePhase::Loading)
+        let any_reconnectable = self.players.iter().any(|p| {
+            if !p.virtual_host
+                && p.gproxy
+                && let Some(disc) = p.disconnected_since
+            {
+                return disc.elapsed() < self.cfg.reconnect_wait;
+            }
+            false
+        });
+        if real_players_count == 0
+            && !any_reconnectable
+            && matches!(self.phase, GamePhase::Playing | GamePhase::Loading)
         {
             tracing::info!(game = %self.cfg.name, "no players left, ending game");
             self.phase = GamePhase::Over;
@@ -698,6 +712,9 @@ impl GameState {
                 && game_over_winner.is_none()
             {
                 game_over_winner = Some(dota.format_winner());
+            }
+            if let Some(w3mmd) = self.w3mmd.as_mut() {
+                w3mmd.process_action(&action.data);
             }
             let len = action.wire_len();
             if batch_len + len > MAX_ACTION_PAYLOAD && !batch.is_empty() {

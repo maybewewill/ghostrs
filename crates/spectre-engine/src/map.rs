@@ -1,4 +1,4 @@
-﻿use std::fs;
+use std::fs;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
@@ -732,6 +732,9 @@ mod tests {
             min_score: 0.0,
             max_score: 0.0,
             matchmaking: false,
+            hcl_from_game_name: true,
+            votekick_allowed: true,
+            votekick_percentage: 100,
         };
 
         let mut st = GameState::new(game_cfg);

@@ -678,20 +678,27 @@ impl GameState {
                 self.votekick_votes.clear();
                 self.send_chat_all("Active votes cancelled.");
             }
-            ChatCommand::VoteKick(name) => match self.players.by_name_partial(&name) {
-                Ok(target) => {
-                    let tpid = target.pid;
-                    let tname = target.name.clone();
-                    self.votekick_target = Some(tpid);
-                    self.votekick_votes = vec![pid];
-                    let total = self.players.human_count();
-                    let needed = (total / 2) + 1;
-                    self.send_chat_all(&format!(
-                        "Votekick started against [{tname}] (1/{needed} votes). Type !yes to vote."
-                    ));
+            ChatCommand::VoteKick(name) => {
+                if !self.cfg.votekick_allowed {
+                    self.send_chat_to(pid, "Votekick is disabled.");
+                    return;
                 }
-                Err(_) => self.send_chat_to(pid, &format!("No player matching [{name}].")),
-            },
+                match self.players.by_name_partial(&name) {
+                    Ok(target) => {
+                        let tpid = target.pid;
+                        let tname = target.name.clone();
+                        self.votekick_target = Some(tpid);
+                        self.votekick_votes = vec![pid];
+                        let total = self.players.human_count();
+                        let pct = self.cfg.votekick_percentage.clamp(1, 100);
+                        let needed = ((total as u32 * pct).div_ceil(100)).max(1) as usize;
+                        self.send_chat_all(&format!(
+                            "Votekick started against [{tname}] (1/{needed} votes). Type !yes to vote."
+                        ));
+                    }
+                    Err(_) => self.send_chat_to(pid, &format!("No player matching [{name}].")),
+                }
+            }
             ChatCommand::Yes => {
                 if let Some(target_pid) = self.votekick_target
                     && !self.votekick_votes.contains(&pid)
@@ -699,7 +706,8 @@ impl GameState {
                     self.votekick_votes.push(pid);
                     let votes = self.votekick_votes.len();
                     let total = self.players.human_count();
-                    let needed = (total / 2) + 1;
+                    let pct = self.cfg.votekick_percentage.clamp(1, 100);
+                    let needed = ((total as u32 * pct).div_ceil(100)).max(1) as usize;
                     self.send_chat_all(&format!("Votekick: {votes}/{needed} votes."));
                     if votes >= needed {
                         let left_code =

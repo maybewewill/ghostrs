@@ -1,4 +1,4 @@
-﻿use std::path::Path;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
@@ -111,6 +111,13 @@ pub enum StoreCmd {
         downloaded: u64,
         duration: u64,
     },
+    LogW3MmdVar {
+        game_name: String,
+        pid: u8,
+        var_name: String,
+        val_num: Option<f64>,
+        val_str: Option<String>,
+    },
     Query(StoreQuery),
 }
 
@@ -216,6 +223,23 @@ impl Store {
             spoofed,
             downloaded,
             duration,
+        });
+    }
+
+    pub fn log_w3mmd_var(
+        &self,
+        game_name: &str,
+        pid: u8,
+        var_name: &str,
+        val_num: Option<f64>,
+        val_str: Option<&str>,
+    ) {
+        let _ = self.tx.try_send(StoreCmd::LogW3MmdVar {
+            game_name: game_name.to_string(),
+            pid,
+            var_name: var_name.to_string(),
+            val_num,
+            val_str: val_str.map(String::from),
         });
     }
 
@@ -372,6 +396,27 @@ fn run_worker(mut conn: Connection, mut rx: mpsc::Receiver<StoreCmd>) {
                 let _ = crate::queries::insert_download(
                     &conn, &map, map_size, &name, &ip, spoofed, downloaded, duration,
                 );
+            }
+            StoreCmd::LogW3MmdVar {
+                game_name,
+                pid,
+                var_name,
+                val_num,
+                val_str,
+            } => {
+                let game_id: Option<i64> = conn
+                    .query_row(
+                        "SELECT id FROM games WHERE name = ?1 ORDER BY id DESC LIMIT 1",
+                        rusqlite::params![game_name],
+                        |row| row.get(0),
+                    )
+                    .ok();
+                if let Some(gid) = game_id {
+                    let _ = conn.execute(
+                        "INSERT INTO w3mmd_vars (game_id, pid, var_name, val_num, val_str) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![gid, pid, var_name, val_num, val_str],
+                    );
+                }
             }
             StoreCmd::Query(q) => match q {
                 StoreQuery::IsBanned { name, ip, reply } => {

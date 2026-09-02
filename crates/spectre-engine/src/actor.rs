@@ -1,4 +1,4 @@
-﻿use std::time::Instant;
+use std::time::Instant;
 
 use spectre_net::{AnyFrame, ConnEventKind};
 use spectre_protocol::frame::Frame;
@@ -288,6 +288,9 @@ pub mod tests_support {
             min_score: 0.0,
             max_score: 0.0,
             matchmaking: false,
+            hcl_from_game_name: true,
+            votekick_allowed: true,
+            votekick_percentage: 100,
         }
     }
 

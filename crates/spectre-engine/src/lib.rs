@@ -1,4 +1,4 @@
-﻿#![forbid(unsafe_code)]
+#![forbid(unsafe_code)]
 
 pub mod actions;
 pub mod actor;
@@ -17,6 +17,7 @@ pub mod slots;
 pub mod state;
 pub mod stats_dota;
 pub mod tick;
+pub mod w3mmd;
 
 pub use actions::MAX_ACTION_PAYLOAD;
 pub use actor::spawn_game;
@@ -32,3 +33,4 @@ pub use slots::{SlotStatus, SlotTable};
 pub use state::{GameConfig, GamePhase, GameState, MapInfo};
 pub use stats_dota::{DotAPlayerStats, StatsDotA};
 pub use tick::TickScheduler;
+pub use w3mmd::{MmdValue, W3Mmd};

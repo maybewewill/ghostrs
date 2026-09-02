@@ -1,4 +1,4 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use spectre_engine::handle::GameCmd;
 use spectre_engine::state::{COUNTDOWN_TOTAL, GameConfig, GamePhase, GameState, MapInfo};
 use spectre_net::PlayerLink;
@@ -38,6 +38,9 @@ fn test_game_cfg() -> GameConfig {
         min_score: 0.0,
         max_score: 0.0,
         matchmaking: false,
+        hcl_from_game_name: true,
+        votekick_allowed: true,
+        votekick_percentage: 100,
     }
 }
 

@@ -8,11 +8,6 @@ max_games = 100
 tft = true
 default_map = "iCCup DotA 507.w3x"
 map_path = "maps"
-allow_downloads = true
-max_downloaders = 3
-max_download_speed = 1000000
-autokick_ping = 400
-lc_pings = true
 udp_broadcast_target = "192.168.100.184"
 
 [bnet]
@@ -37,6 +32,11 @@ latency_ms = 15
 sync_limit = 500
 virtual_host_name = "|cFFEB0000iCCup"
 reconnect_wait_sec = 180
+allow_downloads = true
+max_downloaders = 3
+max_download_speed = 1000000
+autokick_ping = 400
+lc_pings = true
 hcl_from_game_name = true
 votekick_allowed = true
 votekick_percentage = 100
