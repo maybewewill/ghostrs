@@ -1,8 +1,6 @@
 target/
 .git/
 .github/
-.superpowers/
-.gemini/
 docs/
 *.log
 *.exe

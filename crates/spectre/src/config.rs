@@ -59,6 +59,9 @@ pub struct GameDefaults {
     pub spoof_checks: u8,
     pub require_spoof_checks: bool,
     pub lobby_time_limit: u32,
+    pub hcl_from_game_name: bool,
+    pub votekick_allowed: bool,
+    pub votekick_percentage: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +188,59 @@ fn default_false() -> bool {
 fn default_lobby_time_limit() -> u32 {
     10
 }
+fn default_votekick_percentage() -> u32 {
+    100
+}
+
+fn deserialize_allow_downloads<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct AllowDownloadsVisitor;
+
+    impl serde::de::Visitor<'_> for AllowDownloadsVisitor {
+        type Value = u8;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a boolean (true/false) or integer (0, 1, 2)")
+        }
+
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(if v { 1 } else { 0 })
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v.clamp(0, 2) as u8)
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v.min(2) as u8)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            match v.to_ascii_lowercase().as_str() {
+                "true" | "1" => Ok(1),
+                "false" | "0" => Ok(0),
+                "conditional" | "2" => Ok(2),
+                _ => Err(E::custom(format!("invalid allow_downloads value: {v}"))),
+            }
+        }
+    }
+
+    deserializer.deserialize_any(AllowDownloadsVisitor)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TomlBot {
@@ -209,6 +265,16 @@ pub struct TomlBot {
     pub gproxy_reconnect_port: u16,
     #[serde(default)]
     pub udp_broadcast_target: Option<String>,
+    #[serde(default)]
+    pub allow_downloads: Option<toml::Value>,
+    #[serde(default)]
+    pub max_downloaders: Option<u32>,
+    #[serde(default)]
+    pub max_download_speed: Option<u32>,
+    #[serde(default)]
+    pub autokick_ping: Option<u32>,
+    #[serde(default)]
+    pub lc_pings: Option<bool>,
 }
 
 impl Default for TomlBot {
@@ -225,6 +291,11 @@ impl Default for TomlBot {
             port_pool_end: None,
             gproxy_reconnect_port: default_gproxy_reconnect_port(),
             udp_broadcast_target: None,
+            allow_downloads: None,
+            max_downloaders: None,
+            max_download_speed: None,
+            autokick_ping: None,
+            lc_pings: None,
         }
     }
 }
@@ -296,7 +367,7 @@ pub struct TomlGame {
     pub max_downloaders: u32,
     #[serde(default = "default_max_download_speed")]
     pub max_download_speed: u32,
-    #[serde(default = "default_allow_downloads")]
+    #[serde(default = "default_allow_downloads", deserialize_with = "deserialize_allow_downloads")]
     pub allow_downloads: u8,
     #[serde(default = "default_autokick_ping")]
     pub autokick_ping: u32,
@@ -308,6 +379,12 @@ pub struct TomlGame {
     pub require_spoof_checks: bool,
     #[serde(default = "default_lobby_time_limit")]
     pub lobby_time_limit: u32,
+    #[serde(default = "default_true")]
+    pub hcl_from_game_name: bool,
+    #[serde(default = "default_true")]
+    pub votekick_allowed: bool,
+    #[serde(default = "default_votekick_percentage")]
+    pub votekick_percentage: u32,
 }
 
 impl Default for TomlGame {
@@ -325,6 +402,9 @@ impl Default for TomlGame {
             spoof_checks: default_spoof_checks(),
             require_spoof_checks: default_false(),
             lobby_time_limit: default_lobby_time_limit(),
+            hcl_from_game_name: default_true(),
+            votekick_allowed: default_true(),
+            votekick_percentage: default_votekick_percentage(),
         }
     }
 }
@@ -470,6 +550,28 @@ impl Config {
             maps.insert(k, v.into());
         }
 
+        let mut allow_downloads = game.allow_downloads;
+        if let Some(ref val) = bot.allow_downloads {
+            match val {
+                toml::Value::Boolean(b) => allow_downloads = if *b { 1 } else { 0 },
+                toml::Value::Integer(i) => allow_downloads = (*i).clamp(0, 2) as u8,
+                toml::Value::String(s) => {
+                    if s.eq_ignore_ascii_case("true") || s == "1" {
+                        allow_downloads = 1;
+                    } else if s.eq_ignore_ascii_case("false") || s == "0" {
+                        allow_downloads = 0;
+                    } else if s.eq_ignore_ascii_case("conditional") || s == "2" {
+                        allow_downloads = 2;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let max_downloaders = bot.max_downloaders.unwrap_or(game.max_downloaders);
+        let max_download_speed = bot.max_download_speed.unwrap_or(game.max_download_speed);
+        let autokick_ping = bot.autokick_ping.unwrap_or(game.autokick_ping);
+        let lc_pings = bot.lc_pings.unwrap_or(game.lc_pings);
+
         Ok(Config {
             bot: BotConfig {
                 war3_path: bot.war3_path,
@@ -508,14 +610,17 @@ impl Config {
                 sync_limit: game.sync_limit,
                 virtual_host_name: game.virtual_host_name,
                 reconnect_wait: Duration::from_secs(game.reconnect_wait_sec),
-                max_downloaders: game.max_downloaders,
-                max_download_speed: game.max_download_speed,
-                allow_downloads: game.allow_downloads,
-                autokick_ping: game.autokick_ping,
-                lc_pings: game.lc_pings,
+                max_downloaders,
+                max_download_speed,
+                allow_downloads,
+                autokick_ping,
+                lc_pings,
                 spoof_checks: game.spoof_checks,
                 require_spoof_checks: game.require_spoof_checks,
                 lobby_time_limit: game.lobby_time_limit,
+                hcl_from_game_name: game.hcl_from_game_name,
+                votekick_allowed: game.votekick_allowed,
+                votekick_percentage: game.votekick_percentage,
             },
             spectator: SpectatorConfig {
                 enabled: spectator.enabled,
@@ -597,6 +702,9 @@ impl Config {
         let spectator_max_viewers = parse_int(&map, "spectator_maxviewers", 32)?;
         let spectator_history_max_mb = parse_int(&map, "spectator_history_max_mb", 64)?;
         let bot_reconnect_port = parse_int(&map, "bot_reconnectport", 6114)?;
+        let hcl_from_game_name = parse_bool(&map, "bot_hclfromgamename", true);
+        let votekick_allowed = parse_bool(&map, "bot_votekickallowed", true);
+        let votekick_percentage = parse_int(&map, "bot_votekickpercentage", 100u32)?;
 
         let db_path = map
             .get("db_path")
@@ -671,6 +779,9 @@ impl Config {
                 spoof_checks,
                 require_spoof_checks,
                 lobby_time_limit,
+                hcl_from_game_name,
+                votekick_allowed,
+                votekick_percentage,
             },
             spectator: SpectatorConfig {
                 enabled: spectator_enabled,
@@ -851,5 +962,40 @@ udp_broadcast_target = "invalid_subnet"
             c_default.bot.resolved_udp_broadcast_target(),
             std::net::Ipv4Addr::BROADCAST
         );
+    }
+
+    #[test]
+    fn test_download_and_votekick_config_parsing() {
+        let toml_sample = r#"
+[bot]
+allow_downloads = true
+max_download_speed = 500000
+
+[game]
+hcl_from_game_name = false
+votekick_allowed = false
+votekick_percentage = 60
+"#;
+        let c = Config::from_toml(toml_sample).unwrap();
+        assert_eq!(c.game.allow_downloads, 1);
+        assert_eq!(c.game.max_download_speed, 500000);
+        assert!(!c.game.hcl_from_game_name);
+        assert!(!c.game.votekick_allowed);
+        assert_eq!(c.game.votekick_percentage, 60);
+
+        let toml_game_level = r#"
+[game]
+allow_downloads = 2
+max_download_speed = 250000
+hcl_from_game_name = true
+votekick_allowed = true
+votekick_percentage = 75
+"#;
+        let c2 = Config::from_toml(toml_game_level).unwrap();
+        assert_eq!(c2.game.allow_downloads, 2);
+        assert_eq!(c2.game.max_download_speed, 250000);
+        assert!(c2.game.hcl_from_game_name);
+        assert!(c2.game.votekick_allowed);
+        assert_eq!(c2.game.votekick_percentage, 75);
     }
 }

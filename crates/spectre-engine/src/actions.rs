@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use spectre_protocol::w3gs::{ActionBlock, incoming::OutgoingAction, outgoing};
 
+use crate::players::ChecksumEntry;
 use crate::state::{GamePhase, GameState};
 
 pub const MAX_ACTION_PAYLOAD: usize = 1452;
@@ -49,12 +50,22 @@ impl GameState {
             Ok(cs) => cs,
             Err(_) => return,
         };
+        let sc = self.sync_counter;
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             p.sync_counter = p.sync_counter.saturating_add(1);
-            if p.checksums.len() >= 512 {
-                p.checksums.pop_front();
+            let turn = p.sync_counter;
+            if p.catching_up {
+                // Пока догоняет — чек-суммы старых ходов не сохраняем (они уже в прошлом).
+                // Считаем sync_counter до точного паритета с игровым счётчиком ходов.
+                if turn >= sc {
+                    p.catching_up = false;
+                }
+            } else {
+                if p.checksums.len() >= 512 {
+                    p.checksums.pop_front();
+                }
+                p.checksums.push_back(ChecksumEntry { turn, checksum });
             }
-            p.checksums.push_back(checksum);
         }
         self.check_desync();
     }
@@ -62,44 +73,79 @@ impl GameState {
     pub fn check_desync(&mut self) {
         loop {
             let mut active_pids: Vec<u8> = Vec::new();
-            let mut all_have_checksum = true;
+            let mut min_turn: Option<u32> = None;
 
             for p in self.players.iter() {
-                if p.left.is_none() && !p.virtual_host && p.loaded {
-                    if p.checksums.is_empty() {
-                        all_have_checksum = false;
-                        break;
-                    }
+                if p.left.is_none() && !p.virtual_host && p.loaded && !p.catching_up {
                     active_pids.push(p.pid);
+                    if let Some(entry) = p.checksums.front() {
+                        min_turn = Some(min_turn.map_or(entry.turn, |m| m.min(entry.turn)));
+                    }
                 }
             }
 
-            if !all_have_checksum || active_pids.is_empty() {
+            if active_pids.len() < 2 || min_turn.is_none() {
+                if active_pids.len() <= 1 {
+                    for p in self.players.iter_mut() {
+                        if p.left.is_none() && !p.virtual_host && p.loaded && !p.catching_up {
+                            p.checksums.clear();
+                        }
+                    }
+                }
                 break;
             }
 
-            let first_pid = active_pids[0];
-            let Some(first_checksum) = self
-                .players
-                .by_pid(first_pid)
-                .and_then(|p| p.checksums.front().copied())
-            else {
-                break;
-            };
+            let target_turn = min_turn.unwrap();
 
-            let mut has_desync = false;
+            // Если кто-то из активных игроков ещё не прислал подтверждение для target_turn
+            // (его пакет в пути по сети), ждём его keepalive.
+            let mut in_flight = false;
             for &pid in &active_pids {
                 if let Some(p) = self.players.by_pid(pid)
-                    && let Some(&cs) = p.checksums.front()
-                    && cs != first_checksum
+                    && p.sync_counter < target_turn
                 {
-                    has_desync = true;
+                    in_flight = true;
                     break;
                 }
             }
+            if in_flight {
+                break;
+            }
+
+            let mut participants: Vec<u8> = Vec::new();
+            let mut first_checksum: Option<u32> = None;
+            let mut has_desync = false;
+
+            for &pid in &active_pids {
+                if let Some(p) = self.players.by_pid(pid)
+                    && let Some(entry) = p.checksums.front()
+                    && entry.turn == target_turn
+                {
+                    participants.push(pid);
+                    match first_checksum {
+                        None => first_checksum = Some(entry.checksum),
+                        Some(first) => {
+                            if entry.checksum != first {
+                                has_desync = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Если этот ход есть только у 1 игрока (например, остальные в этот ход догоняли
+            // или ещё не подключились), снимаем его с очереди без ошибки.
+            if participants.len() < 2 {
+                for &pid in &participants {
+                    if let Some(p) = self.players.by_pid_mut(pid) {
+                        p.checksums.pop_front();
+                    }
+                }
+                continue;
+            }
 
             if !has_desync {
-                for &pid in &active_pids {
+                for &pid in &participants {
                     if let Some(p) = self.players.by_pid_mut(pid) {
                         p.checksums.pop_front();
                     }
@@ -109,11 +155,11 @@ impl GameState {
 
             let mut bins: std::collections::HashMap<u32, Vec<u8>> =
                 std::collections::HashMap::new();
-            for &pid in &active_pids {
+            for &pid in &participants {
                 if let Some(p) = self.players.by_pid(pid)
-                    && let Some(&cs) = p.checksums.front()
+                    && let Some(entry) = p.checksums.front()
                 {
-                    bins.entry(cs).or_default().push(pid);
+                    bins.entry(entry.checksum).or_default().push(pid);
                 }
             }
 
@@ -131,12 +177,12 @@ impl GameState {
                 }
             }
 
-            tracing::warn!(game = %self.cfg.name, "desync detected");
+            tracing::warn!(game = %self.cfg.name, turn = target_turn, "desync detected");
             self.send_chat_all("Desync detected!");
 
             if tied {
                 tracing::warn!(game = %self.cfg.name, "desync tie, dropping all players");
-                for &pid in &active_pids {
+                for &pid in &participants {
                     self.kick_player(
                         pid,
                         "was dropped due to desync",
@@ -158,7 +204,7 @@ impl GameState {
                 }
             }
 
-            for &pid in &active_pids {
+            for &pid in &participants {
                 if let Some(p) = self.players.by_pid_mut(pid) {
                     p.checksums.pop_front();
                 }
@@ -172,6 +218,46 @@ impl GameState {
         let Some(pid) = self.players.by_conn(conn_id).map(|p| p.pid) else {
             return;
         };
+        if self.players.by_pid(pid).map(|p| p.rejoin)
+            == Some(crate::players::RejoinStage::AwaitingLoaded)
+        {
+            let start_seq = self.full_history.first_seq();
+            // I2: если голова истории уже вытеснена (first_seq>0), свежий клиент
+            // НЕ сможет проиграть с хода 0 — частичная подача = тихий десинк.
+            // Чисто роняем переджойнера вместо порчи партии.
+            if start_seq > 0 {
+                tracing::warn!(
+                    game = %self.cfg.name, pid, first_seq = start_seq,
+                    "FULL rejoin arrived after history eviction; cannot replay from turn 0, dropping"
+                );
+                if let Some(p) = self.players.by_pid_mut(pid) {
+                    p.rejoin = crate::players::RejoinStage::None;
+                    p.left = Some("cannot rejoin: game history too long to replay".into());
+                    p.left_code = spectre_protocol::w3gs::ids::PLAYERLEAVE_DISCONNECT;
+                }
+                return;
+            }
+            let others: Vec<u8> = self
+                .players
+                .iter()
+                .filter(|q| q.pid != pid && !q.virtual_host && q.left.is_none())
+                .map(|q| q.pid)
+                .collect();
+            for opid in others {
+                self.send_to(pid, outgoing::game_loaded_others(opid));
+            }
+            if let Some(p) = self.players.by_pid_mut(pid) {
+                p.loaded = true;
+                p.rejoin = crate::players::RejoinStage::None;
+                p.catchup_cursor = Some(start_seq);
+                // I1: с началом catch-up исключаем переджойнера из десинк-сверки
+                // на всё окно подачи (его чек-суммы позиционно не выровнены с
+                // живыми, пока он проигрывает лог). Снимется в handle_keepalive.
+                p.catching_up = true;
+            }
+            self.broadcast(outgoing::game_loaded_others(pid));
+            return;
+        }
         if let Some(p) = self.players.by_pid_mut(pid) {
             p.loaded = true;
             p.finished_loading_at = Some(std::time::Instant::now());
@@ -344,8 +430,11 @@ impl GameState {
 
         let fpid = self.players.next_free_pid()?;
         let slot_idx = self.slots.first_open()?;
-        let (tx, rx) = tokio::sync::mpsc::channel(128);
-        std::mem::forget(rx);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        // Drain task so FakePlayer never hits backpressure (was mem::forget -> 100 drops -> left)
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move { while rx.recv().await.is_some() {} });
+        }
         let mut p = crate::players::Player::new(
             fpid,
             "FakePlayer".to_string(),
@@ -479,6 +568,7 @@ impl GameState {
                 }
             }
             GamePhase::Playing => {
+                self.pump_rejoin_catchup();
                 if let Some(fpid) = self.fake_player_pid
                     && let Some(p) = self.players.by_pid_mut(fpid)
                 {
@@ -523,7 +613,18 @@ impl GameState {
             .iter()
             .filter(|p| !p.virtual_host && p.left.is_none())
             .count();
-        if real_players_count == 0 && matches!(self.phase, GamePhase::Playing | GamePhase::Loading)
+        let any_reconnectable = self.players.iter().any(|p| {
+            if !p.virtual_host
+                && p.gproxy
+                && let Some(disc) = p.disconnected_since
+            {
+                return disc.elapsed() < self.cfg.reconnect_wait;
+            }
+            false
+        });
+        if real_players_count == 0
+            && !any_reconnectable
+            && matches!(self.phase, GamePhase::Playing | GamePhase::Loading)
         {
             tracing::info!(game = %self.cfg.name, "no players left, ending game");
             self.phase = GamePhase::Over;
@@ -611,6 +712,9 @@ impl GameState {
                 && game_over_winner.is_none()
             {
                 game_over_winner = Some(dota.format_winner());
+            }
+            if let Some(w3mmd) = self.w3mmd.as_mut() {
+                w3mmd.process_action(&action.data);
             }
             let len = action.wire_len();
             if batch_len + len > MAX_ACTION_PAYLOAD && !batch.is_empty() {

@@ -12,6 +12,7 @@ pub mod ids {
     pub const RECONNECT: u8 = 0x02;
     pub const ACK: u8 = 0x03;
     pub const REJECT: u8 = 0x04;
+    pub const FULL: u8 = 0x05;
 }
 
 pub mod reject_reason {
@@ -54,6 +55,15 @@ pub fn reject(reason: u32) -> Bytes {
         .expect("4-byte gps reject always fits")
 }
 
+pub fn full(pid: u8, reconnect_key: u32) -> Bytes {
+    let mut p = BytesMut::with_capacity(5);
+    p.put_u8(pid);
+    p.put_u32_le(reconnect_key);
+    Frame::new(ids::FULL, p.freeze())
+        .encode_with(GPS_HEADER)
+        .expect("5-byte gps full always fits")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReconnectReq {
     pub pid: u8,
@@ -68,6 +78,13 @@ pub fn decode_reconnect(payload: &Bytes) -> Result<ReconnectReq, ProtoError> {
         reconnect_key: b.try_get_u32_le()?,
         last_packet: b.try_get_u32_le()?,
     })
+}
+
+pub fn decode_full(payload: &Bytes) -> Result<(u8, u32), ProtoError> {
+    let mut b = payload.clone();
+    let pid = b.try_get_u8()?;
+    let key = b.try_get_u32_le()?;
+    Ok((pid, key))
 }
 
 #[cfg(test)]
@@ -97,5 +114,21 @@ mod tests {
     #[test]
     fn truncated_reconnect_errors() {
         assert!(decode_reconnect(&Bytes::from_static(&[3, 0, 0])).is_err());
+    }
+
+    #[test]
+    fn full_token_roundtrip() {
+        let b = full(7, 0xDEAD_BEEF);
+        assert_eq!(b[0], GPS_HEADER);
+        assert_eq!(b[1], ids::FULL);
+        assert_eq!(u16::from_le_bytes([b[2], b[3]]) as usize, b.len());
+        let (pid, key) = decode_full(&b.slice(4..)).unwrap();
+        assert_eq!(pid, 7);
+        assert_eq!(key, 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn decode_full_rejects_truncated() {
+        assert!(decode_full(&Bytes::from_static(&[7, 0, 0])).is_err());
     }
 }

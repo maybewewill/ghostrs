@@ -1,4 +1,4 @@
-﻿use std::collections::VecDeque;
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use spectre_net::PlayerLink;
@@ -11,6 +11,22 @@ const PING_HISTORY: usize = 10;
 pub enum NameMatch {
     None,
     Ambiguous(usize),
+}
+
+/// Стадия «join-in-progress» переджойнящегося игрока. Управляет реактивным
+/// handshake поверх обычных обработчиков REQJOIN → MAPSIZE → GAMELOADED_SELF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejoinStage {
+    None,
+    AwaitingMapSize,
+    AwaitingLoaded,
+}
+
+/// Запись чек-суммы состояния игры с привязкой к номеру хода.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChecksumEntry {
+    pub turn: u32,
+    pub checksum: u32,
 }
 
 #[derive(Debug)]
@@ -38,7 +54,7 @@ pub struct Player {
     pub reserved: bool,
     pub total_packets_sent: u32,
     pub total_packets_received: u32,
-    pub checksums: VecDeque<u32>,
+    pub checksums: VecDeque<ChecksumEntry>,
     pub consecutive_send_failures: u32,
     pub left_code: u32,
     pub left: Option<String>,
@@ -50,6 +66,9 @@ pub struct Player {
     pub stats_dota_sent_time: Option<Instant>,
     pub last_gproxy_wait_notice: Option<Instant>,
     pub gproxy_disconnect_notice_sent: bool,
+    pub rejoin: RejoinStage,
+    pub catchup_cursor: Option<u64>,
+    pub catching_up: bool,
 }
 
 impl Player {
@@ -90,6 +109,9 @@ impl Player {
             stats_dota_sent_time: None,
             last_gproxy_wait_notice: None,
             gproxy_disconnect_notice_sent: false,
+            rejoin: RejoinStage::None,
+            catchup_cursor: None,
+            catching_up: false,
         }
     }
     pub fn record_ping(&mut self, ping_ms: u32) {
@@ -263,5 +285,13 @@ mod tests {
         let _ = slots.set_colour(0, 5);
 
         assert_eq!(t.next_free_colour(&slots), 0);
+    }
+
+    #[test]
+    fn new_player_has_no_rejoin_state() {
+        let p = test_player(1, "a");
+        assert_eq!(p.rejoin, RejoinStage::None);
+        assert_eq!(p.catchup_cursor, None);
+        assert!(!p.catching_up);
     }
 }

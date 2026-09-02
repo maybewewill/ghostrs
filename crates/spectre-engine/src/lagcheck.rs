@@ -12,11 +12,13 @@ impl GameState {
         let mut recovered: Vec<(u8, u32)> = Vec::new();
         let was_lagging = self.lagging;
 
-        for p in self
-            .players
-            .iter_mut()
-            .filter(|p| !p.virtual_host && p.left.is_none())
-        {
+        for p in self.players.iter_mut().filter(|p| {
+            !p.virtual_host
+                && p.left.is_none()
+                && p.rejoin == crate::players::RejoinStage::None
+                && p.catchup_cursor.is_none()
+                && !p.catching_up
+        }) {
             let behind = game_sync.saturating_sub(p.sync_counter);
             if p.lagging {
                 if behind < limit / 2 {
@@ -102,6 +104,10 @@ impl GameState {
                 !p.virtual_host
                     && p.lagging
                     && p.left.is_none()
+                    && p.disconnected_since.is_none()
+                    && p.rejoin == crate::players::RejoinStage::None
+                    && p.catchup_cursor.is_none()
+                    && !p.catching_up
                     && p.started_lagging.is_some_and(|t| t.elapsed() >= max_lag)
             })
             .map(|p| {

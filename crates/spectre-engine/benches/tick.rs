@@ -1,4 +1,4 @@
-﻿use std::time::Duration;
+use std::time::Duration;
 
 use bytes::Bytes;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
@@ -61,6 +61,9 @@ fn seated_state(n: usize) -> GameState {
         min_score: 0.0,
         max_score: 0.0,
         matchmaking: false,
+        hcl_from_game_name: true,
+        votekick_allowed: true,
+        votekick_percentage: 100,
     };
     let mut st = GameState::new(cfg);
     for i in 1..=n {

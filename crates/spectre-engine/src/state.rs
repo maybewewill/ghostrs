@@ -141,6 +141,9 @@ pub struct GameConfig {
     pub min_score: f64,
     pub max_score: f64,
     pub matchmaking: bool,
+    pub hcl_from_game_name: bool,
+    pub votekick_allowed: bool,
+    pub votekick_percentage: u32,
 }
 
 pub const COUNTDOWN_STEP: Duration = Duration::from_millis(500);
@@ -187,6 +190,7 @@ pub struct GameState {
     pub jitter_histogram: [u64; 5],
     pub last_jitter_report: Instant,
     pub dota: Option<crate::stats_dota::StatsDotA>,
+    pub w3mmd: Option<crate::w3mmd::W3Mmd>,
     pub game_over_time: Option<tokio::time::Instant>,
     pub hcl: Option<String>,
     pub muted_all: bool,
@@ -213,6 +217,8 @@ pub struct GameState {
     pub last_game_name: String,
     pub refresh_rehosted: bool,
     pub fake_player_pid: Option<u8>,
+    pub full_history: crate::full_history::FullHistory,
+    pub pending_full: std::collections::HashMap<u64, (u8, u32)>,
 }
 
 impl GameState {
@@ -277,8 +283,21 @@ impl GameState {
             } else {
                 None
             },
+            w3mmd: if cfg.map.map_type == "w3mmd"
+                || (!cfg.map.map_type.is_empty() && cfg.map.map_type != "dota")
+                || cfg.map.map_type.is_empty()
+            {
+                Some(crate::w3mmd::W3Mmd::new())
+            } else {
+                None
+            },
             game_over_time: None,
-            hcl: crate::hcl::Hcl::parse_from_gamename(&cfg.name).or_else(|| {
+            hcl: if cfg.hcl_from_game_name {
+                crate::hcl::Hcl::parse_from_gamename(&cfg.name)
+            } else {
+                None
+            }
+            .or_else(|| {
                 if !cfg.map.default_hcl.is_empty() {
                     Some(cfg.map.default_hcl.clone())
                 } else {
@@ -305,6 +324,8 @@ impl GameState {
             last_game_name: cfg.name.clone(),
             refresh_rehosted: false,
             fake_player_pid: None,
+            full_history: crate::full_history::FullHistory::new(),
+            pending_full: std::collections::HashMap::new(),
             cfg,
         }
     }
@@ -328,12 +349,25 @@ impl GameState {
     pub const MAX_CONSECUTIVE_DROPS: u32 = 100;
 
     pub fn broadcast(&mut self, bytes: Bytes) {
+        if matches!(self.phase, GamePhase::Playing) {
+            self.full_history.push(bytes.clone());
+        }
         for p in self.players.iter_mut() {
             if p.left.is_some() || p.virtual_host {
                 continue;
             }
             if let Some(buf) = p.gproxy_buffer.as_mut() {
                 buf.push(bytes.clone());
+            }
+            // Во время rejoin-handshake (переджойнер переподключён, но ещё не
+            // прошёл GAMELOADED_SELF) НЕ шлём live: эти пакеты уже записаны в
+            // full_history и придут ему ровно один раз через catch-up. Иначе —
+            // дубль хода-таймслота и десинк переджойнера (C1).
+            if p.rejoin != crate::players::RejoinStage::None {
+                continue;
+            }
+            if p.catchup_cursor.is_some() {
+                continue;
             }
             if p.disconnected_since.is_some() {
                 continue;
@@ -357,6 +391,61 @@ impl GameState {
                     } else {
                         p.left = Some("connection closed".into());
                     }
+                }
+            }
+        }
+    }
+
+    /// Подаёт FULL-переджойнеру накопленную историю курсором, уважая backpressure.
+    /// Когда курсор достигает конца лога — переключает игрока на живой эфир.
+    pub fn pump_rejoin_catchup(&mut self) {
+        let next_seq = self.full_history.next_seq();
+        let first_seq = self.full_history.first_seq();
+        for p in self.players.iter_mut() {
+            let Some(cursor) = p.catchup_cursor else {
+                continue;
+            };
+            if p.left.is_some() {
+                p.catchup_cursor = None;
+                continue;
+            }
+            // Догоняющий отстал: нужный пакет уже вытеснен из лога — молча пропустить
+            // нельзя (это тот самый ложный десинк). Явно роняем с понятной причиной.
+            if cursor < first_seq {
+                tracing::warn!(
+                    game = %self.cfg.name, pid = p.pid, cursor, first_seq,
+                    "FULL rejoin catch-up fell behind history eviction, dropping rejoiner"
+                );
+                p.left = Some("catch-up fell behind history eviction".into());
+                p.catchup_cursor = None;
+                continue;
+            }
+            let mut cur = cursor;
+            let pending = self.full_history.snapshot_from_seq(cur);
+            for pkt in pending {
+                match p.link.try_send(pkt) {
+                    Ok(()) => {
+                        cur += 1;
+                        p.consecutive_send_failures = 0;
+                    }
+                    Err(spectre_net::LinkError::Backpressure) => break,
+                    Err(spectre_net::LinkError::Closed) => {
+                        if p.gproxy && p.disconnected_since.is_none() {
+                            p.disconnected_since = Some(std::time::Instant::now());
+                        } else {
+                            p.left = Some("connection closed during catch-up".into());
+                        }
+                        p.catchup_cursor = None;
+                        break;
+                    }
+                }
+            }
+            if p.catchup_cursor.is_some() {
+                if cur >= next_seq {
+                    p.catchup_cursor = None;
+                    p.catching_up = true;
+                } else {
+                    p.catchup_cursor = Some(cur);
                 }
             }
         }
@@ -581,5 +670,46 @@ impl GameState {
             pid,
             spectre_protocol::w3gs::ids::PLAYERLEAVE_LOBBY,
         ));
+    }
+}
+
+#[cfg(test)]
+mod full_history_recording_tests {
+    use super::*;
+    use crate::actor::tests_support::seated_game;
+
+    #[test]
+    fn lobby_broadcasts_are_not_recorded() {
+        let (mut st, _rxs) = seated_game(1);
+        st.broadcast(Bytes::from_static(&[0xF7, 0x0F, 0x04, 0x00]));
+        assert_eq!(
+            st.full_history.len(),
+            0,
+            "lobby packets must not enter FullHistory"
+        );
+    }
+
+    #[test]
+    fn playing_broadcasts_are_recorded_byte_identical() {
+        let (mut st, _rxs) = seated_game(1);
+        st.begin_playing();
+        let pkt = Bytes::from_static(&[0xF7, 0x0C, 0x06, 0x00, 0x64, 0x00]);
+        st.broadcast(pkt.clone());
+        assert_eq!(st.full_history.len(), 1);
+        assert_eq!(st.full_history.snapshot_from_seq(0)[0], pkt);
+    }
+
+    #[test]
+    fn history_survives_gproxy_buffer_eviction() {
+        let (mut st, _rxs) = seated_game(1);
+        st.begin_playing();
+        st.players.by_pid_mut(1).unwrap().gproxy = true;
+        st.players.by_pid_mut(1).unwrap().gproxy_buffer =
+            Some(crate::gproxy::GProxyBuffer::new(500));
+        for i in 0..600u32 {
+            st.broadcast(Bytes::from(i.to_le_bytes().to_vec()));
+        }
+        // per-player GProxyBuffer(500) вытеснил префикс, но глобальный лог держит всё
+        assert_eq!(st.full_history.len(), 600);
     }
 }

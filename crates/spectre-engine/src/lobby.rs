@@ -29,6 +29,9 @@ impl GameState {
         };
 
         if !matches!(self.phase, GamePhase::Lobby) {
+            if self.try_full_rejoin(conn_id, &req, external_ip, link.clone()) {
+                return;
+            }
             let _ = link.try_send(outgoing::reject_join(REJECT_STARTED));
             return;
         }
@@ -166,6 +169,7 @@ impl GameState {
     }
 
     pub fn handle_conn_closed(&mut self, conn_id: u64, reason: String) {
+        self.pending_full.remove(&conn_id);
         if let Some(p) = self.players.by_conn_mut(conn_id) {
             if p.gproxy {
                 if p.disconnected_since.is_none() {

@@ -66,6 +66,7 @@ pub struct Supervisor {
     selected_map_file: Option<String>,
     host_counter: u32,
     current_game_created_at: Option<std::time::Instant>,
+    shutdown_requested: bool,
 }
 
 impl Supervisor {
@@ -156,6 +157,7 @@ impl Supervisor {
             selected_map_file: None,
             host_counter: 1,
             current_game_created_at: None,
+            shutdown_requested: false,
         };
 
         for name in host_on_start {
@@ -184,6 +186,12 @@ impl Supervisor {
         }
 
         loop {
+            if self.shutdown_requested {
+                tracing::info!("shutdown requested, exiting event loop gracefully");
+                self.shutdown();
+                break;
+            }
+
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down gracefully");
@@ -738,7 +746,7 @@ impl Supervisor {
             "exit" | "quit" => {
                 self.bnet
                     .send(BnetCmd::SendChat(format!("/w {user} Shutting down bot.")));
-                std::process::exit(0);
+                self.shutdown_requested = true;
             }
             "status" => {
                 let total = self.games.len();
@@ -1080,6 +1088,9 @@ impl Supervisor {
             min_score: 0.0,
             max_score: 0.0,
             matchmaking: false,
+            hcl_from_game_name: self.cfg.game.hcl_from_game_name,
+            votekick_allowed: self.cfg.game.votekick_allowed,
+            votekick_percentage: self.cfg.game.votekick_percentage,
         };
 
         let (handle, join) = spawn_game(game_cfg);
@@ -1192,6 +1203,9 @@ impl Supervisor {
         for g in &self.games {
             g.handle.send(GameCmd::Shutdown);
         }
+        if let Some(g) = &self.current_game {
+            g.send(GameCmd::Shutdown);
+        }
     }
 
     #[cfg(test)]
@@ -1235,6 +1249,7 @@ impl Supervisor {
             selected_map_file: None,
             host_counter: 1,
             current_game_created_at: None,
+            shutdown_requested: false,
         }
     }
 }
