@@ -8,6 +8,7 @@ members = [
     "crates/spectre-store",
     "crates/spectre",
     "crates/spectre-loadtest",
+    "crates/spectre-mpq",
 ]
 resolver = "3"
 
@@ -29,7 +30,7 @@ rusqlite = { version = "0.33", features = ["bundled"] }
 crc32fast = "1.4"
 sha1 = "0.10.6"
 rand = "0.9.1"
-mpq = "0.8"
+spectre-mpq = { path = "crates/spectre-mpq" }
 flate2 = "1.1.1"
 proptest = "1.5"
 criterion = "0.5"

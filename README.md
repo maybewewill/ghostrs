@@ -306,7 +306,7 @@ path = "data/spectre.db"
 
 ## Workspace Structure
 
-The project is structured as an 8-crate Cargo workspace with strict `#![forbid(unsafe_code)]` on protocol and game logic:
+The project is structured as a 9-crate Cargo workspace with strict `#![forbid(unsafe_code)]` across protocol, MPQ parsing, and game logic:
 
 ```
 crates/
@@ -314,6 +314,7 @@ crates/
 ├── spectre-bnet       # Battle.net client actor, SRP-6a/NLS, X-SHA1 authentication
 ├── spectre-engine     # Game state machine, tick scheduler, DotA & W3MMD parsers, full rejoin
 ├── spectre-loadtest   # High-throughput load testing harness and client simulator
+├── spectre-mpq        # Pure-Rust, safe MPQ archive parser with circular hash probing
 ├── spectre-net        # Framed TCP link actor, UDP LAN discovery broadcaster
 ├── spectre-protocol   # Zero-copy packet codecs (W3GS, BNCS, GPS, DotaTV)
 ├── spectre-spectator  # Live DotaTV streaming server, delay buffer, .w3g replay writer

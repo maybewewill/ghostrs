@@ -20,7 +20,7 @@ thiserror.workspace = true
 rand.workspace = true
 sha1.workspace = true
 crc32fast.workspace = true
-mpq.workspace = true
+spectre-mpq.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

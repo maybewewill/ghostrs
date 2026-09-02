@@ -3,8 +3,8 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
 
-use mpq::Archive;
 use sha1::{Digest, Sha1};
+use spectre_mpq::Archive;
 
 use crate::slots::SlotStatus;
 use crate::state::MapInfo;
@@ -259,7 +259,7 @@ impl ParsedMap {
         let map_data = fs::read(path)?;
         let map_size = map_data.len() as u32;
 
-        let mut map_archive = Archive::open(path).map_err(|e| {
+        let mut map_archive = Archive::from_bytes(map_data.clone()).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("failed to open MPQ archive: {e}"),

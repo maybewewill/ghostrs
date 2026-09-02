@@ -1,0 +1,18 @@
+[package]
+name = "spectre-mpq"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Pure-Rust, safe MPQ archive parser for Warcraft III maps and assets"
+
+[lints]
+workspace = true
+
+[dependencies]
+flate2.workspace = true
+thiserror.workspace = true
+implode = "0.1.1"
+
+[dev-dependencies]
